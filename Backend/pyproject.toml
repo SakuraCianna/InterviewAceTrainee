@@ -1,0 +1,30 @@
+[project]
+name = "mianba-backend"
+version = "0.1.0"
+description = "FastAPI backend for the Mianba AI interview platform."
+readme = "../需求文档.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.16.0",
+    "email-validator>=2.3.0",
+    "fastapi>=0.115.0",
+    "psycopg[binary]>=3.3.0",
+    "pydantic-settings>=2.8.0",
+    "pwdlib[argon2]>=0.2.0",
+    "python-jose[cryptography]>=3.3.0",
+    "redis>=5.2.0",
+    "sqlalchemy>=2.0.0",
+    "uvicorn[standard]>=0.34.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.0",
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

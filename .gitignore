@@ -1,0 +1,17 @@
+.venv/
+Backend/.venv/
+Backend/.uv-cache/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.pyc
+
+Frontend/node_modules/
+Frontend/dist/
+Frontend/.vite/
+
+.env
+.env.*
+!.env.example
+
