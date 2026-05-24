@@ -105,10 +105,10 @@ const reportPreviews = [
 ];
 
 const adminFeatures = [
-  ["lucide:coins", "手动发放次数", "支持你先在社交平台宣传，用户联系你后由后台开通次数。"],
-  ["lucide:route", "多供应商路由", "LLM、ASR、TTS 都保留供应商配置，后续切换模型不拆代码。"],
-  ["lucide:file-clock", "审计日志", "登录、开通、扣次、模型调用和报告生成都保留可追溯记录。"],
-  ["lucide:activity", "运营数据看板", "查看用户、剩余次数、训练完成率和模型调用情况，方便判断下一步宣传渠道。"],
+  ["lucide:coins", "微信联系开通", "添加管理员微信 Teptysuki666 后，可人工确认并发放对应训练次数。"],
+  ["lucide:route", "稳定模型路由", "面试提问、语音识别和报告生成保留备用供应商，减少单一模型异常带来的中断。"],
+  ["lucide:file-clock", "记录可追溯", "登录、开通、扣次、训练过程和报告生成都会保留记录，便于售后和争议核对。"],
+  ["lucide:activity", "训练状态清晰", "账户剩余次数、训练完成情况和历史报告可持续留存，方便用户安排下一次练习。"],
 ];
 
 export function HomePage() {
@@ -193,7 +193,7 @@ export function HomePage() {
           <a href="#modules">模块</a>
           <a href="#flow">流程</a>
           <a href="#report">报告</a>
-          <a href="#admin">后台</a>
+          <a href="#admin">开通</a>
           <a href="/login">登录</a>
         </div>
       </nav>
@@ -372,9 +372,11 @@ export function HomePage() {
       <section className="admin-band motion-section" id="admin">
         <div className="admin-inner">
           <div className="section-heading motion-item">
-            <p className="home-eyebrow">Operator console</p>
-            <h2>先人工开通次数，也要按正式后台来设计。</h2>
-            <p>你可以先通过社交平台获客，再在后台给用户开通次数；模型路由、管理员认证和日志体系从一开始就留好位置。</p>
+            <p className="home-eyebrow">Credit activation</p>
+            <h2>训练次数人工开通，流程清晰可追溯。</h2>
+            <p>
+              需要开通训练次数时，用户可添加管理员微信 Teptysuki666。确认后，系统会发放对应模块次数，并保留开通、扣次、训练和报告记录。
+            </p>
           </div>
           <div className="admin-feature-grid">
             {adminFeatures.map(([icon, title, copy]) => (
