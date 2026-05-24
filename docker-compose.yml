@@ -58,7 +58,7 @@ services:
     build:
       context: ./Frontend
       args:
-        VITE_ADMIN_ENTRY_PATH: ${VITE_ADMIN_ENTRY_PATH:-/console-mianba}
+        VITE_ADMIN_ENTRY_PATH: /console-mianba
     container_name: mianba-frontend
     restart: unless-stopped
     depends_on:
@@ -75,8 +75,10 @@ services:
       - frontend
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
 
 volumes:
   postgres-data:

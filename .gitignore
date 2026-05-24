@@ -14,7 +14,7 @@ Frontend/test-results/
 Frontend/*.tsbuildinfo
 
 database_backups/
+nginx/certs/
 
 .env
 .env.*
-!.env.example

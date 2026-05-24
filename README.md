@@ -20,17 +20,7 @@ uv run pytest tests -v
 uv run uvicorn app.main:app --reload
 ```
 
-项目不再拆“开发环境 / 生产环境”两套配置，统一使用 `Backend/.env`。你在本机开发、Docker Compose 或服务器部署时，只需要按实际地址修改同一组变量。
-
-```powershell
-Copy-Item .env.example .env
-```
-
-当前仓库里已经放了一份 `Backend/.env`。默认假设 PostgreSQL 和 Redis 都部署在同一台机器上：PostgreSQL 负责用户、次数余额、训练会话、报告、模型配置、审计日志和调用日志；Redis 负责邮箱验证码、验证码限流，以及数据库不可用时的本机降级调试。因此连接：
-
-```txt
-postgresql+psycopg://postgres:postgres@127.0.0.1:5432/mianba
-```
+项目不再拆“开发环境 / 生产环境”两套配置，统一直接维护 `Backend/.env`。这个文件包含真实部署配置和本机联调配置，已被 `.gitignore` 忽略，不会提交到仓库。默认假设 PostgreSQL 和 Redis 都部署在同一台机器上：PostgreSQL 负责用户、次数余额、训练会话、报告、模型配置、审计日志和调用日志；Redis 负责邮箱验证码、验证码限流，以及数据库不可用时的本机降级调试。
 
 你只需要先在本机 PostgreSQL 手动创建数据库：
 
@@ -42,7 +32,7 @@ CREATE DATABASE mianba
 
 PostgreSQL 不使用 MySQL 的 `utf8mb4` 命名；它的 `UTF8` 编码支持 4 字节 Unicode 字符和 emoji，可以按这个显式建库。
 
-如果你的本机 PostgreSQL 用户名或密码不是 `postgres` / `postgres`，只改 `Backend/.env` 里的 `DATABASE_URL`。
+如果你的本机 PostgreSQL 用户名、密码、端口或数据库名有变化，只改 `Backend/.env` 里的 `DATABASE_URL`，不用再复制或维护示例配置。
 
 Docker Compose 内置 PostgreSQL 的宿主机端口映射为 `5433:5432`，避免和本机 PostgreSQL 的 `5432` 冲突。
 后端容器启动时会先执行 `python -m app.cli.safe_migrate`，也就是先用 `pg_dump` 在 `database_backups/` 里保留迁移前备份，再执行 Alembic 迁移，然后才启动 FastAPI。Compose 会把项目根目录的 `database_backups/` 映射到容器内 `/app/database_backups`，备份不会因为容器重建而丢失。
@@ -110,7 +100,7 @@ GET http://localhost:8000/api/health
 GET http://localhost:8000/api/health/readiness
 ```
 
-`/api/health/readiness` 会检查数据库表、Redis、邮件模式和 JWT 密钥是否达到可运行条件。本地用 `http://localhost` 调试时，`AUTH_COOKIE_SECURE=false` 才能让浏览器带上登录 Cookie；等服务器启用 HTTPS 后，把它改成 `true`。
+`/api/health/readiness` 会检查数据库表、Redis、邮件模式和 JWT 密钥是否达到可运行条件。本机纯 HTTP 调试登录闭环时，`AUTH_COOKIE_SECURE=false` 才能让浏览器带上登录 Cookie；服务器启用 HTTPS 后，把同一个 `Backend/.env` 里的该值改成 `true`。
 
 ## 前端
 
@@ -127,7 +117,7 @@ npm run dev
 - 管理后台：`http://localhost:5173/console-mianba`
 - 政策页面：`/terms`、`/privacy`、`/refund`、`/contact`
 
-后台入口由前端构建变量 `VITE_ADMIN_ENTRY_PATH` 控制，默认是 `/console-mianba`。本地开发可以复制 `Frontend/.env.example` 为 `Frontend/.env` 后修改；Docker 构建时可以在根目录 `.env` 或当前终端设置同名变量。隐藏路径只降低暴露概率，真正安全仍依赖管理员双重认证、后端权限校验和审计日志。
+后台入口由前端构建变量 `VITE_ADMIN_ENTRY_PATH` 控制，当前直接使用 `Frontend/.env` 和 `docker-compose.yml` 中的 `/console-mianba`。隐藏路径只降低暴露概率，真正安全仍依赖管理员双重认证、后端权限校验和审计日志。
 
 面试房间支持四个模块：工作面试、研究生复试、考公面试、雅思口语。用户中断后再次进入会先读取 `/api/interviews/active`，可以继续上一场未完成训练；完成后会展示报告并保存到后端。
 
@@ -140,7 +130,8 @@ docker compose up --build
 Nginx 默认监听：
 
 ```txt
-http://localhost/
+http://sakuracianna.icu/
+https://sakuracianna.icu/
 ```
 
-正式域名开启 HTTPS 时，可以参考 `nginx/nginx.https.example.conf`。证书路径默认示例为 `/etc/nginx/certs/fullchain.pem` 和 `/etc/nginx/certs/privkey.pem`；启用 HTTPS 后记得把 `Backend/.env` 里的 `AUTH_COOKIE_SECURE` 改成 `true`，并把 `CORS_ORIGINS` 保留为你的正式域名。
+`nginx/nginx.conf` 已经是正式 HTTPS 配置：80 端口会跳转到 443，证书从 `nginx/certs/fullchain.pem` 和 `nginx/certs/privkey.pem` 挂载到容器内 `/etc/nginx/certs/`。证书文件属于服务器私有资产，`nginx/certs/` 已加入 `.gitignore`。启用 HTTPS 后记得把 `Backend/.env` 里的 `AUTH_COOKIE_SECURE` 改成 `true`，并把 `CORS_ORIGINS` 保留为你的正式域名。
