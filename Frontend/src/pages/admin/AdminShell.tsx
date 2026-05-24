@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AppIcon } from "../../components/AppIcon";
+import { csrfHeaders } from "../../lib/api";
 
 type CurrentUser = {
   email: string;
@@ -58,6 +59,25 @@ type AICallLogEntry = {
   created_at: string;
 };
 
+type AdminUserSearchItem = {
+  email: string;
+  role: string;
+  credit_balance: number;
+  total_interviews: number;
+  completed_interviews: number;
+  last_interview_at?: string | null;
+};
+
+type AdminInterviewHistoryItem = {
+  session_id: string;
+  interview_type: string;
+  status: string;
+  current_step_index: number;
+  total_steps: number;
+  report_total_score?: number | null;
+  created_at: string;
+};
+
 const emptyProvider = {
   id: "",
   provider_type: "llm",
@@ -74,6 +94,10 @@ export function AdminShell() {
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [creditLedger, setCreditLedger] = useState<CreditLedgerEntry[]>([]);
   const [aiCallLogs, setAiCallLogs] = useState<AICallLogEntry[]>([]);
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [userSearchResults, setUserSearchResults] = useState<AdminUserSearchItem[]>([]);
+  const [selectedUserHistory, setSelectedUserHistory] = useState<AdminInterviewHistoryItem[]>([]);
+  const [selectedUserEmail, setSelectedUserEmail] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginCode, setLoginCode] = useState("");
@@ -153,6 +177,45 @@ export function AdminShell() {
     setCreditLedger((await response.json()) as CreditLedgerEntry[]);
   }
 
+  async function searchUsers(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    const query = userSearchQuery.trim();
+    if (!query) {
+      setMessage("请先输入用户邮箱或邮箱关键词。");
+      return;
+    }
+
+    const response = await fetch(`/api/admin/users/search?query=${encodeURIComponent(query)}`, {
+      credentials: "include",
+    });
+    if (!response.ok) {
+      setMessage("用户搜索失败，请确认管理员会话仍然有效。");
+      return;
+    }
+
+    const users = (await response.json()) as AdminUserSearchItem[];
+    setUserSearchResults(users);
+    setMessage(users.length > 0 ? `找到 ${users.length} 个用户记录。` : "没有匹配的用户。");
+    if (users.length > 0) {
+      await loadUserHistory(users[0].email);
+    }
+  }
+
+  async function loadUserHistory(userEmail: string) {
+    setSelectedUserEmail(userEmail);
+    setCreditUser(userEmail);
+    await loadCreditLedger(userEmail);
+    const response = await fetch(`/api/admin/users/${encodeURIComponent(userEmail)}/interviews`, {
+      credentials: "include",
+    });
+    if (!response.ok) {
+      setSelectedUserHistory([]);
+      setMessage("用户训练记录读取失败。");
+      return;
+    }
+    setSelectedUserHistory((await response.json()) as AdminInterviewHistoryItem[]);
+  }
+
   async function requestAdminCode() {
     if (!loginEmail) {
       setMessage("请先填写管理员邮箱。");
@@ -203,7 +266,7 @@ export function AdminShell() {
     const response = await fetch(`/api/admin/users/${encodeURIComponent(creditUser)}/credits`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ change_amount: amount, reason: amount > 0 ? "manual_grant" : "manual_adjustment" }),
     });
     const data = await response.json();
@@ -221,7 +284,7 @@ export function AdminShell() {
     const response = await fetch(`/api/ai-providers/${encodeURIComponent(provider.id)}`, {
       method: "PUT",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ enabled: !provider.enabled }),
     });
     if (!response.ok) {
@@ -238,7 +301,7 @@ export function AdminShell() {
     const response = await fetch("/api/ai-providers", {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         ...providerForm,
         priority: Number.parseInt(providerForm.priority, 10),
@@ -262,12 +325,15 @@ export function AdminShell() {
   }
 
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrfHeaders() });
     setCurrentUser(null);
     setProviders([]);
     setAuditLogs([]);
     setCreditLedger([]);
     setAiCallLogs([]);
+    setUserSearchResults([]);
+    setSelectedUserHistory([]);
+    setSelectedUserEmail("");
     setMessage("已退出后台，请重新完成管理员双重认证。");
   }
 
@@ -397,6 +463,67 @@ export function AdminShell() {
               </div>
               <button type="submit" className="admin-primary-button">新增模型</button>
             </form>
+          </section>
+
+          <section className="admin-provider-table admin-user-table">
+            <div className="admin-section-heading">
+              <span className="eyebrow">User Operations</span>
+              <h2>用户检索与训练追踪</h2>
+            </div>
+            <form className="admin-search-form" onSubmit={searchUsers}>
+              <label>
+                用户邮箱
+                <input
+                  type="search"
+                  value={userSearchQuery}
+                  onChange={(event) => setUserSearchQuery(event.target.value)}
+                  placeholder="输入完整邮箱或邮箱关键词"
+                />
+              </label>
+              <button type="submit" className="admin-primary-button">
+                <AppIcon icon="lucide:users" size={18} />
+                搜索用户
+              </button>
+            </form>
+            <div className="admin-user-grid">
+              <div className="admin-user-results">
+                {userSearchResults.length === 0 && <p className="admin-empty-text">搜索后会显示用户余额、训练次数和最近训练时间。</p>}
+                {userSearchResults.map((user) => (
+                  <button
+                    type="button"
+                    className={selectedUserEmail === user.email ? "is-selected" : ""}
+                    key={user.email}
+                    onClick={() => void loadUserHistory(user.email)}
+                  >
+                    <span>
+                      <strong>{user.email}</strong>
+                      <em>{user.role} / 余额 {user.credit_balance} 次</em>
+                    </span>
+                    <b>{user.completed_interviews}/{user.total_interviews}</b>
+                  </button>
+                ))}
+              </div>
+              <div className="admin-user-history">
+                <div className="admin-user-history-head">
+                  <span>{selectedUserEmail || "未选择用户"}</span>
+                  <em>{selectedUserHistory.length} 条训练记录</em>
+                </div>
+                {selectedUserHistory.length === 0 ? (
+                  <p className="admin-empty-text">选择用户后，这里会显示训练模块、进度、报告分数和创建时间。</p>
+                ) : (
+                  selectedUserHistory.slice(0, 8).map((item) => (
+                    <article key={item.session_id}>
+                      <div>
+                        <strong>{item.interview_type}</strong>
+                        <span>{item.status} / {item.current_step_index + 1}-{item.total_steps}</span>
+                      </div>
+                      <em>{item.report_total_score ?? "未出分"}</em>
+                      <small>{new Date(item.created_at).toLocaleString("zh-CN")}</small>
+                    </article>
+                  ))
+                )}
+              </div>
+            </div>
           </section>
 
           <section className="admin-provider-table">

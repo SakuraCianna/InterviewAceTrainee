@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from secrets import token_urlsafe
 
 from jose import JWTError, jwt
 from pwdlib import PasswordHash
@@ -7,6 +8,8 @@ from app.core.config import get_settings
 
 password_hash = PasswordHash.recommended()
 ACCESS_TOKEN_COOKIE_NAME = "mianba_access_token"
+CSRF_TOKEN_COOKIE_NAME = "mianba_csrf_token"
+CSRF_TOKEN_HEADER_NAME = "X-CSRF-Token"
 
 
 def hash_password(password: str) -> str:
@@ -15,6 +18,10 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, password_digest: str) -> bool:
     return password_hash.verify(password, password_digest)
+
+
+def create_csrf_token() -> str:
+    return token_urlsafe(32)
 
 
 def require_admin_role(role: str) -> None:

@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from app.schemas.interviews import InterviewHistoryItem, InterviewReportResponse
+
 
 class AdminCreditAdjustmentRequest(BaseModel):
     current_balance: int | None = Field(default=None, ge=0)
@@ -52,3 +54,26 @@ class AdminAICallLogResponse(BaseModel):
     error_message: str | None = None
     usage_json: dict | None = None
     created_at: str
+
+
+class AdminUserSearchItem(BaseModel):
+    email: str
+    role: str
+    credit_balance: int
+    total_interviews: int
+    completed_interviews: int
+    last_interview_at: str | None = None
+
+
+class AdminUserDetailResponse(BaseModel):
+    email: str
+    role: str
+    credit_balance: int
+    total_interviews: int
+    completed_interviews: int
+    last_interview_at: str | None = None
+    interviews: list[InterviewHistoryItem]
+
+
+class AdminUserInterviewReportResponse(InterviewReportResponse):
+    user_email: str

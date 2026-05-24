@@ -3688,6 +3688,119 @@ button {
   margin-top: 24px;
 }
 
+.admin-user-table {
+  margin-bottom: 24px;
+}
+
+.admin-search-form {
+  align-items: end;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-bottom: 18px;
+}
+
+.admin-search-form label {
+  color: #475569;
+  display: grid;
+  font-size: 14px;
+  font-weight: 800;
+  gap: 8px;
+}
+
+.admin-search-form input {
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  color: #0f172a;
+  font: inherit;
+  min-height: 46px;
+  outline: 0;
+  padding: 0 14px;
+}
+
+.admin-user-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+}
+
+.admin-user-results,
+.admin-user-history {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-user-results button,
+.admin-user-history article {
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  color: inherit;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 14px;
+  text-align: left;
+}
+
+.admin-user-results button {
+  cursor: pointer;
+}
+
+.admin-user-results button.is-selected {
+  background: #101826;
+  color: #ffffff;
+}
+
+.admin-user-results span,
+.admin-user-history article div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.admin-user-results strong,
+.admin-user-history strong,
+.admin-user-history-head span {
+  color: inherit;
+  font-size: 15px;
+}
+
+.admin-user-results em,
+.admin-user-history span,
+.admin-user-history small,
+.admin-user-history-head em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.admin-user-results button.is-selected em {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.admin-user-results b,
+.admin-user-history em {
+  align-self: center;
+  color: #2563eb;
+  font-size: 18px;
+  font-style: normal;
+  font-weight: 1000;
+}
+
+.admin-user-history-head {
+  align-items: center;
+  background: #eef4ff;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 14px;
+}
+
 .admin-empty-text {
   color: #64748b;
   font-weight: 800;
@@ -3786,6 +3899,8 @@ button {
   .admin-status-row,
   .admin-workbench,
   .provider-row,
+  .admin-search-form,
+  .admin-user-grid,
   .admin-form-grid,
   .material-form {
     grid-template-columns: 1fr;

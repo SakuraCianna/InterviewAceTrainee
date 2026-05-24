@@ -13,6 +13,10 @@ class EmailCodeRateLimitError(ValueError):
     """Raised when an email has requested too many verification codes."""
 
 
+class AuthAttemptRateLimitError(ValueError):
+    """Raised when an auth subject has too many failed verification attempts."""
+
+
 @dataclass(frozen=True)
 class EmailCodeRecord:
     email: str
@@ -90,6 +94,56 @@ class RedisEmailRateLimiter:
 
     def _key(self, email: str) -> str:
         return f"{self._key_prefix}:{email}"
+
+
+class InMemoryAuthAttemptLimiter:
+    def __init__(self) -> None:
+        self._attempts: dict[str, tuple[int, datetime]] = {}
+
+    def check(self, key: str, limit: int, window_seconds: int, now: datetime | None = None) -> None:
+        checked_at = now or datetime.now(UTC)
+        count, expires_at = self._attempts.get(key, (0, checked_at + timedelta(seconds=window_seconds)))
+        if expires_at <= checked_at:
+            count = 0
+            expires_at = checked_at + timedelta(seconds=window_seconds)
+        if count >= limit:
+            raise AuthAttemptRateLimitError("too many failed auth attempts")
+        self._attempts[key] = (count, expires_at)
+
+    def record_failure(self, key: str, limit: int, window_seconds: int, now: datetime | None = None) -> None:
+        checked_at = now or datetime.now(UTC)
+        count, expires_at = self._attempts.get(key, (0, checked_at + timedelta(seconds=window_seconds)))
+        if expires_at <= checked_at:
+            count = 0
+            expires_at = checked_at + timedelta(seconds=window_seconds)
+        self._attempts[key] = (count + 1, expires_at)
+
+    def reset(self, key: str) -> None:
+        self._attempts.pop(key, None)
+
+
+class RedisAuthAttemptLimiter:
+    def __init__(self, redis_client: Any, key_prefix: str = "auth_failure") -> None:
+        self._redis = redis_client
+        self._key_prefix = key_prefix
+
+    def check(self, key: str, limit: int, window_seconds: int) -> None:
+        value = self._redis.get(self._key(key))
+        count = int(value or 0)
+        if count >= limit:
+            raise AuthAttemptRateLimitError("too many failed auth attempts")
+
+    def record_failure(self, key: str, limit: int, window_seconds: int) -> None:
+        redis_key = self._key(key)
+        count = self._redis.incr(redis_key)
+        if count == 1:
+            self._redis.expire(redis_key, window_seconds)
+
+    def reset(self, key: str) -> None:
+        self._redis.delete(self._key(key))
+
+    def _key(self, key: str) -> str:
+        return f"{self._key_prefix}:{key}"
 
 
 def generate_email_code() -> str:

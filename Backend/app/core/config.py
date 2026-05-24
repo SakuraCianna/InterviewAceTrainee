@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     access_token_secret: str = "change-me-before-deploy"
     access_token_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
+    auth_failure_limit: int = 5
+    auth_failure_window_seconds: int = 300
     password_hash_target_ms: int = 200
     email_provider: str = "dev"
     email_from_name: str = "面霸练习生"

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppIcon } from "../../components/AppIcon";
 import { AvatarStage, AvatarState } from "../../components/AvatarStage";
+import { csrfHeaders } from "../../lib/api";
 
 type InterviewType = "job" | "postgraduate" | "civil_service" | "ielts";
 
@@ -230,7 +231,7 @@ export function InterviewRoom() {
     const response = await fetch("/api/interviews", {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         session_id: targetSessionId,
         interview_type: resume && activeSession ? activeSession.interview_type : selectedModule.type,
@@ -286,6 +287,7 @@ export function InterviewRoom() {
     const response = await fetch("/api/interview-materials", {
       method: "POST",
       credentials: "include",
+      headers: csrfHeaders(),
       body: formData,
     });
     const data = (await response.json()) as InterviewMaterialResponse & { detail?: string };
@@ -380,7 +382,7 @@ export function InterviewRoom() {
     const response = await fetch(`/api/interviews/${encodeURIComponent(interviewState.session_id)}/answers`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ answer_text: answerText }),
     });
     const data = (await response.json()) as InterviewStateResponse;
@@ -418,7 +420,7 @@ export function InterviewRoom() {
   }
 
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrfHeaders() });
     window.speechSynthesis?.cancel();
     socketRef.current?.close();
     setCurrentUser(null);
