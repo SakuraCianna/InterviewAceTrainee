@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -20,8 +20,8 @@ from app.schemas.admin import (
 from app.schemas.interviews import InterviewHistoryItem
 from app.services.audit_logs import DatabaseAuditLogStore, InMemoryAuditLogStore, get_audit_log_store
 from app.services.ai_call_logs import AICallLogStore, get_ai_call_log_store
-from app.services.credit_balances import CreditBalanceStore, get_credit_balance_store
-from app.services.credit_ledger import CreditLedgerStore, get_credit_ledger_store
+from app.services.credit_balances import CreditBalanceStore, DatabaseCreditBalanceStore, get_credit_balance_store
+from app.services.credit_ledger import CreditLedgerStore, DatabaseCreditLedgerStore, get_credit_ledger_store
 from app.services.credits import InsufficientCreditsError
 from app.services.interview_runtime import (
     DatabaseInterviewRuntimeStore,
@@ -32,6 +32,7 @@ from app.services.interview_runtime import (
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 ADMIN_INTERVIEW_REQUIRED_TABLES = ("interview_sessions", "interview_turns", "interview_reports", "interview_materials")
+ADMIN_CREDIT_ADJUSTMENT_REQUIRED_TABLES = ("users", "credit_ledger", "admin_audit_logs")
 
 
 def get_optional_admin_db_session() -> Generator[Session | None, None, None]:
@@ -40,6 +41,10 @@ def get_optional_admin_db_session() -> Generator[Session | None, None, None]:
 
 def get_optional_admin_interview_db_session() -> Generator[Session | None, None, None]:
     yield from get_optional_db_session(ADMIN_INTERVIEW_REQUIRED_TABLES)
+
+
+def get_optional_credit_adjustment_db_session() -> Generator[Session | None, None, None]:
+    yield from get_optional_db_session(ADMIN_CREDIT_ADJUSTMENT_REQUIRED_TABLES)
 
 
 def get_admin_interview_store(
@@ -175,16 +180,61 @@ def read_user_interview_report(
 
 @router.post("/users/{user_id}/credits", response_model=AdminCreditAdjustmentResponse)
 def adjust_user_credits(
+    request: Request,
     user_id: str,
     payload: AdminCreditAdjustmentRequest,
     admin_claims: TokenClaims = Depends(require_admin_user),
-    credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
-    credit_ledger_store: CreditLedgerStore = Depends(get_credit_ledger_store),
-    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+    fallback_credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
+    fallback_credit_ledger_store: CreditLedgerStore = Depends(get_credit_ledger_store),
+    fallback_audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+    adjustment_db_session: Session | None = Depends(get_optional_credit_adjustment_db_session),
 ) -> AdminCreditAdjustmentResponse:
-    balance_before = credit_store.get_balance(user_id)
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    if adjustment_db_session is not None:
+        try:
+            response = adjust_user_credits_with_stores(
+                user_id=user_id,
+                payload=payload,
+                admin_claims=admin_claims,
+                credit_store=DatabaseCreditBalanceStore(adjustment_db_session, commit_on_write=False),
+                credit_ledger_store=DatabaseCreditLedgerStore(adjustment_db_session, commit_on_write=False),
+                audit_store=DatabaseAuditLogStore(adjustment_db_session, commit_on_write=False),
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            adjustment_db_session.commit()
+            return response
+        except Exception:
+            adjustment_db_session.rollback()
+            raise
+
+    return adjust_user_credits_with_stores(
+        user_id=user_id,
+        payload=payload,
+        admin_claims=admin_claims,
+        credit_store=fallback_credit_store,
+        credit_ledger_store=fallback_credit_ledger_store,
+        audit_store=fallback_audit_store,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+
+def adjust_user_credits_with_stores(
+    user_id: str,
+    payload: AdminCreditAdjustmentRequest,
+    admin_claims: TokenClaims,
+    credit_store: CreditBalanceStore,
+    credit_ledger_store: CreditLedgerStore,
+    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore,
+    ip_address: str | None,
+    user_agent: str | None,
+) -> AdminCreditAdjustmentResponse:
+    normalized_user_id = normalize_user_email(user_id)
+    balance_before = credit_store.get_balance(normalized_user_id)
     try:
-        balance_after = credit_store.adjust(user_id, payload.change_amount)
+        balance_after = credit_store.adjust(normalized_user_id, payload.change_amount)
     except InsufficientCreditsError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="credit_balance_cannot_be_negative") from exc
 
@@ -192,12 +242,14 @@ def adjust_user_credits(
         admin_email=admin_claims["sub"],
         action="credit_adjust",
         target_type="user_credit",
-        target_id=user_id,
+        target_id=normalized_user_id,
         before_snapshot={"balance": balance_before},
         after_snapshot={"balance": balance_after, "change_amount": payload.change_amount, "reason": payload.reason},
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
     credit_ledger_store.record(
-        user_email=user_id,
+        user_email=normalized_user_id,
         change_amount=payload.change_amount,
         balance_after=balance_after,
         reason=payload.reason,
@@ -205,7 +257,7 @@ def adjust_user_credits(
         note="admin_manual_adjustment",
     )
     return AdminCreditAdjustmentResponse(
-        user_id=user_id,
+        user_id=normalized_user_id,
         change_amount=payload.change_amount,
         balance_after=balance_after,
         reason=payload.reason,

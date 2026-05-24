@@ -32,6 +32,40 @@ def test_database_credit_balance_store_rejects_negative_balance():
         store.adjust("student@example.com", -1)
 
 
+def test_database_credit_changes_can_join_outer_transaction_and_roll_back():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    session = session_factory()
+    balance_store = DatabaseCreditBalanceStore(session, commit_on_write=False)
+    ledger_store = DatabaseCreditLedgerStore(session, commit_on_write=False)
+    audit_store = DatabaseAuditLogStore(session, commit_on_write=False)
+
+    balance_after = balance_store.adjust("student@example.com", 3)
+    ledger_store.record(
+        user_email="student@example.com",
+        change_amount=3,
+        balance_after=balance_after,
+        reason="manual_grant",
+    )
+    audit_store.record(
+        admin_email="admin@example.com",
+        action="credit_adjust",
+        target_type="user_credit",
+        target_id="student@example.com",
+        before_snapshot={"balance": 0},
+        after_snapshot={"balance": balance_after, "change_amount": 3, "reason": "manual_grant"},
+        ip_address="127.0.0.1",
+        user_agent="pytest",
+    )
+    session.rollback()
+
+    verify_session = session_factory()
+    assert DatabaseCreditBalanceStore(verify_session).get_balance("student@example.com") == 0
+    assert DatabaseCreditLedgerStore(verify_session).list_for_user("student@example.com") == []
+    assert DatabaseAuditLogStore(verify_session).list_recent(limit=1) == []
+
+
 def test_database_credit_ledger_store_records_balance_history():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)

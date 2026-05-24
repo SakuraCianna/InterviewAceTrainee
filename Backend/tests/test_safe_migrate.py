@@ -3,6 +3,7 @@ from pathlib import Path
 from app.cli.safe_migrate import (
     build_pg_dump_command,
     prune_old_backups,
+    resolve_backup_root,
     timestamped_backup_path,
 )
 
@@ -41,6 +42,13 @@ def test_timestamped_backup_path_uses_database_name_and_timestamp(tmp_path):
     )
 
     assert path == tmp_path / "mianba_20260524_143012.dump"
+
+
+def test_resolve_backup_root_can_be_overridden_with_environment_variable(tmp_path, monkeypatch):
+    custom_path = tmp_path / "custom-backups"
+    monkeypatch.setenv("DATABASE_BACKUP_DIR", str(custom_path))
+
+    assert resolve_backup_root(tmp_path / "project-root") == custom_path
 
 
 def test_prune_old_backups_keeps_latest_five_matching_dump_files_by_default(tmp_path):

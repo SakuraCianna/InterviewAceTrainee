@@ -17,6 +17,7 @@ export default defineConfig({
         ...process.env,
         EMAIL_PROVIDER: "dev",
         AUTH_COOKIE_SECURE: "false",
+        ADMIN_EMAIL_ALLOWLIST: "e2e-admin@example.com",
         CORS_ORIGINS: "http://127.0.0.1:5173,http://localhost:5173",
       },
       reuseExistingServer: true,

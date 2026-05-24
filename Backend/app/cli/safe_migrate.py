@@ -35,7 +35,7 @@ def main() -> int:
 def run_safe_migration(database_url: str, project_root: Path, backend_dir: Path) -> Path:
     ensure_database_reachable(database_url)
 
-    backup_root = project_root / BACKUP_DIR_NAME
+    backup_root = resolve_backup_root(project_root)
     backup_root.mkdir(parents=True, exist_ok=True)
     backup_path = timestamped_backup_path(
         database_url=database_url,
@@ -46,6 +46,13 @@ def run_safe_migration(database_url: str, project_root: Path, backend_dir: Path)
     prune_old_backups(backup_root, keep_count=BACKUP_KEEP_COUNT)
     run_alembic_upgrade(backend_dir)
     return backup_path
+
+
+def resolve_backup_root(project_root: Path) -> Path:
+    configured_backup_dir = os.environ.get("DATABASE_BACKUP_DIR")
+    if configured_backup_dir:
+        return Path(configured_backup_dir)
+    return project_root / BACKUP_DIR_NAME
 
 
 def ensure_database_reachable(database_url: str) -> None:

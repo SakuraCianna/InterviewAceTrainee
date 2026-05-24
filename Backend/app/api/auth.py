@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
-from app.api.dependencies import TokenClaims, get_current_user_claims
+from app.api.dependencies import TokenClaims, get_current_user_claims, require_csrf_for_cookie_auth
 from app.core.config import get_settings
 from app.core.security import (
     ACCESS_TOKEN_COOKIE_NAME,
@@ -255,7 +255,9 @@ def login_admin(
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(response: Response, settings=Depends(get_settings)) -> None:
+def logout(request: Request, response: Response, settings=Depends(get_settings)) -> None:
+    if request.cookies.get(ACCESS_TOKEN_COOKIE_NAME):
+        require_csrf_for_cookie_auth(request)
     response.delete_cookie(
         key=ACCESS_TOKEN_COOKIE_NAME,
         path="/",

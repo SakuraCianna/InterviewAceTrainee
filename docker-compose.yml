@@ -49,6 +49,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - ./database_backups:/app/database_backups
     ports:
       - "8000:8000"
 

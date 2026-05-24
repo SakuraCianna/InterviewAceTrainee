@@ -442,8 +442,9 @@ class InMemoryInterviewRuntimeStore:
 
 
 class DatabaseInterviewRuntimeStore:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, commit_on_write: bool = True) -> None:
         self._session = session
+        self._commit_on_write = commit_on_write
 
     def get_session(self, user_email: str, session_id: str) -> InterviewState | None:
         session_model = self._find_session(user_email, session_id)
@@ -491,7 +492,10 @@ class DatabaseInterviewRuntimeStore:
                     question_text=step.question_text,
                 )
             )
-        self._session.commit()
+        if self._commit_on_write:
+            self._session.commit()
+        else:
+            self._session.flush()
         return self._to_state(session_model)
 
     def answer_current_question(
@@ -539,7 +543,10 @@ class DatabaseInterviewRuntimeStore:
                 next_turn.question_text = next_question_override
             session_model.current_step_index += 1
 
-        self._session.commit()
+        if self._commit_on_write:
+            self._session.commit()
+        else:
+            self._session.flush()
         return self._to_state(session_model)
 
     def get_report(self, user_email: str, session_id: str) -> InterviewReportResponse | None:

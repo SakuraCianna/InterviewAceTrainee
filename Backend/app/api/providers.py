@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import TokenClaims, require_admin_user
@@ -22,6 +22,7 @@ from app.services.provider_configs import (
 )
 
 router = APIRouter(prefix="/ai-providers", tags=["ai-providers"])
+PROVIDER_AUDIT_REQUIRED_TABLES = ("ai_provider_configs", "admin_audit_logs")
 
 
 def to_response(config: AIProviderConfig) -> ProviderSelectionResponse:
@@ -39,6 +40,10 @@ def to_response(config: AIProviderConfig) -> ProviderSelectionResponse:
 
 def get_optional_provider_db_session() -> Generator[Session | None, None, None]:
     yield from get_optional_db_session(("ai_provider_configs",))
+
+
+def get_optional_provider_audit_db_session() -> Generator[Session | None, None, None]:
+    yield from get_optional_db_session(PROVIDER_AUDIT_REQUIRED_TABLES)
 
 
 def get_provider_config_store(
@@ -59,10 +64,48 @@ def list_provider_configs(
 
 @router.post("", response_model=ProviderSelectionResponse, status_code=status.HTTP_201_CREATED)
 def create_provider_config(
+    request: Request,
     payload: ProviderConfigCreateRequest,
     admin_claims: TokenClaims = Depends(require_admin_user),
-    store: DatabaseProviderConfigStore | InMemoryProviderConfigStore = Depends(get_provider_config_store),
-    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+    fallback_store: DatabaseProviderConfigStore | InMemoryProviderConfigStore = Depends(get_provider_config_store),
+    fallback_audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+    provider_audit_db_session: Session | None = Depends(get_optional_provider_audit_db_session),
+) -> ProviderSelectionResponse:
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    if provider_audit_db_session is not None:
+        try:
+            response = create_provider_config_with_stores(
+                payload=payload,
+                admin_claims=admin_claims,
+                store=DatabaseProviderConfigStore(provider_audit_db_session, commit_on_write=False),
+                audit_store=DatabaseAuditLogStore(provider_audit_db_session, commit_on_write=False),
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            provider_audit_db_session.commit()
+            return response
+        except Exception:
+            provider_audit_db_session.rollback()
+            raise
+
+    return create_provider_config_with_stores(
+        payload=payload,
+        admin_claims=admin_claims,
+        store=fallback_store,
+        audit_store=fallback_audit_store,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+
+def create_provider_config_with_stores(
+    payload: ProviderConfigCreateRequest,
+    admin_claims: TokenClaims,
+    store: DatabaseProviderConfigStore | InMemoryProviderConfigStore,
+    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore,
+    ip_address: str | None,
+    user_agent: str | None,
 ) -> ProviderSelectionResponse:
     try:
         config = store.create_config(payload)
@@ -74,17 +117,60 @@ def create_provider_config(
         target_type="ai_provider_config",
         target_id=config.id,
         after_snapshot=to_response(config).model_dump(mode="json"),
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
     return to_response(config)
 
 
 @router.put("/{provider_id}", response_model=ProviderSelectionResponse)
 def update_provider_config(
+    request: Request,
     provider_id: str,
     payload: ProviderConfigUpdateRequest,
     admin_claims: TokenClaims = Depends(require_admin_user),
-    store: DatabaseProviderConfigStore | InMemoryProviderConfigStore = Depends(get_provider_config_store),
-    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+    fallback_store: DatabaseProviderConfigStore | InMemoryProviderConfigStore = Depends(get_provider_config_store),
+    fallback_audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+    provider_audit_db_session: Session | None = Depends(get_optional_provider_audit_db_session),
+) -> ProviderSelectionResponse:
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    if provider_audit_db_session is not None:
+        try:
+            response = update_provider_config_with_stores(
+                provider_id=provider_id,
+                payload=payload,
+                admin_claims=admin_claims,
+                store=DatabaseProviderConfigStore(provider_audit_db_session, commit_on_write=False),
+                audit_store=DatabaseAuditLogStore(provider_audit_db_session, commit_on_write=False),
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
+            provider_audit_db_session.commit()
+            return response
+        except Exception:
+            provider_audit_db_session.rollback()
+            raise
+
+    return update_provider_config_with_stores(
+        provider_id=provider_id,
+        payload=payload,
+        admin_claims=admin_claims,
+        store=fallback_store,
+        audit_store=fallback_audit_store,
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+
+def update_provider_config_with_stores(
+    provider_id: str,
+    payload: ProviderConfigUpdateRequest,
+    admin_claims: TokenClaims,
+    store: DatabaseProviderConfigStore | InMemoryProviderConfigStore,
+    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore,
+    ip_address: str | None,
+    user_agent: str | None,
 ) -> ProviderSelectionResponse:
     try:
         before = next((config for config in store.list_configs() if config.id == provider_id), None)
@@ -98,6 +184,8 @@ def update_provider_config(
         target_id=provider_id,
         before_snapshot=to_response(before).model_dump(mode="json") if before is not None else None,
         after_snapshot=to_response(updated).model_dump(mode="json"),
+        ip_address=ip_address,
+        user_agent=user_agent,
     )
     return to_response(updated)
 
@@ -105,6 +193,7 @@ def update_provider_config(
 @router.post("/select", response_model=ProviderSelectionResponse)
 def select_provider(
     payload: ProviderSelectionRequest,
+    _admin_claims: TokenClaims = Depends(require_admin_user),
     store: DatabaseProviderConfigStore | InMemoryProviderConfigStore = Depends(get_provider_config_store),
 ) -> ProviderSelectionResponse:
     router_service = AIServiceRouter(store.list_configs())

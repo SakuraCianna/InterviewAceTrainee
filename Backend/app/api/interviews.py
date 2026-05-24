@@ -17,7 +17,9 @@ from app.schemas.interviews import (
     InterviewType,
 )
 from app.services.credit_balances import CreditBalanceStore, get_credit_balance_store
+from app.services.credit_balances import DatabaseCreditBalanceStore
 from app.services.credit_ledger import CreditLedgerStore, get_credit_ledger_store
+from app.services.credit_ledger import DatabaseCreditLedgerStore
 from app.services.credits import CreditLedger, InsufficientCreditsError
 from app.services.ai_call_logs import AICallLogStore, get_ai_call_log_store
 from app.services.interview_runtime import (
@@ -28,6 +30,7 @@ from app.services.interview_runtime import (
     memory_interview_store,
 )
 from app.services.interview_materials import InterviewMaterialStore, get_interview_material_store
+from app.services.interview_materials import DatabaseInterviewMaterialStore
 from app.services.ai_router import AIServiceRouter
 from app.services.interview_ai import generate_next_interview_question
 from app.services.interview_products import get_interview_product
@@ -37,10 +40,22 @@ from app.services.provider_configs import DatabaseProviderConfigStore, InMemoryP
 router = APIRouter(prefix="/interviews", tags=["interviews"])
 
 INTERVIEW_REQUIRED_TABLES = ("interview_sessions", "interview_turns", "interview_reports", "interview_materials")
+INTERVIEW_START_REQUIRED_TABLES = (
+    "users",
+    "credit_ledger",
+    "interview_sessions",
+    "interview_turns",
+    "interview_reports",
+    "interview_materials",
+)
 
 
 def get_optional_interview_db_session() -> Generator[Session | None, None, None]:
     yield from get_optional_db_session(INTERVIEW_REQUIRED_TABLES)
+
+
+def get_optional_interview_start_db_session() -> Generator[Session | None, None, None]:
+    yield from get_optional_db_session(INTERVIEW_START_REQUIRED_TABLES)
 
 
 def get_interview_store(
@@ -87,10 +102,45 @@ def build_answer_response(state: InterviewState) -> InterviewAnswerResponse:
 def start_interview(
     payload: InterviewStartRequest,
     claims: TokenClaims = Depends(get_current_user_claims),
-    credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
-    credit_ledger_store: CreditLedgerStore = Depends(get_credit_ledger_store),
-    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
-    material_store: InterviewMaterialStore = Depends(get_interview_material_store),
+    fallback_credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
+    fallback_credit_ledger_store: CreditLedgerStore = Depends(get_credit_ledger_store),
+    fallback_interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
+    fallback_material_store: InterviewMaterialStore = Depends(get_interview_material_store),
+    start_db_session: Session | None = Depends(get_optional_interview_start_db_session),
+) -> InterviewStartResponse:
+    if start_db_session is not None:
+        try:
+            response = start_interview_with_stores(
+                payload=payload,
+                claims=claims,
+                credit_store=DatabaseCreditBalanceStore(start_db_session, commit_on_write=False),
+                credit_ledger_store=DatabaseCreditLedgerStore(start_db_session, commit_on_write=False),
+                interview_store=DatabaseInterviewRuntimeStore(start_db_session, commit_on_write=False),
+                material_store=DatabaseInterviewMaterialStore(start_db_session),
+            )
+            start_db_session.commit()
+            return response
+        except Exception:
+            start_db_session.rollback()
+            raise
+
+    return start_interview_with_stores(
+        payload=payload,
+        claims=claims,
+        credit_store=fallback_credit_store,
+        credit_ledger_store=fallback_credit_ledger_store,
+        interview_store=fallback_interview_store,
+        material_store=fallback_material_store,
+    )
+
+
+def start_interview_with_stores(
+    payload: InterviewStartRequest,
+    claims: TokenClaims,
+    credit_store: CreditBalanceStore,
+    credit_ledger_store: CreditLedgerStore,
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore,
+    material_store: InterviewMaterialStore,
 ) -> InterviewStartResponse:
     interview_type = payload.interview_type or InterviewType.JOB
     product = get_interview_product(interview_type)

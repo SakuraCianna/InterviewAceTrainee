@@ -52,6 +52,14 @@ def test_list_provider_configs_requires_admin_token():
     assert response.status_code == 401
 
 
+def test_select_provider_requires_admin_token():
+    client = TestClient(app)
+
+    response = client.post("/api/ai-providers/select", json={"provider_type": "llm", "purpose": "interview"})
+
+    assert response.status_code == 401
+
+
 def test_default_provider_configs_include_deepseek_flash_fallback():
     client = TestClient(app)
     token = get_admin_token(client)

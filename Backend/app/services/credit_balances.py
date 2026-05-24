@@ -68,8 +68,9 @@ class RedisCreditBalanceStore(CreditBalanceStore):
 
 
 class DatabaseCreditBalanceStore(CreditBalanceStore):
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, commit_on_write: bool = True) -> None:
         self._session = session
+        self._commit_on_write = commit_on_write
 
     def get_balance(self, user_id: str) -> int:
         user = self._get_user(user_id)
@@ -82,7 +83,10 @@ class DatabaseCreditBalanceStore(CreditBalanceStore):
             self._session.rollback()
             raise InsufficientCreditsError("credit balance cannot be negative")
         user.credit_balance = balance_after
-        self._session.commit()
+        if self._commit_on_write:
+            self._session.commit()
+        else:
+            self._session.flush()
         return balance_after
 
     def _get_user(self, email: str) -> User | None:

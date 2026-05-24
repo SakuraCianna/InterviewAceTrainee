@@ -79,8 +79,9 @@ class InMemoryCreditLedgerStore(CreditLedgerStore):
 
 
 class DatabaseCreditLedgerStore(CreditLedgerStore):
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, commit_on_write: bool = True) -> None:
         self._session = session
+        self._commit_on_write = commit_on_write
 
     def record(
         self,
@@ -102,7 +103,10 @@ class DatabaseCreditLedgerStore(CreditLedgerStore):
             note=note,
         )
         self._session.add(model)
-        self._session.commit()
+        if self._commit_on_write:
+            self._session.commit()
+        else:
+            self._session.flush()
         return self._to_record(model)
 
     def list_for_user(self, user_email: str, limit: int = 50) -> list[CreditLedgerRecord]:

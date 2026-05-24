@@ -121,8 +121,9 @@ class InMemoryProviderConfigStore:
 
 
 class DatabaseProviderConfigStore:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, commit_on_write: bool = True) -> None:
         self._session = session
+        self._commit_on_write = commit_on_write
 
     def list_configs(self) -> list[AIProviderConfig]:
         self._seed_defaults_if_empty()
@@ -144,7 +145,10 @@ class DatabaseProviderConfigStore:
             region=payload.region,
         )
         self._session.add(model)
-        self._session.commit()
+        if self._commit_on_write:
+            self._session.commit()
+        else:
+            self._session.flush()
         return self._to_config(model)
 
     def update_config(self, provider_id: str, payload: ProviderConfigUpdateRequest) -> AIProviderConfig:
@@ -166,7 +170,10 @@ class DatabaseProviderConfigStore:
             model.region = payload.region
         if payload.enabled is not None:
             model.enabled = payload.enabled
-        self._session.commit()
+        if self._commit_on_write:
+            self._session.commit()
+        else:
+            self._session.flush()
         return self._to_config(model)
 
     def _seed_defaults_if_empty(self) -> None:
@@ -187,7 +194,10 @@ class DatabaseProviderConfigStore:
                     region=config.region,
                 )
             )
-        self._session.commit()
+        if self._commit_on_write:
+            self._session.commit()
+        else:
+            self._session.flush()
 
     def _get_model(self, provider_id: str) -> AIProviderConfigModel | None:
         return self._session.get(AIProviderConfigModel, provider_id)

@@ -166,7 +166,13 @@ def test_logout_clears_http_only_session_cookie():
     )
     assert register_response.status_code == 201
 
-    logout_response = client.post("/api/auth/logout")
+    csrf_token = client.cookies.get("mianba_csrf_token")
+    assert csrf_token
+
+    missing_csrf_response = client.post("/api/auth/logout")
+    assert missing_csrf_response.status_code == 403
+
+    logout_response = client.post("/api/auth/logout", headers={"X-CSRF-Token": csrf_token})
     me_response = client.get("/api/auth/me")
 
     assert logout_response.status_code == 204
