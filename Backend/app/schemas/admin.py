@@ -7,6 +7,7 @@ class AdminCreditAdjustmentRequest(BaseModel):
     current_balance: int | None = Field(default=None, ge=0)
     change_amount: int
     reason: str = Field(min_length=2, max_length=80)
+    note: str | None = Field(default=None, max_length=240)
 
 
 class AdminCreditAdjustmentResponse(BaseModel):

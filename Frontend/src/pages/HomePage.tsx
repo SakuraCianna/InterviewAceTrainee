@@ -105,7 +105,7 @@ const reportPreviews = [
 ];
 
 const adminFeatures = [
-  ["lucide:coins", "微信联系开通", "添加管理员微信 Teptysuki666 后，可人工确认并发放对应训练次数。"],
+  ["lucide:coins", "微信联系开通", "添加官方微信 Teptysuki666 后，可人工确认并发放对应训练次数。"],
   ["lucide:route", "稳定模型路由", "面试提问、语音识别和报告生成保留备用供应商，减少单一模型异常带来的中断。"],
   ["lucide:file-clock", "记录可追溯", "登录、开通、扣次、训练过程和报告生成都会保留记录，便于售后和争议核对。"],
   ["lucide:activity", "训练状态清晰", "账户剩余次数、训练完成情况和历史报告可持续留存，方便用户安排下一次练习。"],
@@ -375,7 +375,7 @@ export function HomePage() {
             <p className="home-eyebrow">Credit activation</p>
             <h2>训练次数人工开通，流程清晰可追溯。</h2>
             <p>
-              需要开通训练次数时，用户可添加管理员微信 Teptysuki666。确认后，系统会发放对应模块次数，并保留开通、扣次、训练和报告记录。
+              需要开通训练次数时，用户可添加官方微信 Teptysuki666。确认后，系统会发放对应模块次数，并保留开通、扣次、训练和报告记录。
             </p>
           </div>
           <div className="admin-feature-grid">

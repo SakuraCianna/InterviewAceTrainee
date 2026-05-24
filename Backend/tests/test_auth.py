@@ -215,7 +215,7 @@ def test_admin_credit_adjustment_accepts_admin_bearer_token():
     response = client.post(
         f"/api/admin/users/{user_id}/credits",
         headers={"Authorization": f"Bearer {token}"},
-        json={"current_balance": 0, "change_amount": 3, "reason": "manual_grant"},
+        json={"current_balance": 0, "change_amount": 3, "reason": "manual_grant", "note": "wechat_confirmed"},
     )
 
     assert response.status_code == 200
@@ -224,11 +224,21 @@ def test_admin_credit_adjustment_accepts_admin_bearer_token():
 
     audit_response = client.get("/api/admin/audit-logs", headers={"Authorization": f"Bearer {token}"})
     assert audit_response.status_code == 200
-    assert any(entry["action"] == "credit_adjust" and entry["target_id"] == user_id for entry in audit_response.json())
+    assert any(
+        entry["action"] == "credit_adjust"
+        and entry["target_id"] == user_id
+        and entry["after_snapshot"]["note"] == "wechat_confirmed"
+        for entry in audit_response.json()
+    )
 
     ledger_response = client.get(f"/api/admin/users/{user_id}/credit-ledger", headers={"Authorization": f"Bearer {token}"})
     assert ledger_response.status_code == 200
-    assert any(entry["reason"] == "manual_grant" and entry["change_amount"] == 3 for entry in ledger_response.json())
+    assert any(
+        entry["reason"] == "manual_grant"
+        and entry["change_amount"] == 3
+        and entry["note"] == "wechat_confirmed"
+        for entry in ledger_response.json()
+    )
 
     ai_logs_response = client.get("/api/admin/ai-call-logs", headers={"Authorization": f"Bearer {token}"})
     assert ai_logs_response.status_code == 200

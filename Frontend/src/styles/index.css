@@ -2639,6 +2639,16 @@ button {
   text-align: left;
 }
 
+.admin-user-history article {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.admin-user-history article.is-active-report {
+  border-color: rgba(37, 99, 235, 0.34);
+  box-shadow: 0 14px 32px rgba(37, 99, 235, 0.12);
+}
+
 .admin-user-results button {
   cursor: pointer;
 }
@@ -2673,6 +2683,10 @@ button {
   line-height: 1.5;
 }
 
+.admin-user-history small {
+  grid-column: 1 / 2;
+}
+
 .admin-user-results button.is-selected em {
   color: rgba(255, 255, 255, 0.72);
 }
@@ -2684,6 +2698,30 @@ button {
   font-size: 18px;
   font-style: normal;
   font-weight: 1000;
+}
+
+.admin-history-action {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid rgba(37, 99, 235, 0.24);
+  border-radius: 999px;
+  color: #2563eb;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  grid-column: 2 / 3;
+  justify-content: center;
+  justify-self: end;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.admin-history-action:disabled {
+  border-color: rgba(15, 23, 42, 0.08);
+  color: #94a3b8;
+  cursor: not-allowed;
 }
 
 .admin-user-history-head {
@@ -2708,6 +2746,118 @@ button {
   margin-bottom: 18px;
 }
 
+.admin-report-detail {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.08);
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+  padding: 22px;
+}
+
+.admin-report-detail-head {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.admin-report-detail-head h3 {
+  color: #0f172a;
+  font-size: 24px;
+  margin: 4px 0 0;
+}
+
+.admin-report-detail-head strong {
+  align-items: center;
+  background: #101826;
+  border-radius: 50%;
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 28px;
+  font-weight: 1000;
+  height: 72px;
+  justify-content: center;
+  width: 72px;
+}
+
+.admin-report-message,
+.admin-report-summary {
+  color: #475569;
+  font-weight: 800;
+  line-height: 1.7;
+  margin: 0;
+}
+
+.admin-report-dimensions,
+.admin-report-lists {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-report-dimensions article,
+.admin-report-lists section {
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.admin-report-dimensions span,
+.admin-report-lists h4 {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 1000;
+  margin: 0;
+}
+
+.admin-report-dimensions b {
+  color: #2563eb;
+  font-size: 24px;
+}
+
+.admin-report-dimensions p,
+.admin-report-lists p {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.admin-report-turns {
+  display: grid;
+  gap: 10px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.admin-report-turns details {
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.admin-report-turns summary {
+  color: #0f172a;
+  cursor: pointer;
+  font-weight: 1000;
+}
+
+.admin-report-turns p {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.7;
+  margin: 8px 0 0;
+}
+
 .admin-provider-list {
   display: grid;
   gap: 12px;
@@ -2728,6 +2878,13 @@ button {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.provider-row-actions {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .provider-row strong {
@@ -2796,6 +2953,8 @@ button {
   .provider-row,
   .admin-search-form,
   .admin-user-grid,
+  .admin-report-dimensions,
+  .admin-report-lists,
   .admin-form-grid,
   .material-form {
     grid-template-columns: 1fr;

@@ -244,7 +244,12 @@ def adjust_user_credits_with_stores(
         target_type="user_credit",
         target_id=normalized_user_id,
         before_snapshot={"balance": balance_before},
-        after_snapshot={"balance": balance_after, "change_amount": payload.change_amount, "reason": payload.reason},
+        after_snapshot={
+            "balance": balance_after,
+            "change_amount": payload.change_amount,
+            "reason": payload.reason,
+            "note": payload.note,
+        },
         ip_address=ip_address,
         user_agent=user_agent,
     )
@@ -254,7 +259,7 @@ def adjust_user_credits_with_stores(
         balance_after=balance_after,
         reason=payload.reason,
         operator_admin_email=admin_claims["sub"],
-        note="admin_manual_adjustment",
+        note=payload.note or "admin_manual_adjustment",
     )
     return AdminCreditAdjustmentResponse(
         user_id=normalized_user_id,

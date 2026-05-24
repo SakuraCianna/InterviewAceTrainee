@@ -78,6 +78,19 @@ type AdminInterviewHistoryItem = {
   created_at: string;
 };
 
+type AdminInterviewReport = {
+  user_email: string;
+  session_id: string;
+  interview_type: string;
+  total_score: number;
+  summary: string;
+  dimensions: { name: string; score: number; comment: string }[];
+  strengths: string[];
+  improvements: string[];
+  next_plan: string[];
+  turns: { round_name: string; question: string; answer: string }[];
+};
+
 const emptyProvider = {
   id: "",
   provider_type: "llm",
@@ -103,11 +116,19 @@ export function AdminShell() {
   const [loginCode, setLoginCode] = useState("");
   const [creditUser, setCreditUser] = useState("");
   const [creditAmount, setCreditAmount] = useState("1");
+  const [creditReason, setCreditReason] = useState("manual_grant");
+  const [creditNote, setCreditNote] = useState("");
   const [providerForm, setProviderForm] = useState(emptyProvider);
+  const [selectedReport, setSelectedReport] = useState<AdminInterviewReport | null>(null);
+  const [reportMessage, setReportMessage] = useState("");
   const [message, setMessage] = useState("正在检查管理员会话。");
   const [isLoading, setIsLoading] = useState(true);
 
   const enabledProviderCount = useMemo(() => providers.filter((provider) => provider.enabled).length, [providers]);
+  const editingProvider = useMemo(
+    () => providers.find((provider) => provider.id === providerForm.id.trim()),
+    [providerForm.id, providers],
+  );
 
   useEffect(() => {
     void loadCurrentUser();
@@ -204,6 +225,8 @@ export function AdminShell() {
   async function loadUserHistory(userEmail: string) {
     setSelectedUserEmail(userEmail);
     setCreditUser(userEmail);
+    setSelectedReport(null);
+    setReportMessage("");
     await loadCreditLedger(userEmail);
     const response = await fetch(`/api/admin/users/${encodeURIComponent(userEmail)}/interviews`, {
       credentials: "include",
@@ -214,6 +237,22 @@ export function AdminShell() {
       return;
     }
     setSelectedUserHistory((await response.json()) as AdminInterviewHistoryItem[]);
+  }
+
+  async function loadInterviewReport(userEmail: string, sessionId: string) {
+    setSelectedReport(null);
+    setReportMessage("正在读取报告。");
+    const response = await fetch(
+      `/api/admin/users/${encodeURIComponent(userEmail)}/interviews/${encodeURIComponent(sessionId)}/report`,
+      { credentials: "include" },
+    );
+    if (!response.ok) {
+      setReportMessage("该训练尚未生成报告，或当前管理员会话已失效。");
+      return;
+    }
+
+    setSelectedReport((await response.json()) as AdminInterviewReport);
+    setReportMessage("报告已读取，可用于售后复核和争议追溯。");
   }
 
   async function requestAdminCode() {
@@ -258,8 +297,10 @@ export function AdminShell() {
   async function submitCreditGrant(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const amount = Number.parseInt(creditAmount, 10);
-    if (!creditUser || Number.isNaN(amount) || amount === 0) {
-      setMessage("请填写用户邮箱和非 0 次数。");
+    const reason = creditReason.trim() || (amount > 0 ? "manual_grant" : "manual_adjustment");
+    const note = creditNote.trim();
+    if (!creditUser || Number.isNaN(amount) || amount === 0 || reason.length < 2) {
+      setMessage("请填写用户邮箱、非 0 次数和调整原因。");
       return;
     }
 
@@ -267,7 +308,7 @@ export function AdminShell() {
       method: "POST",
       credentials: "include",
       headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ change_amount: amount, reason: amount > 0 ? "manual_grant" : "manual_adjustment" }),
+      body: JSON.stringify({ change_amount: amount, reason, note: note || undefined }),
     });
     const data = await response.json();
     if (!response.ok) {
@@ -277,6 +318,8 @@ export function AdminShell() {
 
     setMessage(`${creditUser} 已调整 ${amount} 次，当前余额 ${data.balance_after}。`);
     setCreditAmount("1");
+    setCreditReason("manual_grant");
+    setCreditNote("");
     await Promise.all([loadAuditLogs(), loadCreditLedger(creditUser)]);
   }
 
@@ -298,26 +341,40 @@ export function AdminShell() {
 
   async function submitProvider(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const response = await fetch("/api/ai-providers", {
-      method: "POST",
-      credentials: "include",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        ...providerForm,
-        priority: Number.parseInt(providerForm.priority, 10),
-        enabled: true,
-      }),
-    });
+    const priority = Number.parseInt(providerForm.priority, 10);
+    if (Number.isNaN(priority)) {
+      setMessage("请填写有效的模型优先级。");
+      return;
+    }
+
+    const providerPayload = {
+      provider_type: providerForm.provider_type,
+      purpose: providerForm.purpose,
+      provider_name: providerForm.provider_name,
+      model_name: providerForm.model_name,
+      priority,
+      region: providerForm.region,
+      enabled: editingProvider?.enabled ?? true,
+    };
+    const response = await fetch(
+      editingProvider ? `/api/ai-providers/${encodeURIComponent(editingProvider.id)}` : "/api/ai-providers",
+      {
+        method: editingProvider ? "PUT" : "POST",
+        credentials: "include",
+        headers: csrfHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(editingProvider ? providerPayload : { id: providerForm.id, ...providerPayload }),
+      },
+    );
     const data = await response.json();
     if (!response.ok) {
-      setMessage(data.detail ? `模型新增失败：${data.detail}` : "模型新增失败。");
+      setMessage(data.detail ? `模型配置保存失败：${data.detail}` : "模型配置保存失败。");
       return;
     }
 
     setProviderForm(emptyProvider);
     await loadProviders();
     await loadAuditLogs();
-    setMessage(`已新增模型配置：${data.id}`);
+    setMessage(`${editingProvider ? "已更新" : "已新增"}模型配置：${data.id}`);
   }
 
   async function refreshAdminData() {
@@ -334,6 +391,8 @@ export function AdminShell() {
     setUserSearchResults([]);
     setSelectedUserHistory([]);
     setSelectedUserEmail("");
+    setSelectedReport(null);
+    setReportMessage("");
     setMessage("已退出后台，请重新完成管理员双重认证。");
   }
 
@@ -404,7 +463,7 @@ export function AdminShell() {
             <article className="admin-card">
               <AppIcon icon="lucide:coins" size={24} />
               <h2>手动开通</h2>
-              <p>先宣传获客，再由后台给用户发放面试次数。</p>
+              <p>根据用户沟通结果，手动发放、扣减或补偿面试训练次数。</p>
             </article>
             <article className="admin-card">
               <AppIcon icon="lucide:shield-check" size={24} />
@@ -424,6 +483,14 @@ export function AdminShell() {
                 次数变化
                 <input type="number" value={creditAmount} onChange={(event) => setCreditAmount(event.target.value)} required />
               </label>
+              <label>
+                调整原因
+                <input value={creditReason} onChange={(event) => setCreditReason(event.target.value)} placeholder="manual_grant / refund_adjustment" required />
+              </label>
+              <label>
+                处理备注
+                <input value={creditNote} onChange={(event) => setCreditNote(event.target.value)} placeholder="例如：微信沟通后补发 1 次" maxLength={240} />
+              </label>
               <div className="admin-action-row">
                 <button type="submit" className="admin-primary-button">提交调整</button>
                 <button type="button" onClick={() => loadCreditLedger()}>
@@ -435,18 +502,26 @@ export function AdminShell() {
                 {creditLedger.slice(0, 4).map((entry) => (
                   <div className="admin-ledger-item" key={entry.id}>
                     <strong>{entry.change_amount > 0 ? `+${entry.change_amount}` : entry.change_amount}</strong>
-                    <span>{entry.reason} · 余额 {entry.balance_after}</span>
+                    <span>{entry.reason} · 余额 {entry.balance_after}{entry.note ? ` · ${entry.note}` : ""}</span>
                   </div>
                 ))}
               </div>
             </form>
 
             <form className="admin-panel" onSubmit={submitProvider}>
-              <h2>新增模型配置</h2>
+              <h2>{editingProvider ? "编辑模型配置" : "新增模型配置"}</h2>
               <div className="admin-form-grid">
                 <label>
                   配置 ID
-                  <input value={providerForm.id} onChange={(event) => setProviderForm({ ...providerForm, id: event.target.value })} placeholder="zhipu-backup" required />
+                  <input value={providerForm.id} onChange={(event) => setProviderForm({ ...providerForm, id: event.target.value })} placeholder="zhipu-backup" required readOnly={Boolean(editingProvider)} />
+                </label>
+                <label>
+                  类型
+                  <input value={providerForm.provider_type} onChange={(event) => setProviderForm({ ...providerForm, provider_type: event.target.value })} placeholder="llm / asr / tts" required />
+                </label>
+                <label>
+                  用途
+                  <input value={providerForm.purpose} onChange={(event) => setProviderForm({ ...providerForm, purpose: event.target.value })} placeholder="interview / general" required />
                 </label>
                 <label>
                   供应商
@@ -460,8 +535,19 @@ export function AdminShell() {
                   优先级
                   <input type="number" value={providerForm.priority} onChange={(event) => setProviderForm({ ...providerForm, priority: event.target.value })} required />
                 </label>
+                <label>
+                  区域
+                  <input value={providerForm.region} onChange={(event) => setProviderForm({ ...providerForm, region: event.target.value })} placeholder="cn" required />
+                </label>
               </div>
-              <button type="submit" className="admin-primary-button">新增模型</button>
+              <div className="admin-action-row">
+                <button type="submit" className="admin-primary-button">{editingProvider ? "保存配置" : "新增模型"}</button>
+                {editingProvider && (
+                  <button type="button" onClick={() => setProviderForm(emptyProvider)}>
+                    取消编辑
+                  </button>
+                )}
+              </div>
             </form>
           </section>
 
@@ -512,18 +598,75 @@ export function AdminShell() {
                   <p className="admin-empty-text">选择用户后，这里会显示训练模块、进度、报告分数和创建时间。</p>
                 ) : (
                   selectedUserHistory.slice(0, 8).map((item) => (
-                    <article key={item.session_id}>
+                    <article className={selectedReport?.session_id === item.session_id ? "is-active-report" : ""} key={item.session_id}>
                       <div>
                         <strong>{item.interview_type}</strong>
                         <span>{item.status} / {item.current_step_index + 1}-{item.total_steps}</span>
                       </div>
                       <em>{item.report_total_score ?? "未出分"}</em>
                       <small>{new Date(item.created_at).toLocaleString("zh-CN")}</small>
+                      <button
+                        type="button"
+                        className="admin-history-action"
+                        disabled={item.report_total_score == null}
+                        onClick={() => void loadInterviewReport(selectedUserEmail, item.session_id)}
+                      >
+                        查看报告
+                      </button>
                     </article>
                   ))
                 )}
               </div>
             </div>
+            {(reportMessage || selectedReport) && (
+              <div className="admin-report-detail">
+                <div className="admin-report-detail-head">
+                  <div>
+                    <span className="eyebrow">Report Review</span>
+                    <h3>{selectedReport ? `${selectedReport.user_email} · ${selectedReport.interview_type}` : "报告复核"}</h3>
+                  </div>
+                  {selectedReport && <strong>{selectedReport.total_score}</strong>}
+                </div>
+                {reportMessage && <p className="admin-report-message">{reportMessage}</p>}
+                {selectedReport && (
+                  <>
+                    <p className="admin-report-summary">{selectedReport.summary}</p>
+                    <div className="admin-report-dimensions">
+                      {selectedReport.dimensions.map((dimension) => (
+                        <article key={dimension.name}>
+                          <span>{dimension.name}</span>
+                          <b>{dimension.score}</b>
+                          <p>{dimension.comment}</p>
+                        </article>
+                      ))}
+                    </div>
+                    <div className="admin-report-lists">
+                      <section>
+                        <h4>优势</h4>
+                        {selectedReport.strengths.map((item) => <p key={item}>{item}</p>)}
+                      </section>
+                      <section>
+                        <h4>改进</h4>
+                        {selectedReport.improvements.map((item) => <p key={item}>{item}</p>)}
+                      </section>
+                      <section>
+                        <h4>下一步</h4>
+                        {selectedReport.next_plan.map((item) => <p key={item}>{item}</p>)}
+                      </section>
+                    </div>
+                    <div className="admin-report-turns">
+                      {selectedReport.turns.map((turn, index) => (
+                        <details key={`${turn.round_name}-${index}`}>
+                          <summary>{turn.round_name}</summary>
+                          <p><b>问：</b>{turn.question}</p>
+                          <p><b>答：</b>{turn.answer || "用户未作答"}</p>
+                        </details>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </section>
 
           <section className="admin-provider-table">
@@ -538,10 +681,26 @@ export function AdminShell() {
                     <strong>{provider.id}</strong>
                     <span>{provider.provider_name} / {provider.model_name}</span>
                   </div>
-                  <em>{provider.purpose} · priority {provider.priority}</em>
-                  <button type="button" className={provider.enabled ? "is-enabled" : ""} onClick={() => toggleProvider(provider)}>
-                    {provider.enabled ? "启用中" : "已停用"}
-                  </button>
+                  <em>{provider.provider_type} · {provider.purpose} · {provider.region} · priority {provider.priority}</em>
+                  <div className="provider-row-actions">
+                    <button
+                      type="button"
+                      onClick={() => setProviderForm({
+                        id: provider.id,
+                        provider_type: provider.provider_type,
+                        purpose: provider.purpose,
+                        provider_name: provider.provider_name,
+                        model_name: provider.model_name,
+                        priority: String(provider.priority),
+                        region: provider.region,
+                      })}
+                    >
+                      编辑
+                    </button>
+                    <button type="button" className={provider.enabled ? "is-enabled" : ""} onClick={() => toggleProvider(provider)}>
+                      {provider.enabled ? "启用中" : "已停用"}
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>

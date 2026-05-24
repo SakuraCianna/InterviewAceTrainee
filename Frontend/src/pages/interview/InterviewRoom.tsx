@@ -242,7 +242,7 @@ export function InterviewRoom() {
     setIsStartingSession(false);
 
     if (!response.ok) {
-      setSocketMessage(data.detail === "insufficient_credits" ? "次数不足，请添加管理员微信 Teptysuki666 开通面试次数。" : "面试创建失败，请重新登录后再试。");
+      setSocketMessage(data.detail === "insufficient_credits" ? "次数不足，请添加官方微信 Teptysuki666 开通面试次数。" : "面试创建失败，请重新登录后再试。");
       return;
     }
 
