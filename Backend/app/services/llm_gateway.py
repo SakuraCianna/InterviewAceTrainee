@@ -64,26 +64,14 @@ class OpenAICompatibleLLMClient:
 
     def _resolve_endpoint(self, config: AIProviderConfig) -> str:
         provider_name = config.provider_name.strip().lower()
-        if provider_name in {"zhipu", "zai", "z.ai", "bigmodel"}:
-            return "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         if provider_name == "deepseek":
             return "https://api.deepseek.com/chat/completions"
-        if provider_name in {"aliyun-bailian", "qwen", "tongyi"}:
-            return "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-        if provider_name in {"volcengine-ark", "doubao"}:
-            return "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
         raise LLMProviderError("provider_not_supported")
 
     def _resolve_api_key(self, config: AIProviderConfig) -> str:
         if config.api_key:
             return config.api_key
         provider_name = config.provider_name.strip().lower()
-        if provider_name in {"zhipu", "zai", "z.ai", "bigmodel"}:
-            return self._settings.zhipu_api_key
         if provider_name == "deepseek":
             return self._settings.deepseek_api_key
-        if provider_name in {"aliyun-bailian", "qwen", "tongyi"}:
-            return self._settings.aliyun_bailian_api_key
-        if provider_name in {"volcengine-ark", "doubao"}:
-            return self._settings.volcengine_ark_api_key
         return ""

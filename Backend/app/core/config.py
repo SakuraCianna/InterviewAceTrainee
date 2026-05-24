@@ -25,10 +25,7 @@ class Settings(BaseSettings):
     email_code_rate_limit: int = 5
     email_code_rate_window_seconds: int = 600
     resend_api_key: str = ""
-    zhipu_api_key: str = ""
     deepseek_api_key: str = ""
-    aliyun_bailian_api_key: str = ""
-    volcengine_ark_api_key: str = ""
     provider_secret_encryption_key: str = ""
     interview_material_max_upload_bytes: int = 5 * 1024 * 1024
     resume_ocr_provider: str = "none"

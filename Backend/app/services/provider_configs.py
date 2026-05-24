@@ -7,6 +7,8 @@ from app.schemas.providers import ProviderConfigCreateRequest, ProviderConfigUpd
 from app.services.ai_router import AIProviderConfig
 from app.services.secret_box import decrypt_secret, encrypt_secret, preview_secret
 
+PRIMARY_LLM_PROVIDER_ID = "deepseek-v4-flash"
+
 
 class ProviderConfigAlreadyExistsError(ValueError):
     """Raised when an AI provider config id already exists."""
@@ -19,61 +21,11 @@ class ProviderConfigNotFoundError(LookupError):
 def default_provider_configs() -> list[AIProviderConfig]:
     return [
         AIProviderConfig(
-            id="glm-4.7-flash",
+            id=PRIMARY_LLM_PROVIDER_ID,
             provider_type="llm",
             purpose="general",
             enabled=True,
             priority=10,
-            provider_name="zhipu",
-            model_name="GLM-4.7-Flash",
-            region="cn",
-        ),
-        AIProviderConfig(
-            id="glm-z1-flash",
-            provider_type="llm",
-            purpose="general",
-            enabled=True,
-            priority=12,
-            provider_name="zhipu",
-            model_name="glm-z1-flash",
-            region="cn",
-        ),
-        AIProviderConfig(
-            id="glm-4-flash-250414",
-            provider_type="llm",
-            purpose="general",
-            enabled=True,
-            priority=15,
-            provider_name="zhipu",
-            model_name="glm-4-flash-250414",
-            region="cn",
-        ),
-        AIProviderConfig(
-            id="qwen-flash",
-            provider_type="llm",
-            purpose="general",
-            enabled=True,
-            priority=20,
-            provider_name="aliyun-bailian",
-            model_name="qwen-flash",
-            region="cn",
-        ),
-        AIProviderConfig(
-            id="doubao-seed-1.6-flash",
-            provider_type="llm",
-            purpose="general",
-            enabled=True,
-            priority=30,
-            provider_name="volcengine-ark",
-            model_name="doubao-seed-1.6-flash",
-            region="cn",
-        ),
-        AIProviderConfig(
-            id="deepseek-v4-flash",
-            provider_type="llm",
-            purpose="general",
-            enabled=True,
-            priority=90,
             provider_name="deepseek",
             model_name="deepseek-v4-flash",
             region="cn",
@@ -179,7 +131,8 @@ class DatabaseProviderConfigStore:
         self._commit_on_write = commit_on_write
 
     def list_configs(self) -> list[AIProviderConfig]:
-        self._seed_defaults_if_empty()
+        self._prune_non_primary_llm_configs()
+        self._seed_missing_default_configs()
         models = self._session.execute(select(AIProviderConfigModel).order_by(AIProviderConfigModel.priority)).scalars()
         return [self._to_config(model) for model in models]
 
@@ -238,11 +191,11 @@ class DatabaseProviderConfigStore:
             raise ProviderConfigNotFoundError("provider config not found")
         return self._to_config(model)
 
-    def _seed_defaults_if_empty(self) -> None:
-        has_any = self._session.execute(select(AIProviderConfigModel.id).limit(1)).scalar_one_or_none()
-        if has_any is not None:
-            return
+    def _seed_missing_default_configs(self) -> None:
+        existing_ids = set(self._session.execute(select(AIProviderConfigModel.id)).scalars().all())
         for config in default_provider_configs():
+            if config.id in existing_ids:
+                continue
             self._session.add(
                 AIProviderConfigModel(
                     id=config.id,
@@ -257,6 +210,26 @@ class DatabaseProviderConfigStore:
                     encrypted_api_key=encrypt_secret(config.api_key, self._settings),
                 )
             )
+        if self._commit_on_write:
+            self._session.commit()
+        else:
+            self._session.flush()
+
+    def _prune_non_primary_llm_configs(self) -> None:
+        removed_models = (
+            self._session.execute(
+                select(AIProviderConfigModel).where(
+                    AIProviderConfigModel.provider_type == "llm",
+                    AIProviderConfigModel.id != PRIMARY_LLM_PROVIDER_ID,
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not removed_models:
+            return
+        for model in removed_models:
+            self._session.delete(model)
         if self._commit_on_write:
             self._session.commit()
         else:

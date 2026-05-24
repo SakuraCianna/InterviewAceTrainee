@@ -618,7 +618,7 @@ export function AdminShell() {
               <div className="admin-form-grid">
                 <label>
                   配置 ID
-                  <input value={providerForm.id} onChange={(event) => setProviderForm({ ...providerForm, id: event.target.value })} placeholder="zhipu-backup" required readOnly={Boolean(editingProvider)} />
+                  <input value={providerForm.id} onChange={(event) => setProviderForm({ ...providerForm, id: event.target.value })} placeholder="deepseek-v4-flash" required readOnly={Boolean(editingProvider)} />
                 </label>
                 <label>
                   类型
@@ -630,11 +630,11 @@ export function AdminShell() {
                 </label>
                 <label>
                   供应商
-                  <input value={providerForm.provider_name} onChange={(event) => setProviderForm({ ...providerForm, provider_name: event.target.value })} placeholder="zhipu" required />
+                  <input value={providerForm.provider_name} onChange={(event) => setProviderForm({ ...providerForm, provider_name: event.target.value })} placeholder="deepseek" required />
                 </label>
                 <label>
                   模型名
-                  <input value={providerForm.model_name} onChange={(event) => setProviderForm({ ...providerForm, model_name: event.target.value })} placeholder="glm-4-flash" required />
+                  <input value={providerForm.model_name} onChange={(event) => setProviderForm({ ...providerForm, model_name: event.target.value })} placeholder="deepseek-v4-flash" required />
                 </label>
                 <label>
                   优先级
