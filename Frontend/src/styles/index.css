@@ -1062,6 +1062,40 @@ button {
   gap: 10px;
 }
 
+.room-report-insights {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.room-report-insights article {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 13px;
+  border: 1px solid rgba(19, 22, 28, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.room-report-insights h2,
+.room-report-turns h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 950;
+}
+
+.room-report-insights span {
+  color: var(--steel);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
 .room-report-grid div {
   display: grid;
   gap: 6px;
@@ -1105,6 +1139,39 @@ button {
   color: var(--ink);
   background: rgba(217, 255, 116, 0.34);
   font-weight: 800;
+}
+
+.room-report-turns {
+  display: grid;
+  gap: 8px;
+}
+
+.room-report-turns details {
+  padding: 10px 12px;
+  border: 1px solid rgba(19, 22, 28, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.room-report-turns summary {
+  color: var(--ink);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.room-report-turns p {
+  margin: 10px 0 6px;
+  color: var(--steel);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.room-report-turns em {
+  display: block;
+  color: var(--ink);
+  font-size: 13px;
+  font-style: normal;
+  line-height: 1.6;
 }
 
 .admin-hero {
@@ -1387,6 +1454,8 @@ button {
   .module-grid,
   .pipeline-track,
   .interview-module-list,
+  .room-report-grid,
+  .room-report-insights,
   .admin-grid {
     grid-template-columns: 1fr;
   }

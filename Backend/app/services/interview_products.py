@@ -10,7 +10,7 @@ INTERVIEW_PRODUCTS: dict[InterviewType, InterviewProduct] = {
         rounds=["专业一面", "专业二面", "HR 面"],
         credit_cost=3,
         pricing_unit="complete_experience",
-        report_focus=["专业能力", "项目表达", "追问承压", "岗位匹配", "HR 表达"],
+        report_focus=["岗位匹配与动机", "专业解释准确性", "项目证据与量化结果", "问题定位与复盘", "压力追问应对"],
     ),
     InterviewType.POSTGRADUATE: InterviewProduct(
         id=InterviewType.POSTGRADUATE,
@@ -20,7 +20,7 @@ INTERVIEW_PRODUCTS: dict[InterviewType, InterviewProduct] = {
         rounds=["复试模拟"],
         credit_cost=1,
         pricing_unit="single_session",
-        report_focus=["专业基础", "科研潜力", "表达逻辑", "导师沟通"],
+        report_focus=["专业基础扎实度", "科研兴趣与问题意识", "文献阅读与英文表达", "导师沟通适配", "学术规范意识"],
     ),
     InterviewType.CIVIL_SERVICE: InterviewProduct(
         id=InterviewType.CIVIL_SERVICE,
@@ -30,7 +30,7 @@ INTERVIEW_PRODUCTS: dict[InterviewType, InterviewProduct] = {
         rounds=["结构化模拟"],
         credit_cost=1,
         pricing_unit="single_session",
-        report_focus=["审题能力", "结构化表达", "公共视角", "语言稳定性"],
+        report_focus=["审题与综合分析", "结构化表达", "计划组织协调", "应急应变", "公共服务价值观"],
     ),
     InterviewType.IELTS: InterviewProduct(
         id=InterviewType.IELTS,
@@ -40,7 +40,7 @@ INTERVIEW_PRODUCTS: dict[InterviewType, InterviewProduct] = {
         rounds=["Part 1", "Part 2", "Part 3"],
         credit_cost=2,
         pricing_unit="speaking_test",
-        report_focus=["fluency", "vocabulary", "grammar", "pronunciation", "coherence"],
+        report_focus=["Fluency and coherence", "Lexical resource", "Grammatical range and accuracy", "Pronunciation"],
     ),
 }
 

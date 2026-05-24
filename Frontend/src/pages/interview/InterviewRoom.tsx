@@ -484,6 +484,26 @@ export function InterviewRoom() {
                 <span>综合表现</span>
               </div>
               <p>{interviewState.report.summary}</p>
+              <div className="room-report-insights">
+                <article>
+                  <h2>
+                    <AppIcon icon="lucide:check-circle-2" size={17} />
+                    本轮亮点
+                  </h2>
+                  {interviewState.report.strengths.map((item) => (
+                    <span key={item}>{item}</span>
+                  ))}
+                </article>
+                <article>
+                  <h2>
+                    <AppIcon icon="lucide:activity" size={17} />
+                    需要强化
+                  </h2>
+                  {interviewState.report.improvements.map((item) => (
+                    <span key={item}>{item}</span>
+                  ))}
+                </article>
+              </div>
               <div className="room-report-grid">
                 {interviewState.report.dimensions.map((dimension) => (
                   <div key={dimension.name}>
@@ -497,6 +517,19 @@ export function InterviewRoom() {
                 <h2>下一轮建议</h2>
                 {interviewState.report.next_plan.map((item) => (
                   <span key={item}>{item}</span>
+                ))}
+              </div>
+              <div className="room-report-turns">
+                <h2>
+                  <AppIcon icon="lucide:file-text" size={17} />
+                  问答记录
+                </h2>
+                {interviewState.report.turns.map((turn, index) => (
+                  <details key={`${turn.round_name}-${index}`}>
+                    <summary>{turn.round_name}</summary>
+                    <p>{turn.question}</p>
+                    <em>{turn.answer}</em>
+                  </details>
                 ))}
               </div>
             </section>
