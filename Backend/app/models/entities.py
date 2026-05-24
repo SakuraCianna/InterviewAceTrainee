@@ -120,6 +120,15 @@ class AIProviderConfigModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
+class SystemConfigModel(Base):
+    __tablename__ = "system_configs"
+
+    key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    value_json: Mapped[object] = mapped_column(json_type)
+    description: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
+
+
 class AICallLog(Base):
     __tablename__ = "ai_call_logs"
 

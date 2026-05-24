@@ -75,6 +75,8 @@ class OpenAICompatibleLLMClient:
         raise LLMProviderError("provider_not_supported")
 
     def _resolve_api_key(self, config: AIProviderConfig) -> str:
+        if config.api_key:
+            return config.api_key
         provider_name = config.provider_name.strip().lower()
         if provider_name in {"zhipu", "zai", "z.ai", "bigmodel"}:
             return self._settings.zhipu_api_key

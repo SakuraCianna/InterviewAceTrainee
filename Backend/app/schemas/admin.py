@@ -60,6 +60,7 @@ class AdminAICallLogResponse(BaseModel):
 class AdminUserSearchItem(BaseModel):
     email: str
     role: str
+    is_active: bool = True
     credit_balance: int
     total_interviews: int
     completed_interviews: int
@@ -69,6 +70,7 @@ class AdminUserSearchItem(BaseModel):
 class AdminUserDetailResponse(BaseModel):
     email: str
     role: str
+    is_active: bool = True
     credit_balance: int
     total_interviews: int
     completed_interviews: int
@@ -78,3 +80,25 @@ class AdminUserDetailResponse(BaseModel):
 
 class AdminUserInterviewReportResponse(InterviewReportResponse):
     user_email: str
+
+
+class AdminUserStatusUpdateRequest(BaseModel):
+    is_active: bool
+    reason: str = Field(min_length=2, max_length=120)
+
+
+class AdminUserStatusResponse(BaseModel):
+    email: str
+    is_active: bool
+
+
+class SystemConfigResponse(BaseModel):
+    key: str
+    value: bool | int | float | str | dict | list | None
+    description: str
+    updated_at: str | None = None
+
+
+class SystemConfigUpdateRequest(BaseModel):
+    value: bool | int | float | str | dict | list | None
+    description: str | None = Field(default=None, max_length=500)

@@ -2626,6 +2626,13 @@ button {
   gap: 10px;
 }
 
+.admin-user-result {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .admin-user-results button,
 .admin-user-history article {
   background: #f8fafc;
@@ -2651,6 +2658,15 @@ button {
 
 .admin-user-results button {
   cursor: pointer;
+}
+
+.admin-user-result > button:first-child {
+  min-width: 0;
+}
+
+.admin-user-result .admin-history-action {
+  grid-column: auto;
+  min-width: 64px;
 }
 
 .admin-user-results button.is-selected {
@@ -2861,6 +2877,52 @@ button {
 .admin-provider-list {
   display: grid;
   gap: 12px;
+}
+
+.admin-config-list {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-config-row {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 260px) auto;
+  padding: 14px;
+}
+
+.admin-config-row label {
+  display: grid;
+  gap: 4px;
+}
+
+.admin-config-row label span {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 1000;
+}
+
+.admin-config-row label em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.admin-config-row input,
+.admin-config-row select {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 8px;
+  color: #0f172a;
+  font: inherit;
+  min-height: 42px;
+  outline: 0;
+  padding: 0 12px;
 }
 
 .provider-row {

@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     aliyun_bailian_api_key: str = ""
     volcengine_ark_api_key: str = ""
+    provider_secret_encryption_key: str = ""
     interview_material_max_upload_bytes: int = 5 * 1024 * 1024
     resume_ocr_provider: str = "none"
 

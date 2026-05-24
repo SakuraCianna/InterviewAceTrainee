@@ -16,6 +16,10 @@ from app.schemas.admin import (
     AdminUserDetailResponse,
     AdminUserInterviewReportResponse,
     AdminUserSearchItem,
+    AdminUserStatusResponse,
+    AdminUserStatusUpdateRequest,
+    SystemConfigResponse,
+    SystemConfigUpdateRequest,
 )
 from app.schemas.interviews import InterviewHistoryItem
 from app.services.audit_logs import DatabaseAuditLogStore, InMemoryAuditLogStore, get_audit_log_store
@@ -29,6 +33,14 @@ from app.services.interview_runtime import (
     InterviewHistoryRecord,
     memory_interview_store,
 )
+from app.services.system_configs import (
+    DatabaseSystemConfigStore,
+    InMemorySystemConfigStore,
+    SystemConfig,
+    SystemConfigNotFoundError,
+    get_system_config_store,
+)
+from app.services.user_credentials import UserAccountRecord, UserCredentialStore, get_user_credential_store
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 ADMIN_INTERVIEW_REQUIRED_TABLES = ("interview_sessions", "interview_turns", "interview_reports", "interview_materials")
@@ -74,6 +86,7 @@ def history_record_to_schema(record: InterviewHistoryRecord) -> InterviewHistory
 def summarize_user(
     user_email: str,
     role: str,
+    is_active: bool,
     credit_store: CreditBalanceStore,
     interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore,
 ) -> AdminUserSearchItem:
@@ -84,10 +97,34 @@ def summarize_user(
     return AdminUserSearchItem(
         email=normalized_email,
         role=role,
+        is_active=is_active,
         credit_balance=credit_store.get_balance(normalized_email),
         total_interviews=len(interviews),
         completed_interviews=completed_interviews,
         last_interview_at=last_interview_at,
+    )
+
+
+def summarize_user_record(
+    record: UserAccountRecord,
+    credit_store: CreditBalanceStore,
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore,
+) -> AdminUserSearchItem:
+    return summarize_user(
+        user_email=record.email,
+        role=record.role,
+        is_active=record.is_active,
+        credit_store=credit_store,
+        interview_store=interview_store,
+    )
+
+
+def system_config_to_response(config: SystemConfig) -> SystemConfigResponse:
+    return SystemConfigResponse(
+        key=config.key,
+        value=config.value,
+        description=config.description,
+        updated_at=config.updated_at.isoformat() if config.updated_at else None,
     )
 
 
@@ -109,6 +146,7 @@ def search_users(
     credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
     interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_admin_interview_store),
     db_session: Session | None = Depends(get_optional_admin_db_session),
+    user_store: UserCredentialStore = Depends(get_user_credential_store),
 ) -> list[AdminUserSearchItem]:
     normalized_query = normalize_user_email(query)
     database_users = search_database_users(normalized_query, db_session)
@@ -117,11 +155,16 @@ def search_users(
             summarize_user(
                 user_email=user.email,
                 role=user.role,
+                is_active=user.is_active,
                 credit_store=credit_store,
                 interview_store=interview_store,
             )
             for user in database_users
         ]
+
+    user_records = user_store.search_users(normalized_query)
+    if user_records:
+        return [summarize_user_record(record, credit_store, interview_store) for record in user_records]
 
     if "@" not in normalized_query:
         return []
@@ -129,6 +172,7 @@ def search_users(
         summarize_user(
             user_email=normalized_query,
             role="user",
+            is_active=user_store.is_active(normalized_query),
             credit_store=credit_store,
             interview_store=interview_store,
         )
@@ -142,6 +186,7 @@ def read_user_detail(
     credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
     interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_admin_interview_store),
     db_session: Session | None = Depends(get_optional_admin_db_session),
+    user_store: UserCredentialStore = Depends(get_user_credential_store),
 ) -> AdminUserDetailResponse:
     normalized_user_id = normalize_user_email(user_id)
     user = None
@@ -149,7 +194,8 @@ def read_user_detail(
         user = db_session.execute(select(User).where(User.email == normalized_user_id)).scalar_one_or_none()
 
     role = user.role if user is not None else "user"
-    summary = summarize_user(normalized_user_id, role, credit_store, interview_store)
+    is_active = user.is_active if user is not None else user_store.is_active(normalized_user_id)
+    summary = summarize_user(normalized_user_id, role, is_active, credit_store, interview_store)
     interviews = [history_record_to_schema(record) for record in interview_store.list_user_sessions(normalized_user_id, limit=80)]
     return AdminUserDetailResponse(**summary.model_dump(), interviews=interviews)
 
@@ -176,6 +222,31 @@ def read_user_interview_report(
     if report is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview_report_not_found")
     return AdminUserInterviewReportResponse(user_email=normalized_user_id, **report.model_dump())
+
+
+@router.put("/users/{user_id}/status", response_model=AdminUserStatusResponse)
+def update_user_status(
+    request: Request,
+    user_id: str,
+    payload: AdminUserStatusUpdateRequest,
+    admin_claims: TokenClaims = Depends(require_admin_user),
+    user_store: UserCredentialStore = Depends(get_user_credential_store),
+    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+) -> AdminUserStatusResponse:
+    normalized_user_id = normalize_user_email(user_id)
+    before_active = user_store.is_active(normalized_user_id)
+    after_active = user_store.set_active(normalized_user_id, payload.is_active)
+    audit_store.record(
+        admin_email=admin_claims["sub"],
+        action="user_status_update",
+        target_type="user",
+        target_id=normalized_user_id,
+        before_snapshot={"is_active": before_active},
+        after_snapshot={"is_active": after_active, "reason": payload.reason},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    return AdminUserStatusResponse(email=normalized_user_id, is_active=after_active)
 
 
 @router.post("/users/{user_id}/credits", response_model=AdminCreditAdjustmentResponse)
@@ -293,3 +364,39 @@ def read_ai_call_logs(
     ai_call_log_store: AICallLogStore = Depends(get_ai_call_log_store),
 ) -> list[AdminAICallLogResponse]:
     return ai_call_log_store.list_recent(limit=80)
+
+
+@router.get("/system-configs", response_model=list[SystemConfigResponse])
+def read_system_configs(
+    _admin_claims: TokenClaims = Depends(require_admin_user),
+    system_config_store: DatabaseSystemConfigStore | InMemorySystemConfigStore = Depends(get_system_config_store),
+) -> list[SystemConfigResponse]:
+    return [system_config_to_response(config) for config in system_config_store.list_configs()]
+
+
+@router.put("/system-configs/{config_key}", response_model=SystemConfigResponse)
+def update_system_config(
+    request: Request,
+    config_key: str,
+    payload: SystemConfigUpdateRequest,
+    admin_claims: TokenClaims = Depends(require_admin_user),
+    system_config_store: DatabaseSystemConfigStore | InMemorySystemConfigStore = Depends(get_system_config_store),
+    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+) -> SystemConfigResponse:
+    try:
+        before = system_config_store.get(config_key)
+        updated = system_config_store.update(config_key, payload.value, payload.description)
+    except SystemConfigNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="system_config_not_found") from exc
+
+    audit_store.record(
+        admin_email=admin_claims["sub"],
+        action="system_config_update",
+        target_type="system_config",
+        target_id=config_key,
+        before_snapshot={"value": before.value, "description": before.description},
+        after_snapshot={"value": updated.value, "description": updated.description},
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    return system_config_to_response(updated)

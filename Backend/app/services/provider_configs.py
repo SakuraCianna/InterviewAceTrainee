@@ -1,9 +1,11 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import Settings, get_settings
 from app.models.entities import AIProviderConfigModel
 from app.schemas.providers import ProviderConfigCreateRequest, ProviderConfigUpdateRequest
 from app.services.ai_router import AIProviderConfig
+from app.services.secret_box import decrypt_secret, encrypt_secret, preview_secret
 
 
 class ProviderConfigAlreadyExistsError(ValueError):
@@ -76,6 +78,46 @@ def default_provider_configs() -> list[AIProviderConfig]:
             model_name="deepseek-v4-flash",
             region="cn",
         ),
+        AIProviderConfig(
+            id="browser-asr",
+            provider_type="asr",
+            purpose="interview",
+            enabled=True,
+            priority=10,
+            provider_name="browser",
+            model_name="web-speech-recognition",
+            region="cn",
+        ),
+        AIProviderConfig(
+            id="aliyun-asr-flash",
+            provider_type="asr",
+            purpose="interview",
+            enabled=False,
+            priority=20,
+            provider_name="aliyun",
+            model_name="paraformer-realtime-v2",
+            region="cn",
+        ),
+        AIProviderConfig(
+            id="browser-tts",
+            provider_type="tts",
+            purpose="interview",
+            enabled=True,
+            priority=10,
+            provider_name="browser",
+            model_name="web-speech-synthesis",
+            region="cn",
+        ),
+        AIProviderConfig(
+            id="volcengine-tts-flash",
+            provider_type="tts",
+            purpose="interview",
+            enabled=False,
+            priority=20,
+            provider_name="volcengine",
+            model_name="seed-tts",
+            region="cn",
+        ),
     ]
 
 
@@ -98,6 +140,8 @@ class InMemoryProviderConfigStore:
             provider_name=payload.provider_name,
             model_name=payload.model_name,
             region=payload.region,
+            api_key=payload.api_key or "",
+            api_key_preview=preview_secret(payload.api_key),
         )
         self._configs.append(config)
         return config
@@ -114,15 +158,24 @@ class InMemoryProviderConfigStore:
                     provider_name=payload.provider_name or config.provider_name,
                     model_name=payload.model_name or config.model_name,
                     region=payload.region or config.region,
+                    api_key=config.api_key if payload.api_key is None else payload.api_key,
+                    api_key_preview=config.api_key_preview if payload.api_key is None else preview_secret(payload.api_key),
                 )
                 self._configs[index] = updated
                 return updated
         raise ProviderConfigNotFoundError("provider config not found")
 
+    def get_config(self, provider_id: str) -> AIProviderConfig:
+        for config in self._configs:
+            if config.id == provider_id:
+                return config
+        raise ProviderConfigNotFoundError("provider config not found")
+
 
 class DatabaseProviderConfigStore:
-    def __init__(self, session: Session, commit_on_write: bool = True) -> None:
+    def __init__(self, session: Session, settings: Settings | None = None, commit_on_write: bool = True) -> None:
         self._session = session
+        self._settings = settings or get_settings()
         self._commit_on_write = commit_on_write
 
     def list_configs(self) -> list[AIProviderConfig]:
@@ -143,6 +196,7 @@ class DatabaseProviderConfigStore:
             display_name=payload.provider_name,
             model_name=payload.model_name,
             region=payload.region,
+            encrypted_api_key=encrypt_secret(payload.api_key, self._settings),
         )
         self._session.add(model)
         if self._commit_on_write:
@@ -170,10 +224,18 @@ class DatabaseProviderConfigStore:
             model.region = payload.region
         if payload.enabled is not None:
             model.enabled = payload.enabled
+        if payload.api_key is not None:
+            model.encrypted_api_key = encrypt_secret(payload.api_key, self._settings)
         if self._commit_on_write:
             self._session.commit()
         else:
             self._session.flush()
+        return self._to_config(model)
+
+    def get_config(self, provider_id: str) -> AIProviderConfig:
+        model = self._get_model(provider_id)
+        if model is None:
+            raise ProviderConfigNotFoundError("provider config not found")
         return self._to_config(model)
 
     def _seed_defaults_if_empty(self) -> None:
@@ -192,6 +254,7 @@ class DatabaseProviderConfigStore:
                     display_name=config.provider_name,
                     model_name=config.model_name,
                     region=config.region,
+                    encrypted_api_key=encrypt_secret(config.api_key, self._settings),
                 )
             )
         if self._commit_on_write:
@@ -203,6 +266,7 @@ class DatabaseProviderConfigStore:
         return self._session.get(AIProviderConfigModel, provider_id)
 
     def _to_config(self, model: AIProviderConfigModel) -> AIProviderConfig:
+        api_key = decrypt_secret(model.encrypted_api_key, self._settings)
         return AIProviderConfig(
             id=model.id,
             provider_type=model.provider_type,
@@ -212,6 +276,8 @@ class DatabaseProviderConfigStore:
             provider_name=model.provider_name,
             model_name=model.model_name,
             region=model.region,
+            api_key=api_key,
+            api_key_preview=preview_secret(api_key),
         )
 
 

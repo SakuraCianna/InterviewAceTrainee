@@ -57,3 +57,28 @@ def test_openai_compatible_client_calls_zhipu_chat_completion_endpoint():
     assert captured["authorization"] == "Bearer test-key"
     assert response.content == "下一题请说明你如何复盘失败经验。"
     assert response.usage["total_tokens"] == 23
+
+
+def test_openai_compatible_client_prefers_provider_config_api_key():
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["authorization"] = request.headers.get("authorization")
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    client = OpenAICompatibleLLMClient(Settings(zhipu_api_key="env-key"), transport=httpx.MockTransport(handler))
+    config = AIProviderConfig(
+        id="glm-custom",
+        provider_type="llm",
+        purpose="interview",
+        enabled=True,
+        priority=1,
+        provider_name="zhipu",
+        model_name="glm-4.7",
+        api_key="config-key",
+    )
+
+    response = client.complete(config, [{"role": "user", "content": "hello"}])
+
+    assert captured["authorization"] == "Bearer config-key"
+    assert response.content == "ok"

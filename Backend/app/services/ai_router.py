@@ -43,6 +43,8 @@ class AIProviderConfig:
     provider_name: str = "custom"
     model_name: str = "custom"
     region: str = "cn"
+    api_key: str = ""
+    api_key_preview: str | None = None
 
 
 class AIServiceRouter:

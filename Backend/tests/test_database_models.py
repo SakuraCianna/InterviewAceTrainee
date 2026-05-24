@@ -14,3 +14,4 @@ def test_database_models_can_create_sqlite_schema_for_isolated_tests():
     assert "interview_sessions" in Base.metadata.tables
     assert "interview_turns" in Base.metadata.tables
     assert "interview_reports" in Base.metadata.tables
+    assert "system_configs" in Base.metadata.tables

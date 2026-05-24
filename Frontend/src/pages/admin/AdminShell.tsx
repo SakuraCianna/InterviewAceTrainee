@@ -16,6 +16,8 @@ type ProviderConfig = {
   priority: number;
   region: string;
   enabled: boolean;
+  has_api_key: boolean;
+  api_key_preview?: string | null;
 };
 
 type AdminLoginResponse = {
@@ -62,6 +64,7 @@ type AICallLogEntry = {
 type AdminUserSearchItem = {
   email: string;
   role: string;
+  is_active: boolean;
   credit_balance: number;
   total_interviews: number;
   completed_interviews: number;
@@ -91,6 +94,13 @@ type AdminInterviewReport = {
   turns: { round_name: string; question: string; answer: string }[];
 };
 
+type SystemConfig = {
+  key: string;
+  value: boolean | number | string | Record<string, unknown> | unknown[] | null;
+  description: string;
+  updated_at?: string | null;
+};
+
 const emptyProvider = {
   id: "",
   provider_type: "llm",
@@ -99,6 +109,7 @@ const emptyProvider = {
   model_name: "",
   priority: "100",
   region: "cn",
+  api_key: "",
 };
 
 export function AdminShell() {
@@ -107,6 +118,8 @@ export function AdminShell() {
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [creditLedger, setCreditLedger] = useState<CreditLedgerEntry[]>([]);
   const [aiCallLogs, setAiCallLogs] = useState<AICallLogEntry[]>([]);
+  const [systemConfigs, setSystemConfigs] = useState<SystemConfig[]>([]);
+  const [providerTestResults, setProviderTestResults] = useState<Record<string, string>>({});
   const [userSearchQuery, setUserSearchQuery] = useState("");
   const [userSearchResults, setUserSearchResults] = useState<AdminUserSearchItem[]>([]);
   const [selectedUserHistory, setSelectedUserHistory] = useState<AdminInterviewHistoryItem[]>([]);
@@ -155,7 +168,7 @@ export function AdminShell() {
     setCurrentUser(user);
     setIsLoading(false);
     setMessage(`已进入后台：${user.email}`);
-    await Promise.all([loadProviders(), loadAuditLogs(), loadAiCallLogs()]);
+    await Promise.all([loadProviders(), loadSystemConfigs(), loadAuditLogs(), loadAiCallLogs()]);
   }
 
   async function loadProviders() {
@@ -181,6 +194,14 @@ export function AdminShell() {
       return;
     }
     setAiCallLogs((await response.json()) as AICallLogEntry[]);
+  }
+
+  async function loadSystemConfigs() {
+    const response = await fetch("/api/admin/system-configs", { credentials: "include" });
+    if (!response.ok) {
+      return;
+    }
+    setSystemConfigs((await response.json()) as SystemConfig[]);
   }
 
   async function loadCreditLedger(userEmail = creditUser) {
@@ -355,6 +376,7 @@ export function AdminShell() {
       priority,
       region: providerForm.region,
       enabled: editingProvider?.enabled ?? true,
+      api_key: providerForm.api_key.trim() || undefined,
     };
     const response = await fetch(
       editingProvider ? `/api/ai-providers/${encodeURIComponent(editingProvider.id)}` : "/api/ai-providers",
@@ -377,8 +399,89 @@ export function AdminShell() {
     setMessage(`${editingProvider ? "已更新" : "已新增"}模型配置：${data.id}`);
   }
 
+  async function testProvider(provider: ProviderConfig) {
+    setProviderTestResults((previous) => ({ ...previous, [provider.id]: "测试中" }));
+    const response = await fetch(`/api/ai-providers/${encodeURIComponent(provider.id)}/test`, {
+      method: "POST",
+      credentials: "include",
+      headers: csrfHeaders(),
+    });
+    const data = await response.json();
+    const resultText = response.ok
+      ? `${data.success ? "通过" : "未通过"}：${data.detail}`
+      : `测试失败：${data.detail ?? "request_failed"}`;
+    setProviderTestResults((previous) => ({ ...previous, [provider.id]: resultText }));
+    await loadAuditLogs();
+  }
+
+  async function updateUserStatus(user: AdminUserSearchItem, isActive: boolean) {
+    const response = await fetch(`/api/admin/users/${encodeURIComponent(user.email)}/status`, {
+      method: "PUT",
+      credentials: "include",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ is_active: isActive, reason: isActive ? "manual_restore" : "manual_disable" }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setMessage(data.detail ? `用户状态更新失败：${data.detail}` : "用户状态更新失败。");
+      return;
+    }
+    setMessage(`${user.email} 已${isActive ? "启用" : "禁用"}。`);
+    await Promise.all([searchUsers(), loadAuditLogs()]);
+  }
+
+  function configInputValue(value: SystemConfig["value"]) {
+    if (typeof value === "string") {
+      return value;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    return JSON.stringify(value);
+  }
+
+  function parseConfigInput(currentValue: SystemConfig["value"], rawValue: string) {
+    if (typeof currentValue === "boolean") {
+      return rawValue === "true";
+    }
+    if (typeof currentValue === "number") {
+      const parsed = Number(rawValue);
+      if (Number.isNaN(parsed)) {
+        throw new Error("invalid_number_config");
+      }
+      return parsed;
+    }
+    if (Array.isArray(currentValue) || (currentValue && typeof currentValue === "object")) {
+      return JSON.parse(rawValue);
+    }
+    return rawValue;
+  }
+
+  async function updateSystemConfig(config: SystemConfig, rawValue: string) {
+    let value: SystemConfig["value"];
+    try {
+      value = parseConfigInput(config.value, rawValue);
+    } catch {
+      setMessage(`${config.key} 需要合法 JSON。`);
+      return;
+    }
+    const response = await fetch(`/api/admin/system-configs/${encodeURIComponent(config.key)}`, {
+      method: "PUT",
+      credentials: "include",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ value }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setMessage(data.detail ? `系统配置保存失败：${data.detail}` : "系统配置保存失败。");
+      return;
+    }
+    setMessage(`已更新系统配置：${data.key}`);
+    await Promise.all([loadSystemConfigs(), loadAuditLogs()]);
+  }
+
   async function refreshAdminData() {
-    await Promise.all([loadProviders(), loadAuditLogs(), loadAiCallLogs(), loadCreditLedger()]);
+    await Promise.all([loadProviders(), loadSystemConfigs(), loadAuditLogs(), loadAiCallLogs(), loadCreditLedger()]);
   }
 
   async function logout() {
@@ -388,6 +491,8 @@ export function AdminShell() {
     setAuditLogs([]);
     setCreditLedger([]);
     setAiCallLogs([]);
+    setSystemConfigs([]);
+    setProviderTestResults({});
     setUserSearchResults([]);
     setSelectedUserHistory([]);
     setSelectedUserEmail("");
@@ -539,6 +644,10 @@ export function AdminShell() {
                   区域
                   <input value={providerForm.region} onChange={(event) => setProviderForm({ ...providerForm, region: event.target.value })} placeholder="cn" required />
                 </label>
+                <label>
+                  API Key
+                  <input value={providerForm.api_key} onChange={(event) => setProviderForm({ ...providerForm, api_key: event.target.value })} placeholder={editingProvider ? "留空保持原密钥" : "可选，保存后脱敏显示"} />
+                </label>
               </div>
               <div className="admin-action-row">
                 <button type="submit" className="admin-primary-button">{editingProvider ? "保存配置" : "新增模型"}</button>
@@ -575,18 +684,26 @@ export function AdminShell() {
               <div className="admin-user-results">
                 {userSearchResults.length === 0 && <p className="admin-empty-text">搜索后会显示用户余额、训练次数和最近训练时间。</p>}
                 {userSearchResults.map((user) => (
-                  <button
-                    type="button"
-                    className={selectedUserEmail === user.email ? "is-selected" : ""}
-                    key={user.email}
-                    onClick={() => void loadUserHistory(user.email)}
-                  >
-                    <span>
-                      <strong>{user.email}</strong>
-                      <em>{user.role} / 余额 {user.credit_balance} 次</em>
-                    </span>
-                    <b>{user.completed_interviews}/{user.total_interviews}</b>
-                  </button>
+                  <article className="admin-user-result" key={user.email}>
+                    <button
+                      type="button"
+                      className={selectedUserEmail === user.email ? "is-selected" : ""}
+                      onClick={() => void loadUserHistory(user.email)}
+                    >
+                      <span>
+                        <strong>{user.email}</strong>
+                        <em>{user.role} / {user.is_active ? "启用中" : "已禁用"} / 余额 {user.credit_balance} 次</em>
+                      </span>
+                      <b>{user.completed_interviews}/{user.total_interviews}</b>
+                    </button>
+                    <button
+                      type="button"
+                      className="admin-history-action"
+                      onClick={() => void updateUserStatus(user, !user.is_active)}
+                    >
+                      {user.is_active ? "禁用" : "启用"}
+                    </button>
+                  </article>
                 ))}
               </div>
               <div className="admin-user-history">
@@ -693,15 +810,54 @@ export function AdminShell() {
                         model_name: provider.model_name,
                         priority: String(provider.priority),
                         region: provider.region,
+                        api_key: "",
                       })}
                     >
                       编辑
+                    </button>
+                    <button type="button" onClick={() => void testProvider(provider)}>
+                      测试
                     </button>
                     <button type="button" className={provider.enabled ? "is-enabled" : ""} onClick={() => toggleProvider(provider)}>
                       {provider.enabled ? "启用中" : "已停用"}
                     </button>
                   </div>
+                  <span>{provider.has_api_key ? `密钥：${provider.api_key_preview}` : "密钥：未配置"}{providerTestResults[provider.id] ? ` · ${providerTestResults[provider.id]}` : ""}</span>
                 </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="admin-provider-table">
+            <div className="admin-section-heading">
+              <span className="eyebrow">System Config</span>
+              <h2>系统参数</h2>
+            </div>
+            <div className="admin-config-list">
+              {systemConfigs.map((config) => (
+                <form
+                  className="admin-config-row"
+                  key={config.key}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const formData = new FormData(event.currentTarget);
+                    void updateSystemConfig(config, String(formData.get("value") ?? ""));
+                  }}
+                >
+                  <label>
+                    <span>{config.key}</span>
+                    <em>{config.description}</em>
+                  </label>
+                  {typeof config.value === "boolean" ? (
+                    <select name="value" defaultValue={String(config.value)}>
+                      <option value="true">开启</option>
+                      <option value="false">关闭</option>
+                    </select>
+                  ) : (
+                    <input name="value" defaultValue={configInputValue(config.value)} />
+                  )}
+                  <button type="submit" className="admin-primary-button">保存</button>
+                </form>
               ))}
             </div>
           </section>

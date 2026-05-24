@@ -131,3 +131,37 @@ def test_admin_can_create_and_update_provider_config():
     actions = [entry["action"] for entry in audit_response.json() if entry["target_id"] == "deepseek-v4-test"]
     assert "provider_create" in actions
     assert "provider_update" in actions
+
+
+def test_provider_config_masks_api_key_and_supports_connectivity_test():
+    client = TestClient(app)
+    token = get_admin_token(client)
+
+    create_response = client.post(
+        "/api/ai-providers",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "id": "browser-asr-test",
+            "provider_type": "asr",
+            "purpose": "interview",
+            "provider_name": "browser",
+            "model_name": "web-speech-recognition",
+            "priority": 10,
+            "region": "cn",
+            "api_key": "secret-key-value",
+        },
+    )
+
+    assert create_response.status_code == 201
+    assert "api_key" not in create_response.json()
+    assert create_response.json()["has_api_key"] is True
+    assert create_response.json()["api_key_preview"] == "secr...alue"
+
+    test_response = client.post(
+        "/api/ai-providers/browser-asr-test/test",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert test_response.status_code == 200
+    assert test_response.json()["success"] is True
+    assert test_response.json()["provider_type"] == "asr"

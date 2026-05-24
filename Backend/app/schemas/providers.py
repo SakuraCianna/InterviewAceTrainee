@@ -15,6 +15,8 @@ class ProviderSelectionResponse(BaseModel):
     priority: int
     region: str
     enabled: bool = True
+    has_api_key: bool = False
+    api_key_preview: str | None = None
 
 
 class ProviderConfigCreateRequest(BaseModel):
@@ -26,6 +28,7 @@ class ProviderConfigCreateRequest(BaseModel):
     priority: int = Field(ge=1, le=10_000)
     region: str = Field(default="cn", min_length=2, max_length=16)
     enabled: bool = True
+    api_key: str | None = Field(default=None, max_length=4096)
 
 
 class ProviderConfigUpdateRequest(BaseModel):
@@ -36,3 +39,13 @@ class ProviderConfigUpdateRequest(BaseModel):
     priority: int | None = Field(default=None, ge=1, le=10_000)
     region: str | None = Field(default=None, min_length=2, max_length=16)
     enabled: bool | None = None
+    api_key: str | None = Field(default=None, max_length=4096)
+
+
+class ProviderConnectivityTestResponse(BaseModel):
+    id: str
+    provider_type: str
+    provider_name: str
+    model_name: str
+    success: bool
+    detail: str

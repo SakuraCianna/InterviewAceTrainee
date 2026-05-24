@@ -17,6 +17,7 @@ REQUIRED_TABLES = (
     "interview_reports",
     "ai_provider_configs",
     "admin_audit_logs",
+    "system_configs",
 )
 
 

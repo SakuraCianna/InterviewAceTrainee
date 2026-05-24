@@ -72,7 +72,11 @@ uv run python -m app.cli.safe_migrate
 
 当前后端已经具备 JWT 登录、邮箱验证码注册/登录、管理员双重认证接口、按模块扣次数、管理员手动发放次数接口、次数流水、训练会话中断恢复、完整报告保存、AI 供应商配置新增/更新、AI 调用日志，以及带 JWT 校验的面试 WebSocket 通道。登录成功后会写入 `HttpOnly` Cookie，前端不再把 token 放进 `localStorage`；后台登录还会额外校验 `ADMIN_EMAIL_ALLOWLIST` 白名单。
 
+管理员后台还支持用户启用/禁用、系统参数配置、供应商密钥脱敏保存和供应商连通性测试。系统参数包含是否开放注册、是否允许普通用户密码登录、是否允许邮箱验证码登录、新用户默认次数、单轮回答建议时长和默认 LLM/ASR/TTS 配置 ID。
+
 AI 模型路由默认按“国内可用、免费/低成本优先”排序：智谱 `GLM-4.7-Flash`、`glm-z1-flash`、`glm-4-flash-250414`，再到阿里百炼 `qwen-flash`、火山方舟 `doubao-seed-1.6-flash`，最后预置 DeepSeek `deepseek-v4-flash` 作为兜底备用。面试下一轮追问会优先尝试模型路由；未配置 API Key、主模型失败或全部模型失败时，系统会自动退回内置题库继续流程，不会卡死训练。
+
+ASR/TTS 也已经纳入同一套供应商配置。首版默认启用浏览器 Web Speech 作为低成本通道，同时预置阿里云 ASR、火山 TTS 等国内供应商配置位，后续接入真实云端语音服务时可以直接在后台启用、填入密钥并调整优先级。
 
 模型 Key 统一放在 `.env`：
 
@@ -138,3 +142,5 @@ Nginx 默认监听：
 ```txt
 http://localhost/
 ```
+
+正式域名开启 HTTPS 时，可以参考 `nginx/nginx.https.example.conf`。证书路径默认示例为 `/etc/nginx/certs/fullchain.pem` 和 `/etc/nginx/certs/privkey.pem`；启用 HTTPS 后记得把 `Backend/.env` 里的 `AUTH_COOKIE_SECURE` 改成 `true`，并把 `CORS_ORIGINS` 保留为你的正式域名。
