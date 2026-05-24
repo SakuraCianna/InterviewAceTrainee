@@ -151,6 +151,8 @@ npm run dev
 docker compose up --build -d
 ```
 
+若数据库发生变化，生产环境直接执行 `docker compose up -d --build` 即可；后端容器启动时会先执行安全迁移流程。
+
 查看状态：
 
 ```powershell
