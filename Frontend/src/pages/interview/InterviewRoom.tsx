@@ -338,6 +338,18 @@ export function InterviewRoom() {
     setSocketMessage(data.status === "completed" ? "已打开历史复盘报告。" : "已恢复这场未完成训练。");
   }
 
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    window.speechSynthesis?.cancel();
+    socketRef.current?.close();
+    setCurrentUser(null);
+    setInterviewState(null);
+    setActiveSession(null);
+    setHistoryItems([]);
+    setSocketState("已退出");
+    setSocketMessage("已退出登录，可以重新登录其他账号。");
+  }
+
   function startFresh() {
     setInterviewState(null);
     setActiveSession(null);
@@ -358,6 +370,12 @@ export function InterviewRoom() {
             <AppIcon icon="lucide:coins" size={16} />
             {currentUser ? `${currentUser.credit_balance} 次` : "未登录"}
           </span>
+          {currentUser && (
+            <button type="button" className="logout-button" onClick={() => void logout()}>
+              <AppIcon icon="lucide:log-out" size={16} />
+              退出
+            </button>
+          )}
         </div>
       </header>
 

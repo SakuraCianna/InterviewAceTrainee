@@ -261,6 +261,16 @@ export function AdminShell() {
     await Promise.all([loadProviders(), loadAuditLogs(), loadAiCallLogs(), loadCreditLedger()]);
   }
 
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    setCurrentUser(null);
+    setProviders([]);
+    setAuditLogs([]);
+    setCreditLedger([]);
+    setAiCallLogs([]);
+    setMessage("已退出后台，请重新完成管理员双重认证。");
+  }
+
   return (
     <main className="workspace-page admin-page">
       <header className="workspace-header">
@@ -268,7 +278,15 @@ export function AdminShell() {
           <AppIcon icon="solar:soundwave-circle-bold-duotone" size={24} />
           面霸练习生
         </a>
-        <span className="session-pill session-pill--admin">{currentUser ? currentUser.email : "Admin Console"}</span>
+        <div className="workspace-header-actions">
+          <span className="session-pill session-pill--admin">{currentUser ? currentUser.email : "Admin Console"}</span>
+          {currentUser && (
+            <button type="button" className="logout-button" onClick={() => void logout()}>
+              <AppIcon icon="lucide:log-out" size={16} />
+              退出
+            </button>
+          )}
+        </div>
       </header>
 
       <section className="admin-hero">

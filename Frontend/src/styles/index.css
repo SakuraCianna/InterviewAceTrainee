@@ -738,6 +738,26 @@ button {
   font-weight: 900;
 }
 
+.logout-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgba(19, 22, 28, 0.1);
+  border-radius: 999px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.66);
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.logout-button:hover {
+  border-color: rgba(47, 109, 246, 0.2);
+  background: rgba(47, 109, 246, 0.08);
+}
+
 .session-pill--admin {
   color: #4e6f08;
   background: rgba(191, 220, 99, 0.28);

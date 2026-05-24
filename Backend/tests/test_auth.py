@@ -156,6 +156,25 @@ def test_password_register_sets_http_only_session_cookie():
     assert me_response.json()["email"] == email
 
 
+def test_logout_clears_http_only_session_cookie():
+    client = TestClient(app)
+    email = unique_email("logout-user")
+    code = request_dev_code(client, email)
+    register_response = client.post(
+        "/api/auth/password/register",
+        json={"email": email, "password": "StrongPass123", "code": code},
+    )
+    assert register_response.status_code == 201
+
+    logout_response = client.post("/api/auth/logout")
+    me_response = client.get("/api/auth/me")
+
+    assert logout_response.status_code == 204
+    assert "mianba_access_token=" in logout_response.headers["set-cookie"]
+    assert "Max-Age=0" in logout_response.headers["set-cookie"]
+    assert me_response.status_code == 401
+
+
 def test_admin_credit_adjustment_requires_admin_bearer_token():
     client = TestClient(app)
     response = client.post(

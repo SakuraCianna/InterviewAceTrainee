@@ -17,6 +17,7 @@ import history from "@iconify-icons/lucide/history";
 import keyRound from "@iconify-icons/lucide/key-round";
 import landmark from "@iconify-icons/lucide/landmark";
 import languages from "@iconify-icons/lucide/languages";
+import logOut from "@iconify-icons/lucide/log-out";
 import mail from "@iconify-icons/lucide/mail";
 import mailCheck from "@iconify-icons/lucide/mail-check";
 import mic from "@iconify-icons/lucide/mic";
@@ -53,6 +54,7 @@ const icons: Record<string, IconifyIcon> = {
   "lucide:key-round": keyRound,
   "lucide:landmark": landmark,
   "lucide:languages": languages,
+  "lucide:log-out": logOut,
   "lucide:mail": mail,
   "lucide:mail-check": mailCheck,
   "lucide:mic": mic,

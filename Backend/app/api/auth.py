@@ -178,6 +178,16 @@ def login_admin(
     return issue_login_response(response, str(payload.email), "admin", settings)
 
 
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(response: Response, settings=Depends(get_settings)) -> None:
+    response.delete_cookie(
+        key=ACCESS_TOKEN_COOKIE_NAME,
+        path="/",
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+    )
+
+
 @router.get("/me", response_model=CurrentUserResponse)
 def read_current_user(
     claims: TokenClaims = Depends(get_current_user_claims),
