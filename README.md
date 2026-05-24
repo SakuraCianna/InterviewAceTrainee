@@ -134,4 +134,4 @@ http://sakuracianna.icu/
 https://sakuracianna.icu/
 ```
 
-`nginx/nginx.conf` 已经是正式 HTTPS 配置：80 端口会跳转到 443，证书从 `nginx/certs/fullchain.pem` 和 `nginx/certs/privkey.pem` 挂载到容器内 `/etc/nginx/certs/`。证书文件属于服务器私有资产，`nginx/certs/` 已加入 `.gitignore`。启用 HTTPS 后记得把 `Backend/.env` 里的 `AUTH_COOKIE_SECURE` 改成 `true`，并把 `CORS_ORIGINS` 保留为你的正式域名。
+`nginx/nginx.conf` 已经是正式 HTTPS 配置：80 端口会跳转到 443，当前直接使用 `nginx/sakuracianna.icu_bundle.pem` 和 `nginx/sakuracianna.icu.key`，并由 Docker Compose 挂载到容器内 `/etc/nginx/certs/`。证书文件和私钥属于服务器私有资产，`nginx/*.key`、`nginx/*.csr`、`nginx/*.crt`、`nginx/*.pem` 已加入 `.gitignore`。启用 HTTPS 后记得把 `Backend/.env` 里的 `AUTH_COOKIE_SECURE` 改成 `true`，并把 `CORS_ORIGINS` 保留为你的正式域名。

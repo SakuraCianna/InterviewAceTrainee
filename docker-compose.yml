@@ -78,7 +78,8 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/sakuracianna.icu_bundle.pem:/etc/nginx/certs/sakuracianna.icu_bundle.pem:ro
+      - ./nginx/sakuracianna.icu.key:/etc/nginx/certs/sakuracianna.icu.key:ro
 
 volumes:
   postgres-data:

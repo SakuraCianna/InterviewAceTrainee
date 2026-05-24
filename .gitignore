@@ -15,6 +15,10 @@ Frontend/*.tsbuildinfo
 
 database_backups/
 nginx/certs/
+nginx/*.key
+nginx/*.csr
+nginx/*.crt
+nginx/*.pem
 
 .env
 .env.*
