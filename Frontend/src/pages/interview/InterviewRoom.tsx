@@ -34,6 +34,22 @@ type InterviewStateResponse = {
   detail?: string;
 };
 
+type CurrentUserResponse = {
+  email: string;
+  role: string;
+  credit_balance: number;
+};
+
+type InterviewHistoryItem = {
+  session_id: string;
+  interview_type: InterviewType;
+  status: string;
+  current_step_index: number;
+  total_steps: number;
+  report_total_score: number | null;
+  created_at: string;
+};
+
 type SpeechRecognitionLike = {
   lang: string;
   continuous: boolean;
@@ -65,10 +81,33 @@ function createSessionId() {
   return `session-${Date.now()}-${random}`;
 }
 
+function moduleByType(type: InterviewType) {
+  return modules.find((module) => module.type === type) ?? modules[0];
+}
+
+function statusLabel(status: string) {
+  return status === "completed" ? "已完成" : "进行中";
+}
+
+function formatHistoryDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "刚刚";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 export function InterviewRoom() {
   const [stateIndex, setStateIndex] = useState(1);
   const [selectedModuleIndex, setSelectedModuleIndex] = useState(0);
   const [sessionId, setSessionId] = useState(createSessionId);
+  const [currentUser, setCurrentUser] = useState<CurrentUserResponse | null>(null);
+  const [historyItems, setHistoryItems] = useState<InterviewHistoryItem[]>([]);
   const [interviewState, setInterviewState] = useState<InterviewStateResponse | null>(null);
   const [activeSession, setActiveSession] = useState<InterviewStateResponse | null>(null);
   const [isStartingSession, setIsStartingSession] = useState(false);
@@ -88,7 +127,9 @@ export function InterviewRoom() {
   const socketSessionId = useMemo(() => interviewState?.session_id ?? activeSession?.session_id ?? sessionId, [activeSession, interviewState, sessionId]);
 
   useEffect(() => {
+    void loadAccount();
     void loadActiveSession();
+    void loadHistory();
   }, []);
 
   useEffect(() => {
@@ -122,6 +163,24 @@ export function InterviewRoom() {
       websocket.close();
     };
   }, [socketSessionId]);
+
+  async function loadAccount() {
+    const response = await fetch("/api/auth/me", { credentials: "include" });
+    if (!response.ok) {
+      setCurrentUser(null);
+      return;
+    }
+    setCurrentUser((await response.json()) as CurrentUserResponse);
+  }
+
+  async function loadHistory() {
+    const response = await fetch("/api/interviews/history", { credentials: "include" });
+    if (!response.ok) {
+      setHistoryItems([]);
+      return;
+    }
+    setHistoryItems((await response.json()) as InterviewHistoryItem[]);
+  }
 
   async function loadActiveSession() {
     const response = await fetch("/api/interviews/active", { credentials: "include" });
@@ -159,11 +218,15 @@ export function InterviewRoom() {
       return;
     }
 
+    if (typeof data.balance_after === "number") {
+      setCurrentUser((user) => (user ? { ...user, credit_balance: data.balance_after ?? user.credit_balance } : user));
+    }
     setSessionId(data.session_id);
     setInterviewState(data);
     setActiveSession(null);
     setStateIndex(1);
     setSocketMessage(data.status === "completed" ? "这场训练已完成，可查看复盘报告。" : `面试已就绪，剩余次数 ${data.balance_after ?? "已更新"}。`);
+    await loadHistory();
     speakQuestion(data.current_question?.text, data.interview_type);
   }
 
@@ -248,6 +311,7 @@ export function InterviewRoom() {
     }
     setInterviewState(data);
     answerDraftRef.current = "";
+    await loadHistory();
     if (data.status === "completed") {
       setStateIndex(0);
       setSocketMessage("训练完成，复盘报告已生成。");
@@ -255,6 +319,23 @@ export function InterviewRoom() {
     }
     setSocketMessage("已进入下一问，问题正在播放。");
     speakQuestion(data.current_question?.text, data.interview_type);
+  }
+
+  async function openHistoryItem(item: InterviewHistoryItem) {
+    const response = await fetch(`/api/interviews/${encodeURIComponent(item.session_id)}`, { credentials: "include" });
+    if (!response.ok) {
+      setSocketMessage("这条训练记录暂时无法打开，请刷新后重试。");
+      return;
+    }
+    const data = (await response.json()) as InterviewStateResponse;
+    const moduleIndex = modules.findIndex((module) => module.type === data.interview_type);
+    if (moduleIndex >= 0) {
+      setSelectedModuleIndex(moduleIndex);
+    }
+    setSessionId(data.session_id);
+    setInterviewState(data);
+    setActiveSession(null);
+    setSocketMessage(data.status === "completed" ? "已打开历史复盘报告。" : "已恢复这场未完成训练。");
   }
 
   function startFresh() {
@@ -271,7 +352,13 @@ export function InterviewRoom() {
           <AppIcon icon="solar:soundwave-circle-bold-duotone" size={24} />
           面霸练习生
         </a>
-        <span className="session-pill">{socketState} · {progressText}</span>
+        <div className="workspace-header-actions">
+          <span className="session-pill">{socketState} · {progressText}</span>
+          <span className="credit-pill">
+            <AppIcon icon="lucide:coins" size={16} />
+            {currentUser ? `${currentUser.credit_balance} 次` : "未登录"}
+          </span>
+        </div>
       </header>
 
       <section className="interview-layout">
@@ -342,6 +429,35 @@ export function InterviewRoom() {
               </button>
             </div>
           )}
+
+          <section className="history-card">
+            <div className="history-card-heading">
+              <span>
+                <AppIcon icon="lucide:history" size={18} />
+                最近训练
+              </span>
+              <em>{historyItems.length} 条</em>
+            </div>
+            {historyItems.length === 0 ? (
+              <p>暂无训练记录。完成第一次模拟后，这里会显示中断恢复入口和历史复盘。</p>
+            ) : (
+              <div className="history-list">
+                {historyItems.slice(0, 5).map((item) => {
+                  const module = moduleByType(item.interview_type);
+                  return (
+                    <button type="button" key={item.session_id} onClick={() => void openHistoryItem(item)}>
+                      <AppIcon icon={module.icon} size={18} />
+                      <span>
+                        <strong>{module.title}</strong>
+                        <em>{formatHistoryDate(item.created_at)} · {statusLabel(item.status)}</em>
+                      </span>
+                      <b>{item.report_total_score ?? `${item.current_step_index + 1}/${item.total_steps}`}</b>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
 
           {interviewState?.report && (
             <section className="room-report">

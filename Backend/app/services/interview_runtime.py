@@ -38,6 +38,17 @@ class InterviewState:
     report: InterviewReportResponse | None = None
 
 
+@dataclass
+class InterviewHistoryRecord:
+    session_id: str
+    interview_type: InterviewType
+    status: str
+    current_step_index: int
+    total_steps: int
+    report_total_score: int | None
+    created_at: datetime
+
+
 class InterviewSessionNotFoundError(LookupError):
     """Raised when a session is not owned by the current user or does not exist."""
 
@@ -196,6 +207,26 @@ class InMemoryInterviewRuntimeStore:
         state = self.get_session(user_email, session_id)
         return None if state is None else state.report
 
+    def list_user_sessions(self, user_email: str, limit: int = 20) -> list[InterviewHistoryRecord]:
+        records = [
+            record
+            for record in self._sessions.values()
+            if record["user_email"] == user_email
+        ]
+        sorted_records = sorted(records, key=lambda item: item["created_at"], reverse=True)[:limit]
+        return [
+            InterviewHistoryRecord(
+                session_id=record["session_id"],
+                interview_type=record["interview_type"],
+                status=record["status"],
+                current_step_index=record["current_step_index"],
+                total_steps=len(record["steps"]),
+                report_total_score=record["report"].total_score if record["report"] is not None else None,
+                created_at=record["created_at"],
+            )
+            for record in sorted_records
+        ]
+
     def _turn_dicts(self, record: dict[str, Any]) -> list[dict[str, str]]:
         turns: list[dict[str, str]] = []
         for index, step in enumerate(record["steps"]):
@@ -327,6 +358,28 @@ class DatabaseInterviewRuntimeStore:
             return None
         return InterviewReportResponse.model_validate(report.report_json)
 
+    def list_user_sessions(self, user_email: str, limit: int = 20) -> list[InterviewHistoryRecord]:
+        sessions = list(
+            self._session.execute(
+                select(InterviewSession)
+                .where(InterviewSession.user_email == user_email)
+                .order_by(InterviewSession.created_at.desc())
+                .limit(limit)
+            ).scalars()
+        )
+        return [
+            InterviewHistoryRecord(
+                session_id=session_model.id,
+                interview_type=InterviewType(session_model.interview_type),
+                status=session_model.status,
+                current_step_index=session_model.current_step_index,
+                total_steps=session_model.total_steps,
+                report_total_score=self._latest_report_score(session_model.id),
+                created_at=session_model.created_at,
+            )
+            for session_model in sessions
+        ]
+
     def _find_session(self, user_email: str, session_id: str) -> InterviewSession | None:
         return self._session.execute(
             select(InterviewSession).where(InterviewSession.id == session_id, InterviewSession.user_email == user_email)
@@ -338,6 +391,15 @@ class DatabaseInterviewRuntimeStore:
                 select(InterviewTurn).where(InterviewTurn.session_id == session_id).order_by(InterviewTurn.turn_index)
             ).scalars()
         )
+
+    def _latest_report_score(self, session_id: str) -> int | None:
+        report = self._session.execute(
+            select(InterviewReport.total_score)
+            .where(InterviewReport.session_id == session_id)
+            .order_by(InterviewReport.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        return report
 
     def _turn_dicts(self, session_id: str) -> list[dict[str, str]]:
         return [

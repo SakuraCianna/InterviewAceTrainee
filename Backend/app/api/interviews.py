@@ -10,6 +10,7 @@ from app.db.session import get_optional_db_session
 from app.schemas.interviews import (
     InterviewAnswerRequest,
     InterviewAnswerResponse,
+    InterviewHistoryItem,
     InterviewReportResponse,
     InterviewStartRequest,
     InterviewStartResponse,
@@ -150,6 +151,25 @@ def read_active_interview(
     if state is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="active_interview_not_found")
     return build_answer_response(state)
+
+
+@router.get("/history", response_model=list[InterviewHistoryItem])
+def read_interview_history(
+    claims: TokenClaims = Depends(get_current_user_claims),
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
+) -> list[InterviewHistoryItem]:
+    return [
+        InterviewHistoryItem(
+            session_id=record.session_id,
+            interview_type=record.interview_type,
+            status=record.status,
+            current_step_index=record.current_step_index,
+            total_steps=record.total_steps,
+            report_total_score=record.report_total_score,
+            created_at=record.created_at,
+        )
+        for record in interview_store.list_user_sessions(claims["sub"])
+    ]
 
 
 @router.get("/{session_id}", response_model=InterviewAnswerResponse)

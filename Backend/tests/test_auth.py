@@ -110,12 +110,32 @@ def test_me_endpoint_returns_current_token_claims():
         json={"email": email, "password": "StrongPass123", "code": code},
     )
     token = response.json()["access_token"]
+    admin_email = unique_email("me-credit-admin")
+    allow_admin_email(admin_email)
+    admin_register_code = request_dev_code(client, admin_email)
+    client.post(
+        "/api/auth/password/register",
+        json={"email": admin_email, "password": "StrongPass123", "code": admin_register_code},
+    )
+    admin_code = request_dev_code(client, admin_email)
+    admin_response = client.post(
+        "/api/auth/admin/login",
+        json={"email": admin_email, "password": "StrongPass123", "code": admin_code},
+    )
+    admin_access_token = admin_response.json()["access_token"]
+    grant_response = client.post(
+        f"/api/admin/users/{email}/credits",
+        headers={"Authorization": f"Bearer {admin_access_token}"},
+        json={"change_amount": 2, "reason": "manual_grant"},
+    )
+    assert grant_response.status_code == 200
 
     me_response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
 
     assert me_response.status_code == 200
     assert me_response.json()["email"] == email
     assert me_response.json()["role"] == "user"
+    assert me_response.json()["credit_balance"] == 2
 
 
 def test_password_register_sets_http_only_session_cookie():

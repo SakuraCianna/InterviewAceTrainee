@@ -229,3 +229,45 @@ def test_active_session_endpoint_returns_latest_interrupted_session():
     assert active_response.status_code == 200
     assert active_response.json()["session_id"] == "session-active-civil"
     assert active_response.json()["current_question"]["text"] == start_response.json()["current_question"]["text"]
+
+
+def test_user_can_read_own_interview_history_without_leaking_other_users_sessions():
+    client = TestClient(app)
+    user_email = unique_email("history-user")
+    other_email = unique_email("history-other")
+    grant_credits(client, user_email, 1)
+    token = create_access_token(user_email, "user")
+    other_token = create_access_token(other_email, "user")
+    session_id = f"session-history-{uuid4().hex}"
+
+    start_response = client.post(
+        "/api/interviews",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"session_id": session_id, "interview_type": "postgraduate"},
+    )
+    assert start_response.status_code == 201
+
+    payload = start_response.json()
+    while payload["status"] != "completed":
+        answer_response = client.post(
+            f"/api/interviews/{session_id}/answers",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"answer_text": "I can explain my background, motivation, examples and next improvement steps clearly."},
+        )
+        assert answer_response.status_code == 200
+        payload = answer_response.json()
+
+    history_response = client.get("/api/interviews/history", headers={"Authorization": f"Bearer {token}"})
+    other_history_response = client.get("/api/interviews/history", headers={"Authorization": f"Bearer {other_token}"})
+
+    assert history_response.status_code == 200
+    history_item = next(item for item in history_response.json() if item["session_id"] == session_id)
+    assert history_item["interview_type"] == "postgraduate"
+    assert history_item["status"] == "completed"
+    assert history_item["current_step_index"] == payload["current_step_index"]
+    assert history_item["total_steps"] == payload["total_steps"]
+    assert history_item["report_total_score"] == payload["report"]["total_score"]
+    assert history_item["created_at"]
+
+    assert other_history_response.status_code == 200
+    assert all(item["session_id"] != session_id for item in other_history_response.json())

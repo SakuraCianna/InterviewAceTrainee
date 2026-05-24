@@ -717,6 +717,27 @@ button {
   font-weight: 800;
 }
 
+.workspace-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.credit-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgba(19, 22, 28, 0.08);
+  border-radius: 999px;
+  color: #4e6f08;
+  background: rgba(191, 220, 99, 0.24);
+  font-weight: 900;
+}
+
 .session-pill--admin {
   color: #4e6f08;
   background: rgba(191, 220, 99, 0.28);
@@ -876,6 +897,105 @@ button {
   background: var(--cream);
   border: 1px solid var(--line);
   box-shadow: none;
+}
+
+.history-card {
+  display: grid;
+  gap: 12px;
+  margin-top: 22px;
+  padding: 16px;
+  border: 1px solid rgba(19, 22, 28, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.history-card-heading,
+.history-card-heading span,
+.history-list button {
+  display: flex;
+  align-items: center;
+}
+
+.history-card-heading {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.history-card-heading span {
+  gap: 8px;
+  color: var(--ink);
+  font-weight: 950;
+}
+
+.history-card-heading em {
+  color: var(--steel);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.history-card > p {
+  margin: 0;
+  color: var(--steel);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.history-list button {
+  width: 100%;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid rgba(19, 22, 28, 0.08);
+  border-radius: 14px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  text-align: left;
+}
+
+.history-list button:hover {
+  border-color: rgba(47, 109, 246, 0.22);
+  background: rgba(47, 109, 246, 0.06);
+}
+
+.history-list button > span {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.history-list strong {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-list em {
+  overflow: hidden;
+  color: var(--steel);
+  font-size: 12px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-list b {
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: var(--blue);
+  background: rgba(47, 109, 246, 0.1);
+  font-size: 14px;
 }
 
 .room-report {
@@ -1207,6 +1327,15 @@ button {
 
   .nav-links {
     display: none;
+  }
+
+  .workspace-header {
+    align-items: flex-start;
+    border-radius: 24px;
+  }
+
+  .workspace-header-actions {
+    justify-content: flex-start;
   }
 
   .hero-title {

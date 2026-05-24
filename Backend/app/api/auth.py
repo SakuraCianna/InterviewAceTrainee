@@ -13,6 +13,7 @@ from app.schemas.auth import (
     PasswordLoginResponse,
     PasswordRegisterRequest,
 )
+from app.services.credit_balances import CreditBalanceStore, get_credit_balance_store
 from app.services.email_codes import (
     EmailCodeRateLimitError,
     EmailCodeStore,
@@ -178,5 +179,12 @@ def login_admin(
 
 
 @router.get("/me", response_model=CurrentUserResponse)
-def read_current_user(claims: TokenClaims = Depends(get_current_user_claims)) -> CurrentUserResponse:
-    return CurrentUserResponse(email=claims["sub"], role=claims["role"])
+def read_current_user(
+    claims: TokenClaims = Depends(get_current_user_claims),
+    credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
+) -> CurrentUserResponse:
+    return CurrentUserResponse(
+        email=claims["sub"],
+        role=claims["role"],
+        credit_balance=credit_store.get_balance(claims["sub"]),
+    )

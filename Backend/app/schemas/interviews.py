@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -70,6 +71,16 @@ class InterviewAnswerResponse(BaseModel):
     total_steps: int
     current_question: InterviewQuestion | None = None
     report: InterviewReportResponse | None = None
+
+
+class InterviewHistoryItem(BaseModel):
+    session_id: str
+    interview_type: InterviewType
+    status: str
+    current_step_index: int
+    total_steps: int
+    report_total_score: int | None = None
+    created_at: datetime
 
 
 class InterviewProduct(BaseModel):

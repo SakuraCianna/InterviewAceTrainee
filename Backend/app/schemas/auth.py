@@ -20,6 +20,7 @@ class PasswordLoginResponse(BaseModel):
 class CurrentUserResponse(BaseModel):
     email: EmailStr
     role: str
+    credit_balance: int
 
 
 class EmailCodeRequest(BaseModel):
