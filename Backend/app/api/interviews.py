@@ -27,6 +27,7 @@ from app.services.interview_runtime import (
     InterviewState,
     memory_interview_store,
 )
+from app.services.interview_materials import InterviewMaterialStore, get_interview_material_store
 from app.services.ai_router import AIServiceRouter
 from app.services.interview_ai import generate_next_interview_question
 from app.services.interview_products import get_interview_product
@@ -35,7 +36,7 @@ from app.services.provider_configs import DatabaseProviderConfigStore, InMemoryP
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
 
-INTERVIEW_REQUIRED_TABLES = ("interview_sessions", "interview_turns", "interview_reports")
+INTERVIEW_REQUIRED_TABLES = ("interview_sessions", "interview_turns", "interview_reports", "interview_materials")
 
 
 def get_optional_interview_db_session() -> Generator[Session | None, None, None]:
@@ -89,6 +90,7 @@ def start_interview(
     credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
     credit_ledger_store: CreditLedgerStore = Depends(get_credit_ledger_store),
     interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
+    material_store: InterviewMaterialStore = Depends(get_interview_material_store),
 ) -> InterviewStartResponse:
     interview_type = payload.interview_type or InterviewType.JOB
     product = get_interview_product(interview_type)
@@ -103,6 +105,12 @@ def start_interview(
         )
     if existing_state is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="interview_session_already_completed")
+
+    material_context = material_store.get_owned(claims["sub"], payload.material_id, interview_type)
+    if interview_type in {InterviewType.JOB, InterviewType.POSTGRADUATE} and material_context is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="interview_material_required")
+    if payload.material_id and material_context is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="interview_material_not_found")
 
     try:
         if is_admin:
@@ -125,7 +133,7 @@ def start_interview(
     except InsufficientCreditsError as exc:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="insufficient_credits") from exc
 
-    state = interview_store.create_session(claims["sub"], payload.session_id, interview_type)
+    state = interview_store.create_session(claims["sub"], payload.session_id, interview_type, material_context)
     credit_ledger_store.record(
         user_email=claims["sub"],
         change_amount=entry.change_amount,
@@ -256,4 +264,4 @@ def build_next_question_override(
 def build_interview_steps_for_state(current_state: InterviewState):
     from app.services.interview_runtime import build_interview_steps
 
-    return build_interview_steps(current_state.interview_type)
+    return build_interview_steps(current_state.interview_type, current_state.material_context)

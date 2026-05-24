@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import admin, auth, health, interview_products, interviews, providers, websocket
+from app.api import admin, auth, health, interview_materials, interview_products, interviews, providers, websocket
 from app.core.config import get_settings
 
 
@@ -20,6 +20,7 @@ def create_app() -> FastAPI:
     application.include_router(health.router, prefix=settings.api_prefix)
     application.include_router(auth.router, prefix=settings.api_prefix)
     application.include_router(interview_products.router, prefix=settings.api_prefix)
+    application.include_router(interview_materials.router, prefix=settings.api_prefix)
     application.include_router(interviews.router, prefix=settings.api_prefix)
     application.include_router(providers.router, prefix=settings.api_prefix)
     application.include_router(admin.router, prefix=settings.api_prefix)

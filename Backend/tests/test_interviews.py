@@ -22,6 +22,32 @@ def grant_credits(client: TestClient, user_email: str, amount: int) -> int:
     return response.json()["balance_after"]
 
 
+def create_material(client: TestClient, token: str, interview_type: str = "job") -> str:
+    if interview_type == "job":
+        response = client.post(
+            "/api/interview-materials",
+            headers={"Authorization": f"Bearer {token}"},
+            data={
+                "interview_type": "job",
+                "job_title": "后端开发实习生",
+                "job_requirements": "需要熟悉 FastAPI、PostgreSQL、Redis 和接口稳定性。",
+            },
+            files={"resume_file": ("resume.txt", "我负责 FastAPI 项目、Redis 缓存和 PostgreSQL 报告。", "text/plain")},
+        )
+    else:
+        response = client.post(
+            "/api/interview-materials",
+            headers={"Authorization": f"Bearer {token}"},
+            data={
+                "interview_type": "postgraduate",
+                "major": "计算机科学与技术",
+                "research_direction": "智能教育",
+            },
+        )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
 def test_interview_start_requires_login_token():
     client = TestClient(app)
 
@@ -35,6 +61,7 @@ def test_job_interview_consumes_three_server_side_credits_and_ignores_client_spo
     user_email = unique_email("job-user")
     grant_credits(client, user_email, 5)
     token = create_access_token(user_email, "user")
+    material_id = create_material(client, token, "job")
 
     response = client.post(
         "/api/interviews",
@@ -44,6 +71,7 @@ def test_job_interview_consumes_three_server_side_credits_and_ignores_client_spo
             "current_credit_balance": 999,
             "is_admin": True,
             "interview_type": "job",
+            "material_id": material_id,
         },
     )
 
@@ -63,16 +91,17 @@ def test_starting_existing_incomplete_session_resumes_without_charging_again():
     user_email = unique_email("resume-user")
     grant_credits(client, user_email, 3)
     token = create_access_token(user_email, "user")
+    material_id = create_material(client, token, "job")
 
     first_response = client.post(
         "/api/interviews",
         headers={"Authorization": f"Bearer {token}"},
-        json={"session_id": "session-resume-no-double-charge", "interview_type": "job"},
+        json={"session_id": "session-resume-no-double-charge", "interview_type": "job", "material_id": material_id},
     )
     second_response = client.post(
         "/api/interviews",
         headers={"Authorization": f"Bearer {token}"},
-        json={"session_id": "session-resume-no-double-charge", "interview_type": "job"},
+        json={"session_id": "session-resume-no-double-charge", "interview_type": "job", "material_id": material_id},
     )
 
     assert first_response.status_code == 201
@@ -107,6 +136,7 @@ def test_interview_start_rejects_when_balance_is_below_product_cost():
     user_email = unique_email("low-balance-user")
     grant_credits(client, user_email, 2)
     token = create_access_token(user_email, "user")
+    material_id = create_material(client, token, "job")
 
     response = client.post(
         "/api/interviews",
@@ -114,6 +144,7 @@ def test_interview_start_rejects_when_balance_is_below_product_cost():
         json={
             "session_id": "session-job-low-balance",
             "interview_type": "job",
+            "material_id": material_id,
         },
     )
 
@@ -124,6 +155,7 @@ def test_interview_start_rejects_when_balance_is_below_product_cost():
 def test_admin_interview_keeps_unlimited_usage():
     client = TestClient(app)
     admin_token = create_access_token(unique_email("interview-admin"), "admin")
+    material_id = create_material(client, admin_token, "job")
 
     response = client.post(
         "/api/interviews",
@@ -131,6 +163,7 @@ def test_admin_interview_keeps_unlimited_usage():
         json={
             "session_id": "session-admin-1",
             "interview_type": "job",
+            "material_id": material_id,
         },
     )
 
@@ -146,11 +179,12 @@ def test_answering_all_questions_completes_session_and_returns_report():
     grant_credits(client, user_email, 1)
     token = create_access_token(user_email, "user")
     session_id = "session-report-postgraduate"
+    material_id = create_material(client, token, "postgraduate")
 
     start_response = client.post(
         "/api/interviews",
         headers={"Authorization": f"Bearer {token}"},
-        json={"session_id": session_id, "interview_type": "postgraduate"},
+        json={"session_id": session_id, "interview_type": "postgraduate", "material_id": material_id},
     )
     assert start_response.status_code == 201
 
@@ -184,11 +218,12 @@ def test_completed_session_id_cannot_be_reused_and_double_charged():
     grant_credits(client, user_email, 3)
     token = create_access_token(user_email, "user")
     session_id = "session-completed-reuse-postgraduate"
+    material_id = create_material(client, token, "postgraduate")
 
     start_response = client.post(
         "/api/interviews",
         headers={"Authorization": f"Bearer {token}"},
-        json={"session_id": session_id, "interview_type": "postgraduate"},
+        json={"session_id": session_id, "interview_type": "postgraduate", "material_id": material_id},
     )
     assert start_response.status_code == 201
 
@@ -205,7 +240,7 @@ def test_completed_session_id_cannot_be_reused_and_double_charged():
     reuse_response = client.post(
         "/api/interviews",
         headers={"Authorization": f"Bearer {token}"},
-        json={"session_id": session_id, "interview_type": "postgraduate"},
+        json={"session_id": session_id, "interview_type": "postgraduate", "material_id": material_id},
     )
 
     assert reuse_response.status_code == 409
@@ -239,11 +274,12 @@ def test_user_can_read_own_interview_history_without_leaking_other_users_session
     token = create_access_token(user_email, "user")
     other_token = create_access_token(other_email, "user")
     session_id = f"session-history-{uuid4().hex}"
+    material_id = create_material(client, token, "postgraduate")
 
     start_response = client.post(
         "/api/interviews",
         headers={"Authorization": f"Bearer {token}"},
-        json={"session_id": session_id, "interview_type": "postgraduate"},
+        json={"session_id": session_id, "interview_type": "postgraduate", "material_id": material_id},
     )
     assert start_response.status_code == 201
 

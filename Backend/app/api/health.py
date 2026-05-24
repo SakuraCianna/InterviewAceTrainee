@@ -12,6 +12,7 @@ REQUIRED_TABLES = (
     "users",
     "credit_ledger",
     "interview_sessions",
+    "interview_materials",
     "interview_turns",
     "interview_reports",
     "ai_provider_configs",

@@ -38,7 +38,8 @@ a {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -853,6 +854,135 @@ button {
   background: var(--blue);
   font-weight: 900;
   cursor: pointer;
+}
+
+.material-card {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid rgba(19, 22, 28, 0.1);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(255, 250, 240, 0.68)),
+    rgba(255, 255, 255, 0.62);
+}
+
+.material-card-heading,
+.material-card-heading span,
+.material-actions {
+  display: flex;
+  align-items: center;
+}
+
+.material-card-heading {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.material-card-heading span {
+  gap: 8px;
+  color: var(--ink);
+  font-weight: 950;
+}
+
+.material-card-heading svg {
+  color: var(--blue);
+}
+
+.material-card-heading em {
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #4e6f08;
+  background: rgba(191, 220, 99, 0.24);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.material-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.material-form label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: var(--steel);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.material-form input,
+.material-form textarea {
+  width: 100%;
+  border: 1px solid rgba(19, 22, 28, 0.1);
+  border-radius: 12px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.78);
+  outline: 0;
+}
+
+.material-form input {
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.material-form textarea {
+  min-height: 96px;
+  padding: 11px 12px;
+  resize: vertical;
+}
+
+.material-form input[type="file"] {
+  padding: 9px 12px;
+}
+
+.material-form-wide {
+  grid-column: 1 / -1;
+}
+
+.material-actions {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.material-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--blue);
+  font-weight: 950;
+}
+
+.material-actions button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.material-actions span {
+  color: var(--steel);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.material-preview {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid rgba(47, 109, 246, 0.12);
+  border-radius: 12px;
+  color: var(--steel);
+  background: rgba(47, 109, 246, 0.06);
+  font-size: 13px;
+  line-height: 1.65;
 }
 
 .voice-controls {
@@ -3656,7 +3786,8 @@ button {
   .admin-status-row,
   .admin-workbench,
   .provider-row,
-  .admin-form-grid {
+  .admin-form-grid,
+  .material-form {
     grid-template-columns: 1fr;
   }
 

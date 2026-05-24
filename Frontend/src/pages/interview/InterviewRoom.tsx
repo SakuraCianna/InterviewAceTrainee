@@ -50,6 +50,18 @@ type InterviewHistoryItem = {
   created_at: string;
 };
 
+type InterviewMaterialResponse = {
+  id: string;
+  interview_type: InterviewType;
+  job_title?: string | null;
+  major?: string | null;
+  research_direction?: string | null;
+  resume_text_preview?: string | null;
+  extracted_text_chars: number;
+  profile_summary: string;
+  keywords: string[];
+};
+
 type SpeechRecognitionLike = {
   lang: string;
   continuous: boolean;
@@ -110,6 +122,13 @@ export function InterviewRoom() {
   const [historyItems, setHistoryItems] = useState<InterviewHistoryItem[]>([]);
   const [interviewState, setInterviewState] = useState<InterviewStateResponse | null>(null);
   const [activeSession, setActiveSession] = useState<InterviewStateResponse | null>(null);
+  const [materialsByType, setMaterialsByType] = useState<Partial<Record<InterviewType, InterviewMaterialResponse>>>({});
+  const [jobResumeFile, setJobResumeFile] = useState<File | null>(null);
+  const [jobTitle, setJobTitle] = useState("");
+  const [jobRequirements, setJobRequirements] = useState("");
+  const [postgraduateMajor, setPostgraduateMajor] = useState("");
+  const [postgraduateDirection, setPostgraduateDirection] = useState("");
+  const [isPreparingMaterial, setIsPreparingMaterial] = useState(false);
   const [isStartingSession, setIsStartingSession] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [socketState, setSocketState] = useState("连接中");
@@ -119,6 +138,8 @@ export function InterviewRoom() {
   const answerDraftRef = useRef("");
   const state = states[stateIndex];
   const selectedModule = modules[selectedModuleIndex];
+  const currentMaterial = materialsByType[selectedModule.type] ?? null;
+  const selectedModuleNeedsMaterial = selectedModule.type === "job" || selectedModule.type === "postgraduate";
   const activeQuestion = interviewState?.current_question ?? activeSession?.current_question ?? null;
   const progressText = interviewState
     ? `${Math.min(interviewState.current_step_index + 1, interviewState.total_steps)} / ${interviewState.total_steps}`
@@ -200,6 +221,11 @@ export function InterviewRoom() {
 
   async function startSession(resume = false) {
     const targetSessionId = resume && activeSession ? activeSession.session_id : createSessionId();
+    const material = resume && activeSession ? materialsByType[activeSession.interview_type] : currentMaterial;
+    if (!resume && selectedModuleNeedsMaterial && !material) {
+      setSocketMessage(selectedModule.type === "job" ? "请先上传简历并填写目标岗位/JD。" : "请先填写报考专业，再开始复试模拟。");
+      return;
+    }
     setIsStartingSession(true);
     const response = await fetch("/api/interviews", {
       method: "POST",
@@ -208,6 +234,7 @@ export function InterviewRoom() {
       body: JSON.stringify({
         session_id: targetSessionId,
         interview_type: resume && activeSession ? activeSession.interview_type : selectedModule.type,
+        material_id: material?.id,
       }),
     });
     const data = (await response.json()) as InterviewStateResponse;
@@ -228,6 +255,58 @@ export function InterviewRoom() {
     setSocketMessage(data.status === "completed" ? "这场训练已完成，可查看复盘报告。" : `面试已就绪，剩余次数 ${data.balance_after ?? "已更新"}。`);
     await loadHistory();
     speakQuestion(data.current_question?.text, data.interview_type);
+  }
+
+  async function prepareMaterial() {
+    setIsPreparingMaterial(true);
+    const formData = new FormData();
+    formData.append("interview_type", selectedModule.type);
+    if (selectedModule.type === "job") {
+      if (!jobResumeFile || !jobTitle.trim() || !jobRequirements.trim()) {
+        setSocketMessage("工作面试需要简历文件、目标岗位和岗位要求。");
+        setIsPreparingMaterial(false);
+        return;
+      }
+      formData.append("resume_file", jobResumeFile);
+      formData.append("job_title", jobTitle.trim());
+      formData.append("job_requirements", jobRequirements.trim());
+    }
+    if (selectedModule.type === "postgraduate") {
+      if (!postgraduateMajor.trim()) {
+        setSocketMessage("研究生复试需要先填写报考专业。");
+        setIsPreparingMaterial(false);
+        return;
+      }
+      formData.append("major", postgraduateMajor.trim());
+      if (postgraduateDirection.trim()) {
+        formData.append("research_direction", postgraduateDirection.trim());
+      }
+    }
+
+    const response = await fetch("/api/interview-materials", {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+    const data = (await response.json()) as InterviewMaterialResponse & { detail?: string };
+    setIsPreparingMaterial(false);
+
+    if (!response.ok) {
+      const messageMap: Record<string, string> = {
+        job_material_required_fields: "工作面试需要简历、目标岗位和岗位要求。",
+        postgraduate_major_required: "研究生复试需要报考专业。",
+        resume_file_too_large: "简历文件过大，请控制在 5MB 以内。",
+        image_resume_ocr_not_configured: "当前本地版本先支持 txt、pdf、docx 简历解析，图片 OCR 需要单独启用。",
+        image_resume_ocr_dependency_missing: "图片 OCR 依赖尚未安装，请先使用 txt、pdf、docx 简历。",
+        unsupported_resume_format: "当前支持 txt、pdf、docx 简历，请换一个文件格式。",
+        resume_text_empty: "简历没有提取到文字，请换成文字版 PDF、docx 或 txt。",
+      };
+      setSocketMessage(messageMap[String(data.detail)] ?? "资料分析失败，请检查文件和填写内容。");
+      return;
+    }
+
+    setMaterialsByType((previous) => ({ ...previous, [data.interview_type]: data }));
+    setSocketMessage(data.interview_type === "job" ? "简历和岗位要求已分析，可以开始工作面试。" : "复试专业信息已保存，可以开始模拟。");
   }
 
   function speakQuestion(questionText?: string, interviewType?: InterviewType) {
@@ -418,10 +497,79 @@ export function InterviewRoom() {
             </div>
           )}
 
+          {!interviewState && selectedModuleNeedsMaterial && (
+            <section className="material-card">
+              <div className="material-card-heading">
+                <span>
+                  <AppIcon icon={selectedModule.type === "job" ? "lucide:file-scan" : "lucide:notebook-tabs"} size={18} />
+                  {selectedModule.type === "job" ? "面试资料预分析" : "复试背景设置"}
+                </span>
+                {currentMaterial ? <em>已就绪</em> : <em>开始前必填</em>}
+              </div>
+              {selectedModule.type === "job" ? (
+                <div className="material-form">
+                  <label>
+                    <span>简历文件</span>
+                    <input
+                      type="file"
+                      accept=".txt,.md,.pdf,.docx,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      onChange={(event) => setJobResumeFile(event.currentTarget.files?.[0] ?? null)}
+                    />
+                  </label>
+                  <label>
+                    <span>应聘岗位</span>
+                    <input value={jobTitle} onChange={(event) => setJobTitle(event.currentTarget.value)} placeholder="例如：AI 后端工程师" />
+                  </label>
+                  <label className="material-form-wide">
+                    <span>岗位要求 / JD</span>
+                    <textarea
+                      value={jobRequirements}
+                      onChange={(event) => setJobRequirements(event.currentTarget.value)}
+                      placeholder="粘贴招聘 JD、岗位职责、加分项和技术要求"
+                      rows={4}
+                    />
+                  </label>
+                </div>
+              ) : (
+                <div className="material-form">
+                  <label>
+                    <span>报考专业</span>
+                    <input
+                      value={postgraduateMajor}
+                      onChange={(event) => setPostgraduateMajor(event.currentTarget.value)}
+                      placeholder="例如：计算机科学与技术"
+                    />
+                  </label>
+                  <label>
+                    <span>研究方向（选填）</span>
+                    <input
+                      value={postgraduateDirection}
+                      onChange={(event) => setPostgraduateDirection(event.currentTarget.value)}
+                      placeholder="例如：自然语言处理与智能教育"
+                    />
+                  </label>
+                </div>
+              )}
+              <div className="material-actions">
+                <button type="button" disabled={isPreparingMaterial} onClick={() => void prepareMaterial()}>
+                  <AppIcon icon="lucide:sparkles" size={17} />
+                  {isPreparingMaterial ? "分析中" : currentMaterial ? "重新分析" : "分析资料"}
+                </button>
+                {currentMaterial && (
+                  <span>
+                    {currentMaterial.extracted_text_chars > 0 ? `${currentMaterial.extracted_text_chars} 字文本` : "背景已保存"}
+                    {currentMaterial.keywords.length > 0 ? ` · ${currentMaterial.keywords.slice(0, 3).join(" / ")}` : ""}
+                  </span>
+                )}
+              </div>
+              {currentMaterial && <p className="material-preview">{currentMaterial.profile_summary}</p>}
+            </section>
+          )}
+
           {interviewState?.status !== "completed" && (
             <div className="voice-controls">
               {!interviewState ? (
-                <button type="button" disabled={isStartingSession} onClick={() => void startSession(false)}>
+                <button type="button" disabled={isStartingSession || (selectedModuleNeedsMaterial && !currentMaterial)} onClick={() => void startSession(false)}>
                   <AppIcon icon="lucide:play" size={18} />
                   {isStartingSession ? "启动中" : "开始训练"}
                 </button>

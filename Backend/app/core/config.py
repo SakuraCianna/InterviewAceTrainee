@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     aliyun_directmail_access_key_secret: str = ""
     tencent_ses_secret_id: str = ""
     tencent_ses_secret_key: str = ""
+    interview_material_max_upload_bytes: int = 5 * 1024 * 1024
+    resume_ocr_provider: str = "none"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

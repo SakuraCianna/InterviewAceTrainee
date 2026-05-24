@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.entities import InterviewReport, InterviewSession, InterviewTurn
+from app.models.entities import InterviewMaterial, InterviewReport, InterviewSession, InterviewTurn
 from app.schemas.interviews import (
     InterviewQuestion,
     InterviewReportDimension,
@@ -14,6 +14,7 @@ from app.schemas.interviews import (
     InterviewType,
 )
 from app.services.interview_products import get_interview_product
+from app.services.interview_material_context import InterviewMaterialContext
 
 
 def utc_now() -> datetime:
@@ -36,6 +37,7 @@ class InterviewState:
     total_steps: int
     current_question: InterviewQuestion | None
     report: InterviewReportResponse | None = None
+    material_context: InterviewMaterialContext | None = None
 
 
 @dataclass
@@ -53,7 +55,11 @@ class InterviewSessionNotFoundError(LookupError):
     """Raised when a session is not owned by the current user or does not exist."""
 
 
-def build_interview_steps(interview_type: InterviewType) -> list[InterviewStep]:
+def build_interview_steps(
+    interview_type: InterviewType,
+    material_context: InterviewMaterialContext | None = None,
+) -> list[InterviewStep]:
+    material_keywords = "、".join(material_context.keywords[:4]) if material_context else ""
     plans: dict[InterviewType, list[InterviewStep]] = {
         InterviewType.JOB: [
             InterviewStep("专业一面", "请用 90 秒按 STAR 结构介绍一个最能体现岗位匹配度的项目，并说明你的职责边界。"),
@@ -89,7 +95,36 @@ def build_interview_steps(interview_type: InterviewType) -> list[InterviewStep]:
             InterviewStep("Part 3 Follow-up", "How can schools and workplaces help people become better lifelong learners?"),
         ],
     }
-    return plans[interview_type]
+    steps = plans[interview_type]
+    if interview_type == InterviewType.JOB and material_context is not None:
+        job_title = material_context.job_title or "目标岗位"
+        jd_focus = material_keywords or _compact_prompt_hint(material_context.job_requirements)
+        steps = [
+            InterviewStep(
+                "专业一面",
+                f"你正在面试「{job_title}」。请用 90 秒按 STAR 结构介绍一个最能匹配该岗位的项目，并优先覆盖这些要求：{jd_focus}。",
+            ),
+            InterviewStep(
+                "专业一面",
+                f"结合你的简历和「{job_title}」岗位 JD，请展开一个关键技术决策，说明你比较过哪些方案、为什么这样取舍。",
+            ),
+            *steps[2:],
+        ]
+    if interview_type == InterviewType.POSTGRADUATE and material_context is not None:
+        major = material_context.major or "报考专业"
+        direction = material_context.research_direction or "你的研究兴趣"
+        steps = [
+            InterviewStep(
+                "复试开场",
+                f"请做一段 90 秒以内的中文自我介绍，围绕「{major}」和「{direction}」突出专业背景、复试动机和你能带来的研究基础。",
+            ),
+            InterviewStep(
+                "专业基础",
+                f"请说明「{major}」里你本科阶段最熟悉的一门专业课，并举例说明它如何支撑「{direction}」。",
+            ),
+            *steps[2:],
+        ]
+    return steps
 
 
 def build_report(session_id: str, interview_type: InterviewType, turns: list[dict[str, str]]) -> InterviewReportResponse:
@@ -260,6 +295,13 @@ def _contains_any(text: str, keywords: list[str]) -> bool:
     return any(keyword.lower() in lowered for keyword in keywords)
 
 
+def _compact_prompt_hint(text: str | None, max_chars: int = 80) -> str:
+    if not text:
+        return "岗位匹配度、项目证据和问题定位"
+    compacted = " ".join(text.split())
+    return compacted[:max_chars]
+
+
 def _dimension_comment(interview_type: InterviewType, name: str, score: int) -> str:
     band = "稳定" if score >= 85 else "可提升" if score >= 75 else "需强化"
     scenario_hint = {
@@ -295,12 +337,19 @@ class InMemoryInterviewRuntimeStore:
             return None
         return self._to_state(sorted(candidates, key=lambda item: item["created_at"], reverse=True)[0])
 
-    def create_session(self, user_email: str, session_id: str, interview_type: InterviewType) -> InterviewState:
-        steps = build_interview_steps(interview_type)
+    def create_session(
+        self,
+        user_email: str,
+        session_id: str,
+        interview_type: InterviewType,
+        material_context: InterviewMaterialContext | None = None,
+    ) -> InterviewState:
+        steps = build_interview_steps(interview_type, material_context)
         record = {
             "session_id": session_id,
             "user_email": user_email,
             "interview_type": interview_type,
+            "material_context": material_context,
             "status": "in_progress",
             "current_step_index": 0,
             "steps": steps,
@@ -388,6 +437,7 @@ class InMemoryInterviewRuntimeStore:
             total_steps=len(record["steps"]),
             current_question=current_question,
             report=record["report"],
+            material_context=record.get("material_context"),
         )
 
 
@@ -412,12 +462,19 @@ class DatabaseInterviewRuntimeStore:
             return None
         return self._to_state(session_model)
 
-    def create_session(self, user_email: str, session_id: str, interview_type: InterviewType) -> InterviewState:
-        steps = build_interview_steps(interview_type)
+    def create_session(
+        self,
+        user_email: str,
+        session_id: str,
+        interview_type: InterviewType,
+        material_context: InterviewMaterialContext | None = None,
+    ) -> InterviewState:
+        steps = build_interview_steps(interview_type, material_context)
         session_model = InterviewSession(
             id=session_id,
             user_email=user_email,
             interview_type=str(interview_type),
+            material_id=material_context.id if material_context is not None else None,
             status="in_progress",
             current_step_index=0,
             total_steps=len(steps),
@@ -538,6 +595,30 @@ class DatabaseInterviewRuntimeStore:
         ).scalar_one_or_none()
         return report
 
+    def _material_context(self, material_id: str | None) -> InterviewMaterialContext | None:
+        if not material_id:
+            return None
+        material = self._session.execute(
+            select(InterviewMaterial).where(InterviewMaterial.id == material_id)
+        ).scalar_one_or_none()
+        if material is None:
+            return None
+        return InterviewMaterialContext(
+            id=material.id,
+            user_email=material.user_email,
+            interview_type=InterviewType(material.interview_type),
+            resume_filename=material.resume_filename,
+            resume_content_type=material.resume_content_type,
+            resume_text=material.resume_text,
+            job_title=material.job_title,
+            job_requirements=material.job_requirements,
+            major=material.major,
+            research_direction=material.research_direction,
+            profile_summary=material.profile_summary,
+            keywords=list(material.keywords_json or []),
+            created_at=material.created_at,
+        )
+
     def _turn_dicts(self, session_id: str) -> list[dict[str, str]]:
         return [
             {"round_name": turn.round_name, "question": turn.question_text, "answer": turn.answer_text or ""}
@@ -569,6 +650,7 @@ class DatabaseInterviewRuntimeStore:
             total_steps=session_model.total_steps,
             current_question=current_question,
             report=self.get_report(session_model.user_email, session_model.id) if session_model.status == "completed" else None,
+            material_context=self._material_context(session_model.material_id),
         )
 
 

@@ -14,6 +14,7 @@ class InterviewType(StrEnum):
 class InterviewStartRequest(BaseModel):
     session_id: str = Field(min_length=1)
     interview_type: InterviewType | None = None
+    material_id: str | None = None
 
 
 class InterviewQuestion(BaseModel):
@@ -92,3 +93,19 @@ class InterviewProduct(BaseModel):
     credit_cost: int
     pricing_unit: str
     report_focus: list[str]
+
+
+class InterviewMaterialResponse(BaseModel):
+    id: str
+    interview_type: InterviewType
+    job_title: str | None = None
+    job_requirements: str | None = None
+    major: str | None = None
+    research_direction: str | None = None
+    resume_filename: str | None = None
+    resume_content_type: str | None = None
+    resume_text_preview: str | None = None
+    extracted_text_chars: int = 0
+    profile_summary: str
+    keywords: list[str]
+    created_at: datetime

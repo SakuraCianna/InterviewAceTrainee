@@ -50,6 +50,7 @@ class InterviewSession(Base):
     id: Mapped[str] = mapped_column(String(120), primary_key=True)
     user_email: Mapped[str] = mapped_column(String(255), index=True)
     interview_type: Mapped[str] = mapped_column(String(32), default="mixed")
+    material_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), default="created")
     current_step_index: Mapped[int] = mapped_column(Integer, default=0)
     total_steps: Mapped[int] = mapped_column(Integer, default=0)
@@ -58,6 +59,24 @@ class InterviewSession(Base):
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class InterviewMaterial(Base):
+    __tablename__ = "interview_materials"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_pk)
+    user_email: Mapped[str] = mapped_column(String(255), index=True)
+    interview_type: Mapped[str] = mapped_column(String(32), index=True)
+    resume_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    resume_content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    resume_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_title: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    job_requirements: Mapped[str | None] = mapped_column(Text, nullable=True)
+    major: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    research_direction: Mapped[str | None] = mapped_column(String(240), nullable=True)
+    profile_summary: Mapped[str] = mapped_column(Text)
+    keywords_json: Mapped[list[str]] = mapped_column(json_type, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 

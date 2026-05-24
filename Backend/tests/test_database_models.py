@@ -10,6 +10,7 @@ def test_database_models_can_create_sqlite_schema_for_isolated_tests():
     Base.metadata.create_all(engine)
 
     assert "users" in Base.metadata.tables
+    assert "interview_materials" in Base.metadata.tables
     assert "interview_sessions" in Base.metadata.tables
     assert "interview_turns" in Base.metadata.tables
     assert "interview_reports" in Base.metadata.tables
