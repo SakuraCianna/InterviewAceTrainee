@@ -3,15 +3,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.models.entities import AIProviderConfigModel
-from app.schemas.providers import ProviderConfigCreateRequest, ProviderConfigUpdateRequest
+from app.schemas.providers import ProviderConfigUpdateRequest
 from app.services.ai_router import AIProviderConfig
 from app.services.secret_box import decrypt_secret, encrypt_secret, preview_secret
 
 PRIMARY_LLM_PROVIDER_ID = "deepseek-v4-flash"
-
-
-class ProviderConfigAlreadyExistsError(ValueError):
-    """Raised when an AI provider config id already exists."""
+PRIMARY_ASR_PROVIDER_ID = "tencent-asr-realtime"
+PRIMARY_TTS_PROVIDER_ID = "tencent-tts-online"
+ACTIVE_PROVIDER_IDS = {PRIMARY_LLM_PROVIDER_ID, PRIMARY_ASR_PROVIDER_ID, PRIMARY_TTS_PROVIDER_ID}
 
 
 class ProviderConfigNotFoundError(LookupError):
@@ -31,43 +30,23 @@ def default_provider_configs() -> list[AIProviderConfig]:
             region="cn",
         ),
         AIProviderConfig(
-            id="browser-asr",
+            id=PRIMARY_ASR_PROVIDER_ID,
             provider_type="asr",
             purpose="interview",
             enabled=True,
             priority=10,
-            provider_name="browser",
-            model_name="web-speech-recognition",
+            provider_name="tencent",
+            model_name="16k_zh",
             region="cn",
         ),
         AIProviderConfig(
-            id="aliyun-asr-flash",
-            provider_type="asr",
-            purpose="interview",
-            enabled=False,
-            priority=20,
-            provider_name="aliyun",
-            model_name="paraformer-realtime-v2",
-            region="cn",
-        ),
-        AIProviderConfig(
-            id="browser-tts",
+            id=PRIMARY_TTS_PROVIDER_ID,
             provider_type="tts",
             purpose="interview",
             enabled=True,
             priority=10,
-            provider_name="browser",
-            model_name="web-speech-synthesis",
-            region="cn",
-        ),
-        AIProviderConfig(
-            id="volcengine-tts-flash",
-            provider_type="tts",
-            purpose="interview",
-            enabled=False,
-            priority=20,
-            provider_name="volcengine",
-            model_name="seed-tts",
+            provider_name="tencent",
+            model_name="tencent-cloud-tts",
             region="cn",
         ),
     ]
@@ -80,36 +59,18 @@ class InMemoryProviderConfigStore:
     def list_configs(self) -> list[AIProviderConfig]:
         return sorted(self._configs, key=lambda config: config.priority)
 
-    def create_config(self, payload: ProviderConfigCreateRequest) -> AIProviderConfig:
-        if any(config.id == payload.id for config in self._configs):
-            raise ProviderConfigAlreadyExistsError("provider config already exists")
-        config = AIProviderConfig(
-            id=payload.id,
-            provider_type=payload.provider_type,
-            purpose=payload.purpose,
-            enabled=payload.enabled,
-            priority=payload.priority,
-            provider_name=payload.provider_name,
-            model_name=payload.model_name,
-            region=payload.region,
-            api_key=payload.api_key or "",
-            api_key_preview=preview_secret(payload.api_key),
-        )
-        self._configs.append(config)
-        return config
-
     def update_config(self, provider_id: str, payload: ProviderConfigUpdateRequest) -> AIProviderConfig:
         for index, config in enumerate(self._configs):
             if config.id == provider_id:
                 updated = AIProviderConfig(
                     id=config.id,
-                    provider_type=payload.provider_type or config.provider_type,
-                    purpose=payload.purpose or config.purpose,
+                    provider_type=config.provider_type,
+                    purpose=config.purpose,
                     enabled=config.enabled if payload.enabled is None else payload.enabled,
                     priority=config.priority if payload.priority is None else payload.priority,
-                    provider_name=payload.provider_name or config.provider_name,
-                    model_name=payload.model_name or config.model_name,
-                    region=payload.region or config.region,
+                    provider_name=config.provider_name,
+                    model_name=config.model_name,
+                    region=config.region,
                     api_key=config.api_key if payload.api_key is None else payload.api_key,
                     api_key_preview=config.api_key_preview if payload.api_key is None else preview_secret(payload.api_key),
                 )
@@ -131,50 +92,17 @@ class DatabaseProviderConfigStore:
         self._commit_on_write = commit_on_write
 
     def list_configs(self) -> list[AIProviderConfig]:
-        self._prune_non_primary_llm_configs()
+        self._prune_unsupported_provider_configs()
         self._seed_missing_default_configs()
         models = self._session.execute(select(AIProviderConfigModel).order_by(AIProviderConfigModel.priority)).scalars()
         return [self._to_config(model) for model in models]
-
-    def create_config(self, payload: ProviderConfigCreateRequest) -> AIProviderConfig:
-        if self._get_model(payload.id) is not None:
-            raise ProviderConfigAlreadyExistsError("provider config already exists")
-        model = AIProviderConfigModel(
-            id=payload.id,
-            provider_type=payload.provider_type,
-            purpose=payload.purpose,
-            enabled=payload.enabled,
-            priority=payload.priority,
-            provider_name=payload.provider_name,
-            display_name=payload.provider_name,
-            model_name=payload.model_name,
-            region=payload.region,
-            encrypted_api_key=encrypt_secret(payload.api_key, self._settings),
-        )
-        self._session.add(model)
-        if self._commit_on_write:
-            self._session.commit()
-        else:
-            self._session.flush()
-        return self._to_config(model)
 
     def update_config(self, provider_id: str, payload: ProviderConfigUpdateRequest) -> AIProviderConfig:
         model = self._get_model(provider_id)
         if model is None:
             raise ProviderConfigNotFoundError("provider config not found")
-        if payload.provider_type is not None:
-            model.provider_type = payload.provider_type
-        if payload.purpose is not None:
-            model.purpose = payload.purpose
-        if payload.provider_name is not None:
-            model.provider_name = payload.provider_name
-            model.display_name = payload.provider_name
-        if payload.model_name is not None:
-            model.model_name = payload.model_name
         if payload.priority is not None:
             model.priority = payload.priority
-        if payload.region is not None:
-            model.region = payload.region
         if payload.enabled is not None:
             model.enabled = payload.enabled
         if payload.api_key is not None:
@@ -215,12 +143,11 @@ class DatabaseProviderConfigStore:
         else:
             self._session.flush()
 
-    def _prune_non_primary_llm_configs(self) -> None:
+    def _prune_unsupported_provider_configs(self) -> None:
         removed_models = (
             self._session.execute(
                 select(AIProviderConfigModel).where(
-                    AIProviderConfigModel.provider_type == "llm",
-                    AIProviderConfigModel.id != PRIMARY_LLM_PROVIDER_ID,
+                    ~AIProviderConfigModel.id.in_(ACTIVE_PROVIDER_IDS),
                 )
             )
             .scalars()

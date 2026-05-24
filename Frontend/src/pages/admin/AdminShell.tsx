@@ -101,17 +101,6 @@ type SystemConfig = {
   updated_at?: string | null;
 };
 
-const emptyProvider = {
-  id: "",
-  provider_type: "llm",
-  purpose: "general",
-  provider_name: "",
-  model_name: "",
-  priority: "100",
-  region: "cn",
-  api_key: "",
-};
-
 export function AdminShell() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
@@ -131,17 +120,12 @@ export function AdminShell() {
   const [creditAmount, setCreditAmount] = useState("1");
   const [creditReason, setCreditReason] = useState("manual_grant");
   const [creditNote, setCreditNote] = useState("");
-  const [providerForm, setProviderForm] = useState(emptyProvider);
   const [selectedReport, setSelectedReport] = useState<AdminInterviewReport | null>(null);
   const [reportMessage, setReportMessage] = useState("");
   const [message, setMessage] = useState("正在检查管理员会话。");
   const [isLoading, setIsLoading] = useState(true);
 
   const enabledProviderCount = useMemo(() => providers.filter((provider) => provider.enabled).length, [providers]);
-  const editingProvider = useMemo(
-    () => providers.find((provider) => provider.id === providerForm.id.trim()),
-    [providerForm.id, providers],
-  );
 
   useEffect(() => {
     void loadCurrentUser();
@@ -174,7 +158,7 @@ export function AdminShell() {
   async function loadProviders() {
     const response = await fetch("/api/ai-providers", { credentials: "include" });
     if (!response.ok) {
-      setMessage("模型配置读取失败。");
+      setMessage("AI 服务状态读取失败。");
       return;
     }
     setProviders((await response.json()) as ProviderConfig[]);
@@ -360,45 +344,6 @@ export function AdminShell() {
     setMessage(`${provider.id} 已${provider.enabled ? "停用" : "启用"}。`);
   }
 
-  async function submitProvider(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const priority = Number.parseInt(providerForm.priority, 10);
-    if (Number.isNaN(priority)) {
-      setMessage("请填写有效的模型优先级。");
-      return;
-    }
-
-    const providerPayload = {
-      provider_type: providerForm.provider_type,
-      purpose: providerForm.purpose,
-      provider_name: providerForm.provider_name,
-      model_name: providerForm.model_name,
-      priority,
-      region: providerForm.region,
-      enabled: editingProvider?.enabled ?? true,
-      api_key: providerForm.api_key.trim() || undefined,
-    };
-    const response = await fetch(
-      editingProvider ? `/api/ai-providers/${encodeURIComponent(editingProvider.id)}` : "/api/ai-providers",
-      {
-        method: editingProvider ? "PUT" : "POST",
-        credentials: "include",
-        headers: csrfHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(editingProvider ? providerPayload : { id: providerForm.id, ...providerPayload }),
-      },
-    );
-    const data = await response.json();
-    if (!response.ok) {
-      setMessage(data.detail ? `模型配置保存失败：${data.detail}` : "模型配置保存失败。");
-      return;
-    }
-
-    setProviderForm(emptyProvider);
-    await loadProviders();
-    await loadAuditLogs();
-    setMessage(`${editingProvider ? "已更新" : "已新增"}模型配置：${data.id}`);
-  }
-
   async function testProvider(provider: ProviderConfig) {
     setProviderTestResults((previous) => ({ ...previous, [provider.id]: "测试中" }));
     const response = await fetch(`/api/ai-providers/${encodeURIComponent(provider.id)}/test`, {
@@ -522,7 +467,7 @@ export function AdminShell() {
       <section className="admin-hero">
         <span className="eyebrow">Operator Console</span>
         <h1>运营后台</h1>
-        <p>后台用于手动发放面试次数、调整模型路由和检查系统状态。管理员必须在邮箱白名单内，并通过密码与邮箱验证码双重认证。</p>
+              <p>后台用于手动发放面试次数、查看 AI 服务状态和检查系统日志。管理员必须在邮箱白名单内，并通过密码与邮箱验证码双重认证。</p>
       </section>
 
       <div className="admin-status-row">
@@ -563,7 +508,7 @@ export function AdminShell() {
             <article className="admin-card">
               <AppIcon icon="lucide:bot" size={24} />
               <h2>{enabledProviderCount} / {providers.length}</h2>
-              <p>启用中的模型供应商</p>
+              <p>启用中的 AI 服务</p>
             </article>
             <article className="admin-card">
               <AppIcon icon="lucide:coins" size={24} />
@@ -610,52 +555,6 @@ export function AdminShell() {
                     <span>{entry.reason} · 余额 {entry.balance_after}{entry.note ? ` · ${entry.note}` : ""}</span>
                   </div>
                 ))}
-              </div>
-            </form>
-
-            <form className="admin-panel" onSubmit={submitProvider}>
-              <h2>{editingProvider ? "编辑模型配置" : "新增模型配置"}</h2>
-              <div className="admin-form-grid">
-                <label>
-                  配置 ID
-                  <input value={providerForm.id} onChange={(event) => setProviderForm({ ...providerForm, id: event.target.value })} placeholder="deepseek-v4-flash" required readOnly={Boolean(editingProvider)} />
-                </label>
-                <label>
-                  类型
-                  <input value={providerForm.provider_type} onChange={(event) => setProviderForm({ ...providerForm, provider_type: event.target.value })} placeholder="llm / asr / tts" required />
-                </label>
-                <label>
-                  用途
-                  <input value={providerForm.purpose} onChange={(event) => setProviderForm({ ...providerForm, purpose: event.target.value })} placeholder="interview / general" required />
-                </label>
-                <label>
-                  供应商
-                  <input value={providerForm.provider_name} onChange={(event) => setProviderForm({ ...providerForm, provider_name: event.target.value })} placeholder="deepseek" required />
-                </label>
-                <label>
-                  模型名
-                  <input value={providerForm.model_name} onChange={(event) => setProviderForm({ ...providerForm, model_name: event.target.value })} placeholder="deepseek-v4-flash" required />
-                </label>
-                <label>
-                  优先级
-                  <input type="number" value={providerForm.priority} onChange={(event) => setProviderForm({ ...providerForm, priority: event.target.value })} required />
-                </label>
-                <label>
-                  区域
-                  <input value={providerForm.region} onChange={(event) => setProviderForm({ ...providerForm, region: event.target.value })} placeholder="cn" required />
-                </label>
-                <label>
-                  API Key
-                  <input value={providerForm.api_key} onChange={(event) => setProviderForm({ ...providerForm, api_key: event.target.value })} placeholder={editingProvider ? "留空保持原密钥" : "可选，保存后脱敏显示"} />
-                </label>
-              </div>
-              <div className="admin-action-row">
-                <button type="submit" className="admin-primary-button">{editingProvider ? "保存配置" : "新增模型"}</button>
-                {editingProvider && (
-                  <button type="button" onClick={() => setProviderForm(emptyProvider)}>
-                    取消编辑
-                  </button>
-                )}
               </div>
             </form>
           </section>
@@ -789,7 +688,7 @@ export function AdminShell() {
           <section className="admin-provider-table">
             <div className="admin-section-heading">
               <span className="eyebrow">Model Router</span>
-              <h2>模型路由配置</h2>
+              <h2>AI 服务状态</h2>
             </div>
             <div className="admin-provider-list">
               {providers.map((provider) => (
@@ -800,21 +699,6 @@ export function AdminShell() {
                   </div>
                   <em>{provider.provider_type} · {provider.purpose} · {provider.region} · priority {provider.priority}</em>
                   <div className="provider-row-actions">
-                    <button
-                      type="button"
-                      onClick={() => setProviderForm({
-                        id: provider.id,
-                        provider_type: provider.provider_type,
-                        purpose: provider.purpose,
-                        provider_name: provider.provider_name,
-                        model_name: provider.model_name,
-                        priority: String(provider.priority),
-                        region: provider.region,
-                        api_key: "",
-                      })}
-                    >
-                      编辑
-                    </button>
                     <button type="button" onClick={() => void testProvider(provider)}>
                       测试
                     </button>

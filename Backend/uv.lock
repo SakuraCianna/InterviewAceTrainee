@@ -400,6 +400,7 @@ dependencies = [
     { name = "redis" },
     { name = "resend" },
     { name = "sqlalchemy" },
+    { name = "tencentcloud-sdk-python" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -419,6 +420,7 @@ requires-dist = [
     { name = "redis", specifier = ">=5.2.0" },
     { name = "resend", specifier = ">=2.30.1" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
+    { name = "tencentcloud-sdk-python", specifier = ">=3.1.101" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
 
@@ -715,6 +717,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/08/a3/84e821cc54b4ab50ae6dbc6ac3800a651b65ec35f045cc73785380654057/starlette-1.0.1.tar.gz", hash = "sha256:512399c5f1de7fac99c88572212ded9ddeddef2fb32afa82d724000e88b38f4f", size = 2659596, upload-time = "2026-05-21T21:58:58.433Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/e1/b2df4bc09a1e51ff664c1e17018a4274b42e5e9352e4a478ea540512dc88/starlette-1.0.1-py3-none-any.whl", hash = "sha256:7c0e69b2ee1c848bd54669d908500117a3ee13de603a21427e5c6fc1adf98dcd", size = 72802, upload-time = "2026-05-21T21:58:56.551Z" },
+]
+
+[[package]]
+name = "tencentcloud-sdk-python"
+version = "3.1.101"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9d/68/dcb7528ae08bb30876bda9b1d7741f27f17383c64fe93947848a5dc0384a/tencentcloud_sdk_python-3.1.101.tar.gz", hash = "sha256:642869dc27d5f2e4634d4e22d5a92150361802c4a9f979a3b65047ea7ae0ec26", size = 14903702, upload-time = "2026-05-20T19:13:55.124Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/80/d6/82bbb1e18610024b27b4fc5bbac5c9c11e4757124570e16f6161d74138fd/tencentcloud_sdk_python-3.1.101-py2.py3-none-any.whl", hash = "sha256:8320faee3dd5db4ac2f70db8e14e6b48cb4001b95a4ecd1a5e07df66f67dfebb", size = 15804448, upload-time = "2026-05-20T19:12:59.678Z" },
 ]
 
 [[package]]

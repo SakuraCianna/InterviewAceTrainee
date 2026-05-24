@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_optional_db_session
 from app.models.entities import SystemConfigModel, utc_now
+from app.services.provider_configs import PRIMARY_ASR_PROVIDER_ID, PRIMARY_LLM_PROVIDER_ID, PRIMARY_TTS_PROVIDER_ID
 
 
 class SystemConfigNotFoundError(LookupError):
@@ -28,10 +29,12 @@ DEFAULT_SYSTEM_CONFIGS: dict[str, SystemConfig] = {
     "email_code_login_enabled": SystemConfig("email_code_login_enabled", True, "是否允许普通用户邮箱验证码登录"),
     "max_interview_steps": SystemConfig("max_interview_steps", 8, "单场训练最大轮数上限"),
     "max_answer_seconds": SystemConfig("max_answer_seconds", 180, "单轮回答建议最长秒数"),
-    "default_llm_provider_id": SystemConfig("default_llm_provider_id", "deepseek-v4-flash", "默认 LLM 配置 ID"),
-    "default_asr_provider_id": SystemConfig("default_asr_provider_id", "browser-asr", "默认 ASR 配置 ID"),
-    "default_tts_provider_id": SystemConfig("default_tts_provider_id", "browser-tts", "默认 TTS 配置 ID"),
+    "default_llm_provider_id": SystemConfig("default_llm_provider_id", PRIMARY_LLM_PROVIDER_ID, "默认 LLM 配置 ID"),
+    "default_asr_provider_id": SystemConfig("default_asr_provider_id", PRIMARY_ASR_PROVIDER_ID, "默认 ASR 配置 ID"),
+    "default_tts_provider_id": SystemConfig("default_tts_provider_id", PRIMARY_TTS_PROVIDER_ID, "默认 TTS 配置 ID"),
 }
+
+PROVIDER_DEFAULT_CONFIG_KEYS = {"default_llm_provider_id", "default_asr_provider_id", "default_tts_provider_id"}
 
 
 class InMemorySystemConfigStore:
@@ -106,7 +109,13 @@ class DatabaseSystemConfigStore:
     def _seed_defaults(self) -> None:
         changed = False
         for config in DEFAULT_SYSTEM_CONFIGS.values():
-            if self._session.get(SystemConfigModel, config.key) is not None:
+            model = self._session.get(SystemConfigModel, config.key)
+            if model is not None:
+                if config.key in PROVIDER_DEFAULT_CONFIG_KEYS and model.value_json != config.value:
+                    model.value_json = config.value
+                    model.description = config.description
+                    model.updated_at = utc_now()
+                    changed = True
                 continue
             self._session.add(
                 SystemConfigModel(

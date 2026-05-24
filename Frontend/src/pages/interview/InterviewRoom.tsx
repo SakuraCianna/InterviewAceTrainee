@@ -63,21 +63,29 @@ type InterviewMaterialResponse = {
   keywords: string[];
 };
 
-type SpeechRecognitionLike = {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  start: () => void;
-  stop: () => void;
-  onresult: ((event: { results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
-  onend: (() => void) | null;
-  onerror: (() => void) | null;
+type SpeechRecognitionApiResponse = {
+  text?: string;
+  detail?: string;
+};
+
+type SpeechSynthesisApiResponse = {
+  audio_base64?: string;
+  mime_type?: string;
+  detail?: string;
+};
+
+type AudioRecorderSession = {
+  context: AudioContext;
+  source: MediaStreamAudioSourceNode;
+  processor: ScriptProcessorNode;
+  stream: MediaStream;
+  chunks: Float32Array[];
+  sampleRate: number;
 };
 
 declare global {
   interface Window {
-    SpeechRecognition?: new () => SpeechRecognitionLike;
-    webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+    webkitAudioContext?: typeof AudioContext;
   }
 }
 
@@ -96,6 +104,68 @@ function createSessionId() {
 
 function moduleByType(type: InterviewType) {
   return modules.find((module) => module.type === type) ?? modules[0];
+}
+
+function mergeAudioChunks(chunks: Float32Array[]) {
+  const totalLength = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  const samples = new Float32Array(totalLength);
+  let offset = 0;
+  chunks.forEach((chunk) => {
+    samples.set(chunk, offset);
+    offset += chunk.length;
+  });
+  return samples;
+}
+
+function writeAscii(view: DataView, offset: number, value: string) {
+  for (let index = 0; index < value.length; index += 1) {
+    view.setUint8(offset + index, value.charCodeAt(index));
+  }
+}
+
+function resampleAudio(samples: Float32Array, inputSampleRate: number, outputSampleRate: number) {
+  if (inputSampleRate === outputSampleRate) {
+    return samples;
+  }
+  const ratio = inputSampleRate / outputSampleRate;
+  const outputLength = Math.round(samples.length / ratio);
+  const output = new Float32Array(outputLength);
+  for (let index = 0; index < outputLength; index += 1) {
+    const sourceIndex = index * ratio;
+    const before = Math.floor(sourceIndex);
+    const after = Math.min(before + 1, samples.length - 1);
+    const weight = sourceIndex - before;
+    output[index] = samples[before] * (1 - weight) + samples[after] * weight;
+  }
+  return output;
+}
+
+function encodeWav(samples: Float32Array, sampleRate: number) {
+  const outputSampleRate = 16000;
+  const outputSamples = resampleAudio(samples, sampleRate, outputSampleRate);
+  const bytesPerSample = 2;
+  const buffer = new ArrayBuffer(44 + outputSamples.length * bytesPerSample);
+  const view = new DataView(buffer);
+  writeAscii(view, 0, "RIFF");
+  view.setUint32(4, 36 + outputSamples.length * bytesPerSample, true);
+  writeAscii(view, 8, "WAVE");
+  writeAscii(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, outputSampleRate, true);
+  view.setUint32(28, outputSampleRate * bytesPerSample, true);
+  view.setUint16(32, bytesPerSample, true);
+  view.setUint16(34, 8 * bytesPerSample, true);
+  writeAscii(view, 36, "data");
+  view.setUint32(40, outputSamples.length * bytesPerSample, true);
+  let offset = 44;
+  outputSamples.forEach((sample) => {
+    const clamped = Math.max(-1, Math.min(1, sample));
+    view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+    offset += bytesPerSample;
+  });
+  return new Blob([view], { type: "audio/wav" });
 }
 
 function statusLabel(status: string) {
@@ -135,8 +205,7 @@ export function InterviewRoom() {
   const [socketState, setSocketState] = useState("连接中");
   const [socketMessage, setSocketMessage] = useState("正在检查是否有未完成训练。");
   const socketRef = useRef<WebSocket | null>(null);
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  const answerDraftRef = useRef("");
+  const recorderRef = useRef<AudioRecorderSession | null>(null);
   const state = states[stateIndex];
   const selectedModule = modules[selectedModuleIndex];
   const currentMaterial = materialsByType[selectedModule.type] ?? null;
@@ -255,7 +324,7 @@ export function InterviewRoom() {
     setStateIndex(1);
     setSocketMessage(data.status === "completed" ? "这场训练已完成，可查看复盘报告。" : `面试已就绪，剩余次数 ${data.balance_after ?? "已更新"}。`);
     await loadHistory();
-    speakQuestion(data.current_question?.text, data.interview_type);
+    void speakQuestion(data.current_question?.text, data.interview_type, data.session_id);
   }
 
   async function prepareMaterial() {
@@ -311,7 +380,7 @@ export function InterviewRoom() {
     setSocketMessage(data.interview_type === "job" ? "简历和岗位要求已分析，可以开始工作面试。" : "复试专业信息已保存，可以开始模拟。");
   }
 
-  function speakQuestion(questionText?: string, interviewType?: InterviewType) {
+  function speakQuestionWithBrowser(questionText: string, interviewType?: InterviewType) {
     if (!questionText || !window.speechSynthesis) {
       return;
     }
@@ -324,6 +393,36 @@ export function InterviewRoom() {
     window.speechSynthesis.speak(utterance);
   }
 
+  async function speakQuestion(questionText?: string, interviewType?: InterviewType, targetSessionId = socketSessionId) {
+    if (!questionText) {
+      return;
+    }
+    setStateIndex(1);
+    try {
+      const response = await fetch("/api/speech/tts", {
+        method: "POST",
+        credentials: "include",
+        headers: csrfHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ text: questionText, interview_type: interviewType, session_id: targetSessionId }),
+      });
+      const data = (await response.json()) as SpeechSynthesisApiResponse;
+      if (!response.ok || !data.audio_base64 || !data.mime_type) {
+        throw new Error(data.detail ?? "tts_failed");
+      }
+      window.speechSynthesis?.cancel();
+      const audio = new Audio(`data:${data.mime_type};base64,${data.audio_base64}`);
+      audio.onended = () => setStateIndex(0);
+      audio.onerror = () => {
+        setStateIndex(0);
+        speakQuestionWithBrowser(questionText, interviewType);
+      };
+      await audio.play();
+    } catch {
+      setSocketMessage("腾讯云语音合成暂时不可用，已切换为浏览器本地播报。");
+      speakQuestionWithBrowser(questionText, interviewType);
+    }
+  }
+
   function sendSocketEvent(type: string) {
     if (socketRef.current?.readyState !== WebSocket.OPEN) {
       return;
@@ -331,40 +430,72 @@ export function InterviewRoom() {
     socketRef.current.send(JSON.stringify({ type, session_id: socketSessionId, avatar_state: state }));
   }
 
-  function startAnswer() {
+  function stopRecorder() {
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    if (!recorder) {
+      return null;
+    }
+    recorder.processor.disconnect();
+    recorder.source.disconnect();
+    recorder.stream.getTracks().forEach((track) => track.stop());
+    void recorder.context.close();
+    return encodeWav(mergeAudioChunks(recorder.chunks), recorder.sampleRate);
+  }
+
+  async function transcribeAnswerAudio(audioBlob: Blob, targetSessionId: string, interviewType: InterviewType) {
+    const formData = new FormData();
+    formData.append("audio_file", audioBlob, `${targetSessionId}.wav`);
+    formData.append("session_id", targetSessionId);
+    formData.append("interview_type", interviewType);
+    const response = await fetch("/api/speech/asr", {
+      method: "POST",
+      credentials: "include",
+      headers: csrfHeaders(),
+      body: formData,
+    });
+    const data = (await response.json()) as SpeechRecognitionApiResponse;
+    if (!response.ok || !data.text) {
+      throw new Error(data.detail ?? "asr_failed");
+    }
+    return data.text;
+  }
+
+  async function startAnswer() {
     if (!interviewState || interviewState.status === "completed") {
       setSocketMessage("请先开始或恢复一场训练。");
       return;
     }
 
-    const SpeechRecognitionCtor = window.SpeechRecognition ?? window.webkitSpeechRecognition;
-    if (!SpeechRecognitionCtor) {
-      setSocketMessage("当前浏览器不支持语音识别，请使用新版 Chrome 或 Edge。");
+    const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
+    if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) {
+      setSocketMessage("当前浏览器不支持录音，请使用新版 Chrome 或 Edge。");
       return;
     }
 
-    answerDraftRef.current = "";
-    const recognition = new SpeechRecognitionCtor() as SpeechRecognitionLike;
-    recognition.lang = modules.find((module) => module.type === interviewState.interview_type)?.lang ?? "zh-CN";
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.onresult = (event) => {
-      let text = "";
-      for (let index = 0; index < event.results.length; index += 1) {
-        text += event.results[index][0].transcript;
-      }
-      answerDraftRef.current = text.trim();
-    };
-    recognition.onend = () => setIsRecording(false);
-    recognition.onerror = () => {
+    try {
+      stopRecorder();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const context = new AudioContextCtor();
+      const source = context.createMediaStreamSource(stream);
+      const processor = context.createScriptProcessor(4096, 1, 1);
+      const chunks: Float32Array[] = [];
+      processor.onaudioprocess = (event) => {
+        chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+        event.outputBuffer.getChannelData(0).fill(0);
+      };
+      source.connect(processor);
+      processor.connect(context.destination);
+      recorderRef.current = { context, source, processor, stream, chunks, sampleRate: context.sampleRate };
+    } catch {
       setIsRecording(false);
-      setSocketMessage("语音识别中断，可以重新点击开始回答。");
-    };
-    recognitionRef.current = recognition;
-    recognition.start();
+      setSocketMessage("无法打开麦克风，请检查浏览器权限后重新点击开始回答。");
+      return;
+    }
+
     setIsRecording(true);
     setStateIndex(2);
-    setSocketMessage("正在听你的回答。说完后点击“回答完毕”。");
+    setSocketMessage("正在录制你的回答。说完后点击“回答完毕”，系统会用腾讯云语音识别转写。");
     sendSocketEvent("answer_started");
   }
 
@@ -373,12 +504,22 @@ export function InterviewRoom() {
       setSocketMessage("请先开始或恢复一场训练。");
       return;
     }
-    recognitionRef.current?.stop();
+    const audioBlob = stopRecorder();
     setIsRecording(false);
     setStateIndex(3);
     sendSocketEvent("answer_finished");
 
-    const answerText = answerDraftRef.current || "语音识别没有返回文本，但用户已完成本轮口头回答。";
+    let answerText = "语音识别没有返回文本，但用户已完成本轮口头回答。";
+    if (audioBlob && audioBlob.size > 44) {
+      try {
+        setSocketMessage("正在用腾讯云语音识别转写回答。");
+        answerText = await transcribeAnswerAudio(audioBlob, interviewState.session_id, interviewState.interview_type);
+      } catch {
+        setStateIndex(0);
+        setSocketMessage("腾讯云语音识别暂时不可用，本轮回答没有提交。请稍后重新点击开始回答。");
+        return;
+      }
+    }
     const response = await fetch(`/api/interviews/${encodeURIComponent(interviewState.session_id)}/answers`, {
       method: "POST",
       credentials: "include",
@@ -391,7 +532,6 @@ export function InterviewRoom() {
       return;
     }
     setInterviewState(data);
-    answerDraftRef.current = "";
     await loadHistory();
     if (data.status === "completed") {
       setStateIndex(0);
@@ -399,7 +539,7 @@ export function InterviewRoom() {
       return;
     }
     setSocketMessage("已进入下一问，问题正在播放。");
-    speakQuestion(data.current_question?.text, data.interview_type);
+    void speakQuestion(data.current_question?.text, data.interview_type, data.session_id);
   }
 
   async function openHistoryItem(item: InterviewHistoryItem) {
@@ -422,6 +562,7 @@ export function InterviewRoom() {
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrfHeaders() });
     window.speechSynthesis?.cancel();
+    stopRecorder();
     socketRef.current?.close();
     setCurrentUser(null);
     setInterviewState(null);
@@ -577,7 +718,7 @@ export function InterviewRoom() {
                 </button>
               ) : (
                 <>
-                  <button type="button" disabled={isRecording} onClick={startAnswer}>
+                  <button type="button" disabled={isRecording} onClick={() => void startAnswer()}>
                     <AppIcon icon="lucide:mic" size={18} />
                     开始回答
                   </button>
@@ -585,7 +726,7 @@ export function InterviewRoom() {
                     <AppIcon icon="lucide:square" size={18} />
                     回答完毕
                   </button>
-                  <button type="button" onClick={() => speakQuestion(interviewState.current_question?.text, interviewState.interview_type)}>
+                  <button type="button" onClick={() => void speakQuestion(interviewState.current_question?.text, interviewState.interview_type, interviewState.session_id)}>
                     <AppIcon icon="lucide:volume-2" size={18} />
                     重播问题
                   </button>
