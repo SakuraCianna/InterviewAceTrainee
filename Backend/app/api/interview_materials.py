@@ -11,6 +11,7 @@ from app.services.document_intake import (
     extract_keywords,
     extract_resume_text,
     normalize_extracted_text,
+    validate_resume_filename,
 )
 from app.services.interview_material_context import InterviewMaterialContext
 from app.services.interview_materials import (
@@ -45,7 +46,7 @@ async def create_interview_material(
     if interview_type == InterviewType.POSTGRADUATE and not normalized_major:
         raise HTTPException(status_code=422, detail="postgraduate_major_required")
 
-    resume_text = await _extract_uploaded_resume_text(resume_file, settings)
+    resume_filename, resume_text = await _extract_uploaded_resume_text(resume_file, settings)
     keywords = extract_keywords(
         resume_text,
         normalized_job_title,
@@ -65,7 +66,7 @@ async def create_interview_material(
         InterviewMaterialDraft(
             user_email=claims["sub"],
             interview_type=interview_type,
-            resume_filename=resume_file.filename if resume_file is not None else None,
+            resume_filename=resume_filename,
             resume_content_type=resume_file.content_type if resume_file is not None else None,
             resume_text=resume_text,
             job_title=normalized_job_title,
@@ -79,15 +80,14 @@ async def create_interview_material(
     return _to_response(record)
 
 
-async def _extract_uploaded_resume_text(resume_file: UploadFile | None, settings: Settings) -> str | None:
+async def _extract_uploaded_resume_text(resume_file: UploadFile | None, settings: Settings) -> tuple[str | None, str | None]:
     if resume_file is None:
-        return None
-    payload = await resume_file.read()
-    if len(payload) > settings.interview_material_max_upload_bytes:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="resume_file_too_large")
+        return None, None
     try:
+        safe_filename = validate_resume_filename(resume_file.filename)
+        payload = await _read_upload_limited(resume_file, settings.interview_material_max_upload_bytes)
         extracted_text = extract_resume_text(
-            resume_file.filename,
+            safe_filename,
             resume_file.content_type,
             payload,
             ocr_provider=settings.resume_ocr_provider,
@@ -97,7 +97,21 @@ async def _extract_uploaded_resume_text(resume_file: UploadFile | None, settings
     normalized_text = normalize_extracted_text(extracted_text)
     if not normalized_text:
         raise HTTPException(status_code=422, detail="resume_text_empty")
-    return normalized_text
+    return safe_filename, normalized_text
+
+
+async def _read_upload_limited(resume_file: UploadFile, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await resume_file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=413, detail="resume_file_too_large")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _to_response(record: InterviewMaterialContext) -> InterviewMaterialResponse:

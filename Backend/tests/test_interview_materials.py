@@ -53,6 +53,65 @@ def test_job_material_upload_extracts_resume_and_requires_job_context():
     assert "resume_file_bytes" not in data
 
 
+def test_resume_upload_rejects_oversized_payload_before_material_is_created():
+    client = TestClient(app)
+    user_email = unique_email("material-large")
+    token = create_access_token(user_email, "user")
+
+    response = client.post(
+        "/api/interview-materials",
+        headers={"Authorization": f"Bearer {token}"},
+        data={
+            "interview_type": "job",
+            "job_title": "后端开发实习生",
+            "job_requirements": "需要熟悉 FastAPI。",
+        },
+        files={"resume_file": ("resume.txt", b"x" * (5 * 1024 * 1024 + 1), "text/plain")},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "resume_file_too_large"
+
+
+def test_resume_upload_rejects_double_extension_and_sanitizes_stored_filename():
+    client = TestClient(app)
+    user_email = unique_email("material-name")
+    token = create_access_token(user_email, "user")
+
+    rejected_response = client.post(
+        "/api/interview-materials",
+        headers={"Authorization": f"Bearer {token}"},
+        data={
+            "interview_type": "job",
+            "job_title": "后端开发实习生",
+            "job_requirements": "需要熟悉 FastAPI。",
+        },
+        files={"resume_file": ("resume.pdf.exe", b"malicious", "application/octet-stream")},
+    )
+    assert rejected_response.status_code == 422
+    assert rejected_response.json()["detail"] == "unsupported_resume_format"
+
+    accepted_response = client.post(
+        "/api/interview-materials",
+        headers={"Authorization": f"Bearer {token}"},
+        data={
+            "interview_type": "job",
+            "job_title": "后端开发实习生",
+            "job_requirements": "需要熟悉 FastAPI。",
+        },
+        files={
+            "resume_file": (
+                "../unsafe name 简历.txt",
+                "项目：FastAPI 面试平台。",
+                "text/plain",
+            )
+        },
+    )
+
+    assert accepted_response.status_code == 201
+    assert accepted_response.json()["resume_filename"] == "unsafe_name_简历.txt"
+
+
 def test_job_interview_requires_prepared_material_and_uses_it_in_first_question():
     client = TestClient(app)
     user_email = unique_email("material-start-job")

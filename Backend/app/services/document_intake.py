@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import PurePath
 import re
 
 from docx import Document
@@ -12,9 +13,27 @@ TEXT_CONTENT_TYPES = {
     "application/json",
 }
 
+ALLOWED_RESUME_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".pdf", ".docx", ".png", ".jpg", ".jpeg", ".webp"}
+
 
 class UnsupportedResumeFormatError(ValueError):
     """Raised when a resume format cannot be converted into text locally."""
+
+
+def sanitize_resume_filename(filename: str | None) -> str:
+    raw_name = PurePath((filename or "resume").replace("\\", "/")).name
+    safe_name = re.sub(r"[^\w.\-\u4e00-\u9fff]+", "_", raw_name, flags=re.UNICODE).strip("._")
+    if not safe_name:
+        safe_name = "resume"
+    return safe_name[:120]
+
+
+def validate_resume_filename(filename: str | None) -> str:
+    safe_name = sanitize_resume_filename(filename)
+    extension = PurePath(safe_name).suffix.lower()
+    if extension not in ALLOWED_RESUME_EXTENSIONS:
+        raise UnsupportedResumeFormatError("unsupported_resume_format")
+    return safe_name
 
 
 def extract_resume_text(
