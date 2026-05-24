@@ -123,6 +123,8 @@ npm run dev
 - 管理后台：`http://localhost:5173/console-mianba`
 - 政策页面：`/terms`、`/privacy`、`/refund`、`/contact`
 
+后台入口由前端构建变量 `VITE_ADMIN_ENTRY_PATH` 控制，默认是 `/console-mianba`。本地开发可以复制 `Frontend/.env.example` 为 `Frontend/.env` 后修改；Docker 构建时可以在根目录 `.env` 或当前终端设置同名变量。隐藏路径只降低暴露概率，真正安全仍依赖管理员双重认证、后端权限校验和审计日志。
+
 面试房间支持四个模块：工作面试、研究生复试、考公面试、雅思口语。用户中断后再次进入会先读取 `/api/interviews/active`，可以继续上一场未完成训练；完成后会展示报告并保存到后端。
 
 ## Docker Compose

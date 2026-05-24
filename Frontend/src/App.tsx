@@ -5,6 +5,8 @@ import { HomePage } from "./pages/HomePage";
 import { InterviewRoom } from "./pages/interview/InterviewRoom";
 import { LegalPage } from "./pages/LegalPage";
 
+const adminEntryPath = import.meta.env.VITE_ADMIN_ENTRY_PATH || "/console-mianba";
+
 export default function App() {
   return (
     <Routes>
@@ -12,7 +14,7 @@ export default function App() {
       <Route path="/login" element={<AuthPage mode="login" />} />
       <Route path="/register" element={<AuthPage mode="register" />} />
       <Route path="/interview" element={<InterviewRoom />} />
-      <Route path="/console-mianba" element={<AdminShell />} />
+      <Route path={adminEntryPath} element={<AdminShell />} />
       <Route path="/terms" element={<LegalPage type="terms" />} />
       <Route path="/privacy" element={<LegalPage type="privacy" />} />
       <Route path="/refund" element={<LegalPage type="refund" />} />

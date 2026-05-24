@@ -57,6 +57,8 @@ services:
   frontend:
     build:
       context: ./Frontend
+      args:
+        VITE_ADMIN_ENTRY_PATH: ${VITE_ADMIN_ENTRY_PATH:-/console-mianba}
     container_name: mianba-frontend
     restart: unless-stopped
     depends_on:

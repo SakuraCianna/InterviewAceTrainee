@@ -166,11 +166,11 @@ export function InterviewRoom() {
     websocket.onmessage = (event) => {
       const payload = JSON.parse(event.data) as { type?: string; received_type?: string; state?: string };
       if (payload.type === "event_ack") {
-        setSocketMessage(`后端已记录：${payload.received_type}`);
+        setSocketMessage(`系统已记录：${payload.received_type}`);
         return;
       }
       if (payload.state === "connected") {
-        setSocketMessage("后端会话已就绪。");
+        setSocketMessage("训练通道已就绪。");
       }
     };
     websocket.onerror = () => {
@@ -298,7 +298,7 @@ export function InterviewRoom() {
         job_material_required_fields: "工作面试需要简历、目标岗位和岗位要求。",
         postgraduate_major_required: "研究生复试需要报考专业。",
         resume_file_too_large: "简历文件过大，请控制在 5MB 以内。",
-        image_resume_ocr_not_configured: "当前本地版本先支持 txt、pdf、docx 简历解析，图片 OCR 需要单独启用。",
+        image_resume_ocr_not_configured: "当前暂支持 txt、pdf、docx 简历解析，图片简历识别稍后开放。",
         image_resume_ocr_dependency_missing: "图片 OCR 依赖尚未安装，请先使用 txt、pdf、docx 简历。",
         unsupported_resume_format: "当前支持 txt、pdf、docx 简历，请换一个文件格式。",
         resume_text_empty: "简历没有提取到文字，请换成文字版 PDF、docx 或 txt。",

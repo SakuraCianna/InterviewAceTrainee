@@ -19,7 +19,7 @@ export function AuthPage({ mode }: AuthPageProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
-  const [message, setMessage] = useState("先填写邮箱获取验证码，再完成注册或登录。当前发信模式由后端 .env 的 EMAIL_PROVIDER 决定。");
+  const [message, setMessage] = useState("先填写邮箱获取验证码，再完成注册或登录。验证码将用于确认账号归属。");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function requestCode() {
