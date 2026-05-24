@@ -60,7 +60,7 @@ cd Backend
 uv run python -m app.cli.safe_migrate
 ```
 
-这个安全迁移命令会先确认 `DATABASE_URL` 指向的数据库可连接，然后用 PostgreSQL 官方 `pg_dump` 生成一份 custom archive 备份到项目根目录的 `database_backups/`，文件名类似 `mianba_20260524_143012.dump`。备份成功后才会执行 `alembic upgrade head`，并且自动只保留最新 3 份 `.dump` 备份，旧备份会被删除。`database_backups/` 已加入 `.gitignore`，不会提交到仓库。
+这个安全迁移命令会先确认 `DATABASE_URL` 指向的数据库可连接，然后用 PostgreSQL 官方 `pg_dump` 生成一份 custom archive 备份到项目根目录的 `database_backups/`，文件名类似 `mianba_20260524_143012.dump`。备份成功后才会执行 `alembic upgrade head`，并且自动只保留最新 5 份 `.dump` 备份，旧备份会被删除。`database_backups/` 已加入 `.gitignore`，不会提交到仓库。
 
 如果系统找不到 `pg_dump`，可以把 PostgreSQL 客户端工具加入 `PATH`，或者在当前终端显式指定：
 

@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.config import get_settings
 
 BACKUP_DIR_NAME = "database_backups"
-BACKUP_KEEP_COUNT = 3
+BACKUP_KEEP_COUNT = 5
 
 
 def main() -> int:

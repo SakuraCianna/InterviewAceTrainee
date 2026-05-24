@@ -43,9 +43,9 @@ def test_timestamped_backup_path_uses_database_name_and_timestamp(tmp_path):
     assert path == tmp_path / "mianba_20260524_143012.dump"
 
 
-def test_prune_old_backups_keeps_latest_three_matching_dump_files(tmp_path):
+def test_prune_old_backups_keeps_latest_five_matching_dump_files_by_default(tmp_path):
     backups = []
-    for index in range(5):
+    for index in range(7):
         path = tmp_path / f"mianba_20260524_1430{index}.dump"
         path.write_text("backup", encoding="utf-8")
         timestamp = 1_800_000_000 + index
@@ -53,11 +53,13 @@ def test_prune_old_backups_keeps_latest_three_matching_dump_files(tmp_path):
         os.utime(path, (timestamp, timestamp))
         backups.append(path)
 
-    prune_old_backups(tmp_path, keep_count=3)
+    prune_old_backups(tmp_path)
 
     remaining = sorted(item.name for item in tmp_path.glob("*.dump"))
     assert remaining == [
         "mianba_20260524_14302.dump",
         "mianba_20260524_14303.dump",
         "mianba_20260524_14304.dump",
+        "mianba_20260524_14305.dump",
+        "mianba_20260524_14306.dump",
     ]
