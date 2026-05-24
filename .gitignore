@@ -12,6 +12,8 @@ Frontend/dist/
 Frontend/.vite/
 Frontend/*.tsbuildinfo
 
+database_backups/
+
 .env
 .env.*
 !.env.example

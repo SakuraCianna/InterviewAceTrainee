@@ -53,6 +53,22 @@ cd Backend
 uv run alembic upgrade head
 ```
 
+更推荐使用带备份的安全迁移命令：
+
+```powershell
+cd Backend
+uv run python -m app.cli.safe_migrate
+```
+
+这个安全迁移命令会先确认 `DATABASE_URL` 指向的数据库可连接，然后用 PostgreSQL 官方 `pg_dump` 生成一份 custom archive 备份到项目根目录的 `database_backups/`，文件名类似 `mianba_20260524_143012.dump`。备份成功后才会执行 `alembic upgrade head`，并且自动只保留最新 3 份 `.dump` 备份，旧备份会被删除。`database_backups/` 已加入 `.gitignore`，不会提交到仓库。
+
+如果系统找不到 `pg_dump`，可以把 PostgreSQL 客户端工具加入 `PATH`，或者在当前终端显式指定：
+
+```powershell
+$env:PG_DUMP_PATH="C:\Program Files\PostgreSQL\18\bin\pg_dump.exe"
+uv run python -m app.cli.safe_migrate
+```
+
 当前后端已经具备 JWT 登录、邮箱验证码注册/登录、管理员双重认证接口、按模块扣次数、管理员手动发放次数接口、次数流水、训练会话中断恢复、完整报告保存、AI 供应商配置新增/更新、AI 调用日志，以及带 JWT 校验的面试 WebSocket 通道。登录成功后会写入 `HttpOnly` Cookie，前端不再把 token 放进 `localStorage`；后台登录还会额外校验 `ADMIN_EMAIL_ALLOWLIST` 白名单。
 
 AI 模型路由默认按“国内可用、免费/低成本优先”排序：智谱 `GLM-4.7-Flash`、`glm-z1-flash`、`glm-4-flash-250414`，再到阿里百炼 `qwen-flash`、火山方舟 `doubao-seed-1.6-flash`，最后预置 DeepSeek `deepseek-v4-flash` 作为兜底备用。面试下一轮追问会优先尝试模型路由；未配置 API Key、主模型失败或全部模型失败时，系统会自动退回内置题库继续流程，不会卡死训练。
