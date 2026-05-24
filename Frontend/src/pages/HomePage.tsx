@@ -1,67 +1,114 @@
 import { useEffect, useRef } from "react";
-import { ArrowRight, AudioLines, BriefcaseBusiness, Building2, GraduationCap, Languages, LockKeyhole, Radar, Route } from "lucide-react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { AvatarStage } from "../components/AvatarStage";
+import { AppIcon } from "../components/AppIcon";
 
 gsap.registerPlugin(ScrollTrigger);
 
-const storyCards = [
+const modules = [
   {
-    eyebrow: "JOB",
-    title: "工作面试",
-    body: "完整体验包含专业一面、专业二面和 HR 面。既练技术深挖，也练岗位匹配、动机表达和压力追问。",
-    icon: BriefcaseBusiness
+    icon: "lucide:briefcase-business",
+    label: "工作面试",
+    headline: "专业一面 + 专业二面 + HR 面",
+    cost: "3 次 / 完整体验",
+    detail: "按求职链路逐轮推进，覆盖项目深挖、岗位匹配、沟通动机和临场追问。",
   },
   {
-    eyebrow: "POSTGRADUATE",
-    title: "研究生复试面试",
-    body: "一次模拟走完整场复试，覆盖自我介绍、专业基础、科研兴趣、毕业设计和导师沟通。",
-    icon: GraduationCap
+    icon: "lucide:graduation-cap",
+    label: "研究生复试",
+    headline: "一趟走完复试模拟",
+    cost: "1 次 / 单场模拟",
+    detail: "围绕自我介绍、专业基础、科研兴趣、毕业设计和导师沟通做完整问答。",
   },
   {
-    eyebrow: "PUBLIC",
-    title: "考公面试",
-    body: "围绕结构化面试常见题型训练审题、层次、公共视角和语言稳定性。",
-    icon: Building2
+    icon: "lucide:landmark",
+    label: "考公面试",
+    headline: "结构化题型表达训练",
+    cost: "1 次 / 单场模拟",
+    detail: "训练审题、层次、公共视角和稳定输出，适配综合分析与应急应变。",
   },
   {
-    eyebrow: "IELTS",
-    title: "雅思口语面试",
-    body: "从 Part 1 到 Part 3 模拟口语问答节奏，训练流利度、词汇、语法和观点展开。",
-    icon: Languages
-  }
+    icon: "lucide:languages",
+    label: "雅思口语",
+    headline: "Part 1 / 2 / 3 全流程",
+    cost: "2 次 / 口语全流程",
+    detail: "按口语考试节奏训练流利度、词汇、语法、发音和观点展开。",
+  },
 ];
 
-const pipelineItems = [
-  "选择面试模块",
-  "匹配专属流程",
-  "语音模拟问答",
-  "按场景继续追问",
-  "输出复盘报告"
+const flow = [
+  ["01", "选择目标", "工作、复试、考公、雅思四类场景分别进入不同流程。"],
+  ["02", "AI 开场提问", "系统播放问题，页面不放聊天框，避免用户依赖文字提示。"],
+  ["03", "用户语音回答", "用户组织语言并说完后，手动点击“回答完毕”。"],
+  ["04", "继续追问", "模型根据上一轮回答继续深挖，形成真实压力感。"],
+  ["05", "生成报告", "按场景输出评分、追问记录、短板和下一轮训练建议。"],
 ];
 
-const productModules = [
+const reportMetrics = [
+  ["表达稳定性", 88],
+  ["逻辑结构", 82],
+  ["场景匹配", 79],
+  ["追问应对", 74],
+  ["改进优先级", 91],
+];
+
+const practiceCoverage = [
+  ["工作面试", "项目复盘、八股追问、岗位动机、HR 压力题"],
+  ["研究生复试", "自我介绍、专业基础、科研兴趣、导师沟通"],
+  ["考公面试", "综合分析、组织协调、人际沟通、应急应变"],
+  ["雅思口语", "Part 1 日常问答、Part 2 话题卡、Part 3 延展讨论"],
+];
+
+const reportPreviews = [
   {
-    title: "工作面试",
-    rounds: "专业一面 + 专业二面 + HR 面",
-    cost: "3 次 / 完整体验"
+    label: "工作面试复盘",
+    score: "86",
+    title: "项目表达清晰，但二面追问还需要更稳。",
+    metrics: [
+      ["专业能力", 88],
+      ["项目深挖", 81],
+      ["岗位匹配", 84],
+    ],
+    followUps: ["为什么这次架构取舍优先保证吞吐？", "如果线上故障复现不了，你会怎么推进？"],
+    advice: "下一轮重点练高并发项目里的取舍、指标和失败复盘。",
+    evidence: "保留 3 轮问答、关键追问、评分维度和人工备注入口。",
+    nextRound: "建议二面专项",
   },
   {
-    title: "研究生复试",
-    rounds: "复试模拟一趟走完",
-    cost: "1 次 / 单场"
+    label: "研究生复试复盘",
+    score: "82",
+    title: "科研兴趣完整，但专业基础回答略松散。",
+    metrics: [
+      ["专业基础", 76],
+      ["科研潜力", 85],
+      ["导师沟通", 83],
+    ],
+    followUps: ["你为什么选择这个研究方向？", "毕业设计里最核心的技术难点是什么？"],
+    advice: "建议把毕设、论文阅读和研究方向整理成 90 秒表达。",
+    evidence: "记录自我介绍、专业基础、科研方向和导师沟通四类表现。",
+    nextRound: "建议基础补强",
   },
   {
-    title: "考公面试",
-    rounds: "结构化面试训练",
-    cost: "1 次 / 单场"
+    label: "雅思口语复盘",
+    score: "6.5",
+    title: "观点能展开，连接词和发音稳定性可继续提高。",
+    metrics: [
+      ["Fluency", 78],
+      ["Vocabulary", 74],
+      ["Grammar", 72],
+    ],
+    followUps: ["Can you give a specific example?", "How has this changed in recent years?"],
+    advice: "Part 2 继续练故事结构，Part 3 增加对比和原因解释。",
+    evidence: "保留 Part 1 / 2 / 3 关键回答、断点、可复用表达和弱项。",
+    nextRound: "建议口语串联",
   },
-  {
-    title: "雅思口语",
-    rounds: "Part 1 + Part 2 + Part 3",
-    cost: "2 次 / 口语全流程"
-  }
+];
+
+const adminFeatures = [
+  ["lucide:coins", "手动发放次数", "支持你先在社交平台宣传，用户联系你后由后台开通次数。"],
+  ["lucide:route", "多供应商路由", "LLM、ASR、TTS 都保留供应商配置，后续切换模型不拆代码。"],
+  ["lucide:file-clock", "审计日志", "登录、开通、扣次、模型调用和报告生成都保留可追溯记录。"],
+  ["lucide:activity", "运营数据看板", "查看用户、剩余次数、训练完成率和模型调用情况，方便判断下一步宣传渠道。"],
 ];
 
 export function HomePage() {
@@ -72,198 +119,302 @@ export function HomePage() {
       return;
     }
 
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduceMotion) {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       return;
     }
 
     const context = gsap.context(() => {
-      gsap.from(".nav-shell", { y: -28, opacity: 0, duration: 0.8, ease: "power3.out" });
-      gsap.from(".hero-kicker, .hero-title span, .hero-lead, .hero-actions, .hero-note", {
-        y: 42,
+      gsap.from(".home-nav", { y: -22, opacity: 0, duration: 0.7, ease: "power3.out" });
+      gsap.from(".hero-intro > *", {
+        y: 34,
         opacity: 0,
-        duration: 1,
-        stagger: 0.08,
-        ease: "power4.out"
-      });
-      gsap.from(".hero-product", {
-        y: 70,
-        rotateX: 8,
-        opacity: 0,
-        duration: 1.2,
+        duration: 0.9,
         ease: "power4.out",
-        delay: 0.18
+        stagger: 0.07,
       });
-      gsap.to(".product-ring", {
-        rotate: 360,
-        duration: 18,
+      gsap.from(".console-shell", {
+        y: 46,
+        opacity: 0,
+        rotateX: 4,
+        duration: 1,
+        delay: 0.15,
+        ease: "power4.out",
+      });
+      gsap.to(".voice-meter span", {
+        scaleY: 0.28,
+        duration: 0.88,
+        ease: "sine.inOut",
+        stagger: 0.07,
         repeat: -1,
-        ease: "none"
+        yoyo: true,
       });
-      gsap.to(".audio-thread", {
-        xPercent: -45,
-        duration: 18,
-        repeat: -1,
-        ease: "none"
-      });
-
-      gsap.utils.toArray<HTMLElement>(".story-card").forEach((card, index) => {
-        gsap.from(card, {
+      gsap.utils.toArray<HTMLElement>(".motion-section").forEach((section) => {
+        gsap.from(section.querySelectorAll(".motion-item"), {
           scrollTrigger: {
-            trigger: card,
+            trigger: section,
             start: "top 78%",
-            end: "bottom 52%",
-            scrub: 1
+            toggleActions: "play none none none",
           },
-          y: 80,
+          y: 54,
           opacity: 0,
-          rotate: index % 2 === 0 ? -2 : 2,
-          ease: "power2.out"
+          duration: 0.82,
+          immediateRender: false,
+          stagger: 0.08,
+          ease: "power2.out",
         });
-      });
-
-      gsap.from(".pipeline-item", {
-        scrollTrigger: {
-          trigger: ".pipeline-section",
-          start: "top 70%",
-          end: "bottom 65%",
-          scrub: 1
-        },
-        x: -80,
-        opacity: 0,
-        stagger: 0.16,
-        ease: "power2.out"
-      });
-      gsap.from(".module-card", {
-        scrollTrigger: {
-          trigger: ".module-grid",
-          start: "top 76%",
-          end: "bottom 68%",
-          scrub: 1
-        },
-        y: 70,
-        opacity: 0,
-        stagger: 0.12,
-        ease: "power2.out"
       });
     }, rootRef);
 
-    return () => context.revert();
+    return () => {
+      context.revert();
+    };
   }, []);
 
   return (
-    <main className="site-shell" ref={rootRef}>
-      <nav className="nav-shell" aria-label="主导航">
-        <a href="/" className="brand-mark" aria-label="面霸练习生首页">
-          <span className="brand-dot" />
-          面霸练习生
+    <main className="product-home" ref={rootRef}>
+      <nav className="home-nav" aria-label="主导航">
+        <a href="/" className="home-brand" aria-label="面霸练习生首页">
+          <img src="/mianba-logo.svg" alt="" />
+          <span>面霸练习生</span>
         </a>
-        <div className="nav-links">
-          <a href="#experience">体验</a>
-          <a href="#pipeline">流程</a>
+        <div className="home-links">
+          <a href="#modules">模块</a>
+          <a href="#flow">流程</a>
+          <a href="#report">报告</a>
+          <a href="#admin">后台</a>
           <a href="/login">登录</a>
         </div>
       </nav>
 
-      <section className="hero-section">
-        <div className="hero-copy">
-          <p className="hero-kicker">AI Interview Rehearsal</p>
-          <h1 className="hero-title">
-            <span>把每一种面试</span>
-            <span>提前排练到稳</span>
-          </h1>
-          <p className="hero-lead">
-            面霸练习生把工作面试、研究生复试、考公面试和雅思口语做成可反复训练的 AI 面试场。不同场景匹配不同流程、轮次和报告标准。
+      <header className="home-hero">
+        <section className="hero-intro" aria-labelledby="home-title">
+          <p className="home-eyebrow">Voice-first Interview Rehearsal</p>
+          <h1 id="home-title">四类面试，按真实流程开练。</h1>
+          <p className="home-lead">
+            面霸练习生把工作面试、研究生复试、考公面试和雅思口语拆成独立训练产品。用户不打字、不看聊天框，只和 AI 面试官轮流语音问答，结束后拿到可复盘的完整报告。
           </p>
-          <div className="hero-actions">
-            <a className="primary-action" href="/register">
+          <div className="home-actions">
+            <a className="home-primary" href="/register">
               开始练习
-              <ArrowRight size={18} />
+              <AppIcon icon="lucide:arrow-right" size={18} />
             </a>
-            <a className="secondary-action" href="/login">已有账户登录</a>
+            <a className="home-secondary" href="#modules">
+              查看模块
+              <AppIcon icon="lucide:chevron-down" size={18} />
+            </a>
           </div>
-          <p className="hero-note">为求职、升学、考编和英语口语面试前的高强度练习设计。</p>
-        </div>
+          <div className="hero-proof">
+            <span><AppIcon icon="lucide:mic-2" size={16} />全程语音</span>
+            <span><AppIcon icon="lucide:file-text" size={16} />完整报告</span>
+            <span><AppIcon icon="lucide:shield-check" size={16} />记录可追溯</span>
+          </div>
+        </section>
 
-        <div className="hero-product" aria-label="语音面试产品预览">
-          <div className="product-ring" />
-          <div className="audio-thread" aria-hidden="true">
-            {Array.from({ length: 26 }).map((_, index) => (
-              <span key={index} style={{ height: `${18 + (index % 7) * 9}px` }} />
+        <section className="console-shell" aria-label="产品训练台预览">
+          <div className="console-topbar">
+            <div>
+              <i />
+              <i />
+              <i />
+            </div>
+            <span>mianba.practice / live-room</span>
+            <strong>Voice only</strong>
+          </div>
+          <div className="console-layout">
+            <aside className="console-sidebar">
+              <span className="console-label">训练模块</span>
+              {modules.map((module) => (
+                <button className={module.label === "工作面试" ? "is-active" : ""} key={module.label} type="button">
+                  <AppIcon icon={module.icon} size={18} />
+                  <span>{module.label}</span>
+                </button>
+              ))}
+            </aside>
+            <div className="live-panel">
+              <div className="live-status">
+                <span><AppIcon icon="lucide:radio" size={18} />AI 正在提问</span>
+                <strong>第 1 / 3 轮</strong>
+              </div>
+              <div className="voice-board">
+                <div className="voice-halo">
+                  <AppIcon icon="lucide:audio-lines" size={58} />
+                </div>
+                <div className="voice-meter" aria-hidden="true">
+                  {Array.from({ length: 18 }).map((_, index) => (
+                    <span key={index} style={{ height: `${18 + (index % 7) * 9}px` }} />
+                  ))}
+                </div>
+              </div>
+              <div className="room-actions">
+                <button type="button"><AppIcon icon="lucide:mic" size={18} />开始回答</button>
+                <button type="button"><AppIcon icon="lucide:square" size={18} />回答完毕</button>
+              </div>
+            </div>
+            <aside className="report-mini">
+              <span className="console-label">本次复盘</span>
+              {reportMetrics.slice(0, 4).map(([label, value]) => (
+                <div className="mini-metric" key={label}>
+                  <span>{label}</span>
+                  <strong>{value}</strong>
+                </div>
+              ))}
+            </aside>
+          </div>
+        </section>
+      </header>
+
+      <section className="home-section module-section motion-section" id="modules">
+        <div className="section-heading motion-item">
+          <p className="home-eyebrow">Four training products</p>
+          <h2>不同目标，不同轮次，不同扣次。</h2>
+          <p>主页不再强调单一“项目面试”，而是把用户最容易理解的四类场景摆在第一层，让收费标准和训练深度自然对应。</p>
+        </div>
+        <div className="module-grid-v2">
+          {modules.map((module, index) => (
+            <article className="module-tile motion-item" key={module.label}>
+              <div className="tile-index">0{index + 1}</div>
+              <AppIcon icon={module.icon} size={30} />
+              <h3>{module.label}</h3>
+              <strong>{module.headline}</strong>
+              <p>{module.detail}</p>
+              <span>{module.cost}</span>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="home-section coverage-section motion-section">
+        <div className="section-heading motion-item">
+          <p className="home-eyebrow">Practice coverage</p>
+          <h2>用户进来后，看到的是明确可练的题型。</h2>
+          <p>每个模块都围绕真实考试或面试场景组织问题，不把所有用户都丢进同一个泛面试入口。</p>
+        </div>
+        <div className="coverage-list">
+          {practiceCoverage.map(([title, copy]) => (
+            <article className="coverage-row motion-item" key={title}>
+              <span>{title}</span>
+              <p>{copy}</p>
+              <AppIcon icon="lucide:arrow-right" size={18} />
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="flow-band motion-section" id="flow">
+        <div className="flow-heading motion-item">
+          <p className="home-eyebrow">Voice-first workflow</p>
+          <h2>像真的面试一样，一轮一轮推进。</h2>
+        </div>
+        <div className="flow-lane">
+          {flow.map(([number, title, copy]) => (
+            <article className="flow-card motion-item" key={number}>
+              <span>{number}</span>
+              <h3>{title}</h3>
+              <p>{copy}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="home-section report-deck motion-section" id="report">
+        <div className="section-heading motion-item">
+          <p className="home-eyebrow">Interview report</p>
+          <h2>每一类训练，都给用户一份能继续行动的复盘报告。</h2>
+        </div>
+        <div className="report-screens">
+          {reportPreviews.map((report) => (
+            <article className="report-screen motion-item" key={report.label}>
+              <div className="screen-toolbar">
+                <span>{report.label}</span>
+                <strong>{report.score}</strong>
+              </div>
+              <h3>{report.title}</h3>
+              <div className="screen-metrics">
+                {report.metrics.map(([label, value]) => (
+                  <div className="screen-metric" key={label}>
+                    <span>{label}</span>
+                    <meter max="100" min="0" value={Number(value)} />
+                    <strong>{value}%</strong>
+                  </div>
+                ))}
+              </div>
+              <div className="screen-follow">
+                <span><AppIcon icon="lucide:radio" size={14} />追问链路</span>
+                {report.followUps.map((item) => (
+                  <p key={item}>{item}</p>
+                ))}
+              </div>
+              <div className="screen-advice">
+                <span><AppIcon icon="lucide:file-text" size={14} />下一步训练</span>
+                <p>{report.advice}</p>
+              </div>
+              <div className="screen-footnote">
+                <span>{report.evidence}</span>
+                <strong>{report.nextRound}</strong>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="admin-band motion-section" id="admin">
+        <div className="admin-inner">
+          <div className="section-heading motion-item">
+            <p className="home-eyebrow">Operator console</p>
+            <h2>先人工开通次数，也要按正式后台来设计。</h2>
+            <p>你可以先通过社交平台获客，再在后台给用户开通次数；模型路由、管理员认证和日志体系从一开始就留好位置。</p>
+          </div>
+          <div className="admin-feature-grid">
+            {adminFeatures.map(([icon, title, copy]) => (
+              <article className="admin-feature motion-item" key={title}>
+                <AppIcon icon={icon} size={26} />
+                <h3>{title}</h3>
+                <p>{copy}</p>
+              </article>
             ))}
           </div>
-          <div className="product-panel">
-            <div className="session-strip">
-              <span>Multi-Scenario Interview</span>
-              <strong>4 Modules</strong>
-            </div>
-            <AvatarStage state="speaking" compact />
-            <div className="prompt-card">
-              <Radar size={18} />
-              <p>请选择训练场景：工作面试、研究生复试、考公面试或雅思口语。</p>
-            </div>
-          </div>
         </div>
       </section>
 
-      <section className="module-section" id="modules">
-        <div className="section-heading">
-          <span className="eyebrow">Interview Modules</span>
-          <h2>四个场景，四套面试节奏</h2>
+      <section className="home-section pricing-panel motion-section">
+        <div className="pricing-copy motion-item">
+          <p className="home-eyebrow">Scenario-based credits</p>
+          <h2>按一次完整体验计费，而不是按一次按钮计费。</h2>
+          <p>工作面试包含三轮，因此消耗 3 次；研究生复试和考公面试是单场训练，消耗 1 次；雅思口语覆盖 Part 1 到 Part 3，消耗 2 次。</p>
         </div>
-        <div className="module-grid">
-          {productModules.map((product) => (
-            <article className="module-card" key={product.title}>
-              <span>{product.title}</span>
-              <h3>{product.rounds}</h3>
-              <p>{product.cost}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="story-section" id="experience">
-        {storyCards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <article className="story-card" key={card.title}>
-              <div className="story-icon">
-                <Icon size={28} />
-              </div>
-              <div>
-                <span>{card.eyebrow}</span>
-                <h2>{card.title}</h2>
-                <p>{card.body}</p>
-              </div>
-            </article>
-          );
-        })}
-      </section>
-
-      <section className="pipeline-section" id="pipeline">
-        <div className="section-heading">
-          <span className="eyebrow">Interview Flow</span>
-          <h2>一次练习，走完整个面试节奏</h2>
-        </div>
-        <div className="pipeline-track">
-          {pipelineItems.map((item, index) => (
-            <div className="pipeline-item" key={item}>
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <p>{item}</p>
+        <div className="pricing-table motion-item">
+          {modules.map((module) => (
+            <div key={module.label}>
+              <span><AppIcon icon={module.icon} size={18} />{module.label}</span>
+              <strong>{module.cost}</strong>
             </div>
           ))}
         </div>
-        <div className="closing-panel">
-          <div>
-            <LockKeyhole size={24} />
-            <h2>账户、报告和后台都已准备好继续扩展</h2>
-          </div>
-          <a href="/register">
-            创建账户
-            <Route size={18} />
-          </a>
-        </div>
       </section>
+
+      <section className="home-final">
+        <img src="/mianba-logo.svg" alt="" />
+        <h2>先完成一次真实模拟，下一次上场就不再是第一次。</h2>
+        <a className="home-primary" href="/register">
+          创建账户
+          <AppIcon icon="lucide:arrow-right" size={18} />
+        </a>
+      </section>
+
+      <footer className="home-footer">
+        <div className="footer-brand">
+          <img src="/mianba-logo.svg" alt="" />
+          <span>面霸练习生</span>
+        </div>
+        <nav aria-label="底部链接">
+          <a href="/terms">使用条款</a>
+          <a href="/privacy">隐私政策</a>
+          <a href="/refund">退款与纠纷</a>
+          <a href="/contact">联系我们</a>
+        </nav>
+        <p>本产品用于面试和口语模拟训练，报告仅作为复盘参考，不承诺录取、上岸或考试成绩结果。</p>
+        <small>© 2026 面霸练习生. All rights reserved.</small>
+      </footer>
     </main>
   );
 }

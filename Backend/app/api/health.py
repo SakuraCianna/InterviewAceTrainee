@@ -1,9 +1,74 @@
 from fastapi import APIRouter
+from sqlalchemy import inspect
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.core.config import get_settings
+from app.db.session import engine
+from app.services.redis_runtime import get_redis_client
 
 router = APIRouter(prefix="/health", tags=["health"])
+
+REQUIRED_TABLES = (
+    "users",
+    "credit_ledger",
+    "interview_sessions",
+    "interview_turns",
+    "interview_reports",
+    "ai_provider_configs",
+    "admin_audit_logs",
+)
 
 
 @router.get("")
 def read_health() -> dict[str, str]:
     return {"status": "ok", "service": "mianba-backend"}
 
+
+@router.get("/readiness")
+def read_readiness() -> dict[str, object]:
+    settings = get_settings()
+    checks = {
+        "database": check_database(),
+        "redis": check_redis(),
+        "email": check_email(settings),
+        "auth": check_auth(settings),
+    }
+    required_checks_ready = checks["database"]["ready"] and checks["auth"]["ready"]
+    status = "ready" if required_checks_ready else "degraded"
+    return {"status": status, "service": "mianba-backend", "checks": checks}
+
+
+def check_database() -> dict[str, object]:
+    try:
+        inspector = inspect(engine)
+        missing_tables = [table for table in REQUIRED_TABLES if not inspector.has_table(table)]
+    except SQLAlchemyError as exc:
+        return {"ready": False, "detail": str(exc)}
+
+    return {"ready": not missing_tables, "missing_tables": missing_tables}
+
+
+def check_redis() -> dict[str, object]:
+    client = get_redis_client()
+    return {"ready": client is not None}
+
+
+def check_email(settings) -> dict[str, object]:
+    provider = settings.email_provider.strip().lower()
+    if provider == "dev":
+        return {"ready": True, "provider": provider, "detail": "dev_code_response_enabled"}
+    if provider == "resend":
+        return {
+            "ready": bool(settings.resend_api_key and settings.email_from_address),
+            "provider": provider,
+            "from_address": settings.email_from_address,
+        }
+    return {"ready": False, "provider": provider, "detail": "unsupported_email_provider"}
+
+
+def check_auth(settings) -> dict[str, object]:
+    return {
+        "ready": settings.access_token_secret != "change-me-before-deploy" and len(settings.access_token_secret) >= 32,
+        "cookie_secure": settings.auth_cookie_secure,
+        "same_site": settings.auth_cookie_samesite,
+    }

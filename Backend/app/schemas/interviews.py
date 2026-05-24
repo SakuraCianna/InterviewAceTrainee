@@ -12,9 +12,37 @@ class InterviewType(StrEnum):
 
 class InterviewStartRequest(BaseModel):
     session_id: str = Field(min_length=1)
-    current_credit_balance: int = Field(ge=0)
-    is_admin: bool = False
     interview_type: InterviewType | None = None
+
+
+class InterviewQuestion(BaseModel):
+    turn_index: int
+    round_name: str
+    text: str
+
+
+class InterviewReportDimension(BaseModel):
+    name: str
+    score: int
+    comment: str
+
+
+class InterviewReportTurn(BaseModel):
+    round_name: str
+    question: str
+    answer: str
+
+
+class InterviewReportResponse(BaseModel):
+    session_id: str
+    interview_type: InterviewType
+    total_score: int
+    summary: str
+    dimensions: list[InterviewReportDimension]
+    strengths: list[str]
+    improvements: list[str]
+    next_plan: list[str]
+    turns: list[InterviewReportTurn]
 
 
 class InterviewStartResponse(BaseModel):
@@ -23,6 +51,25 @@ class InterviewStartResponse(BaseModel):
     credit_change: int
     balance_after: int
     ledger_reason: str
+    status: str
+    current_step_index: int
+    total_steps: int
+    current_question: InterviewQuestion | None = None
+    report: InterviewReportResponse | None = None
+
+
+class InterviewAnswerRequest(BaseModel):
+    answer_text: str = Field(min_length=1, max_length=8000)
+
+
+class InterviewAnswerResponse(BaseModel):
+    session_id: str
+    interview_type: InterviewType
+    status: str
+    current_step_index: int
+    total_steps: int
+    current_question: InterviewQuestion | None = None
+    report: InterviewReportResponse | None = None
 
 
 class InterviewProduct(BaseModel):

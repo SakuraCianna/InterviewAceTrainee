@@ -10,8 +10,8 @@ __pycache__/
 Frontend/node_modules/
 Frontend/dist/
 Frontend/.vite/
+Frontend/*.tsbuildinfo
 
 .env
 .env.*
 !.env.example
-

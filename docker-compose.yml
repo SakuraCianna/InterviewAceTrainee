@@ -12,7 +12,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mianba -d mianba"]
       interval: 10s
@@ -23,6 +23,9 @@ services:
     image: redis:8-alpine
     container_name: mianba-redis
     restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
     ports:
       - "6379:6379"
     healthcheck:
@@ -37,7 +40,10 @@ services:
     container_name: mianba-backend
     restart: unless-stopped
     env_file:
-      - ./Backend/.env.example
+      - ./Backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://mianba:mianba@postgres:5432/mianba
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,3 +76,4 @@ services:
 
 volumes:
   postgres-data:
+  redis-data:

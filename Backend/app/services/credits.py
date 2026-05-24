@@ -20,7 +20,10 @@ class CreditLedger:
         self._balance = initial_balance
         self._is_admin = is_admin
 
-    def consume_for_interview(self, session_id: str) -> CreditLedgerEntry:
+    def consume_for_interview(self, session_id: str, credit_cost: int = 1, interview_type: str = "interview") -> CreditLedgerEntry:
+        if credit_cost <= 0:
+            raise ValueError("credit cost must be positive")
+
         if self._is_admin:
             return CreditLedgerEntry(
                 change_amount=0,
@@ -29,14 +32,13 @@ class CreditLedger:
                 related_session_id=session_id,
             )
 
-        if self._balance <= 0:
+        if self._balance < credit_cost:
             raise InsufficientCreditsError("not enough credits to start an interview")
 
-        self._balance -= 1
+        self._balance -= credit_cost
         return CreditLedgerEntry(
-            change_amount=-1,
+            change_amount=-credit_cost,
             balance_after=self._balance,
-            reason="interview_start",
+            reason=f"interview_start:{interview_type}",
             related_session_id=session_id,
         )
-

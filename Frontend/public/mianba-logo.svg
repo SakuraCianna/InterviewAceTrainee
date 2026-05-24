@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">面霸练习生标识</title>
+  <desc id="desc">由面试轮次、语音波形和复盘节点组成的产品图标。</desc>
+  <defs>
+    <linearGradient id="logo-panel" x1="20" y1="16" x2="108" y2="112" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EEF4FF"/>
+    </linearGradient>
+    <linearGradient id="logo-wave" x1="32" y1="44" x2="96" y2="84" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2F6DF6"/>
+      <stop offset=".55" stop-color="#18B7D6"/>
+      <stop offset="1" stop-color="#00A878"/>
+    </linearGradient>
+    <filter id="logo-shadow" x="0" y="0" width="128" height="128" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="10" flood-color="#10141F" flood-opacity=".18"/>
+    </filter>
+  </defs>
+  <rect x="12" y="12" width="104" height="104" rx="26" fill="url(#logo-panel)" filter="url(#logo-shadow)"/>
+  <rect x="22" y="22" width="84" height="84" rx="20" fill="none" stroke="#D9E5FF" stroke-width="3"/>
+  <circle cx="39" cy="39" r="6" fill="#D9FF74"/>
+  <circle cx="89" cy="89" r="6" fill="#FFB84D"/>
+  <path d="M37 55C45 47 53 47 61 55C69 63 77 63 91 50" fill="none" stroke="url(#logo-wave)" stroke-width="7" stroke-linecap="round"/>
+  <path d="M37 70C45 62 53 62 61 70C69 78 77 78 91 65" fill="none" stroke="url(#logo-wave)" stroke-width="7" stroke-linecap="round"/>
+  <path d="M37 85C45 77 53 77 61 85C69 93 77 93 91 80" fill="none" stroke="url(#logo-wave)" stroke-width="7" stroke-linecap="round"/>
+  <path d="M48 36H80" fill="none" stroke="#10141F" stroke-width="6" stroke-linecap="round" opacity=".86"/>
+  <path d="M51 102H77" fill="none" stroke="#10141F" stroke-width="5" stroke-linecap="round" opacity=".72"/>
+</svg>

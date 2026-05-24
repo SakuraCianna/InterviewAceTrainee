@@ -1,4 +1,4 @@
-import { Brain, Mic, Sparkles } from "lucide-react";
+import { AppIcon } from "./AppIcon";
 
 export type AvatarState = "idle" | "listening" | "thinking" | "speaking";
 
@@ -39,10 +39,10 @@ export function AvatarStage({ state, compact = false }: AvatarStageProps) {
           </div>
         </div>
         <div className="mentor-status">
-          {state === "listening" && <Mic size={16} />}
-          {state === "thinking" && <Brain size={16} />}
-          {state === "speaking" && <Sparkles size={16} />}
-          {state === "idle" && <Sparkles size={16} />}
+          {state === "listening" && <AppIcon icon="lucide:mic" size={16} />}
+          {state === "thinking" && <AppIcon icon="lucide:brain" size={16} />}
+          {state === "speaking" && <AppIcon icon="lucide:sparkles" size={16} />}
+          {state === "idle" && <AppIcon icon="lucide:sparkles" size={16} />}
           <span>{stateLabels[state]}</span>
         </div>
       </div>

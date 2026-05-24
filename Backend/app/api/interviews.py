@@ -1,24 +1,239 @@
-from fastapi import APIRouter, HTTPException, status
+from collections.abc import Generator
 
-from app.schemas.interviews import InterviewStartRequest, InterviewStartResponse, InterviewType
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.api.dependencies import TokenClaims, get_current_user_claims
+from app.api.providers import get_provider_config_store
+from app.core.config import Settings, get_settings
+from app.db.session import get_optional_db_session
+from app.schemas.interviews import (
+    InterviewAnswerRequest,
+    InterviewAnswerResponse,
+    InterviewReportResponse,
+    InterviewStartRequest,
+    InterviewStartResponse,
+    InterviewType,
+)
+from app.services.credit_balances import CreditBalanceStore, get_credit_balance_store
+from app.services.credit_ledger import CreditLedgerStore, get_credit_ledger_store
 from app.services.credits import CreditLedger, InsufficientCreditsError
+from app.services.ai_call_logs import AICallLogStore, get_ai_call_log_store
+from app.services.interview_runtime import (
+    DatabaseInterviewRuntimeStore,
+    InMemoryInterviewRuntimeStore,
+    InterviewSessionNotFoundError,
+    InterviewState,
+    memory_interview_store,
+)
+from app.services.ai_router import AIServiceRouter
+from app.services.interview_ai import generate_next_interview_question
+from app.services.interview_products import get_interview_product
+from app.services.llm_gateway import OpenAICompatibleLLMClient
+from app.services.provider_configs import DatabaseProviderConfigStore, InMemoryProviderConfigStore
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
 
+INTERVIEW_REQUIRED_TABLES = ("interview_sessions", "interview_turns", "interview_reports")
+
+
+def get_optional_interview_db_session() -> Generator[Session | None, None, None]:
+    yield from get_optional_db_session(INTERVIEW_REQUIRED_TABLES)
+
+
+def get_interview_store(
+    db_session: Session | None = Depends(get_optional_interview_db_session),
+) -> DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore:
+    if db_session is None:
+        return memory_interview_store
+    return DatabaseInterviewRuntimeStore(db_session)
+
+
+def build_start_response(
+    state: InterviewState,
+    credit_change: int,
+    balance_after: int,
+    ledger_reason: str,
+) -> InterviewStartResponse:
+    return InterviewStartResponse(
+        session_id=state.session_id,
+        interview_type=state.interview_type,
+        credit_change=credit_change,
+        balance_after=balance_after,
+        ledger_reason=ledger_reason,
+        status=state.status,
+        current_step_index=state.current_step_index,
+        total_steps=state.total_steps,
+        current_question=state.current_question,
+        report=state.report,
+    )
+
+
+def build_answer_response(state: InterviewState) -> InterviewAnswerResponse:
+    return InterviewAnswerResponse(
+        session_id=state.session_id,
+        interview_type=state.interview_type,
+        status=state.status,
+        current_step_index=state.current_step_index,
+        total_steps=state.total_steps,
+        current_question=state.current_question,
+        report=state.report,
+    )
+
 
 @router.post("", response_model=InterviewStartResponse, status_code=status.HTTP_201_CREATED)
-def start_interview(payload: InterviewStartRequest) -> InterviewStartResponse:
-    ledger = CreditLedger(initial_balance=payload.current_credit_balance, is_admin=payload.is_admin)
+def start_interview(
+    payload: InterviewStartRequest,
+    claims: TokenClaims = Depends(get_current_user_claims),
+    credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
+    credit_ledger_store: CreditLedgerStore = Depends(get_credit_ledger_store),
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
+) -> InterviewStartResponse:
+    interview_type = payload.interview_type or InterviewType.JOB
+    product = get_interview_product(interview_type)
+    is_admin = claims["role"] == "admin"
+    existing_state = interview_store.get_session(claims["sub"], payload.session_id)
+    if existing_state is not None and existing_state.status != "completed":
+        return build_start_response(
+            existing_state,
+            credit_change=0,
+            balance_after=credit_store.get_balance(claims["sub"]),
+            ledger_reason="interview_resume",
+        )
+    if existing_state is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="interview_session_already_completed")
 
     try:
-        entry = ledger.consume_for_interview(payload.session_id)
+        if is_admin:
+            ledger = CreditLedger(initial_balance=credit_store.get_balance(claims["sub"]), is_admin=True)
+            entry = ledger.consume_for_interview(
+                payload.session_id,
+                credit_cost=product.credit_cost,
+                interview_type=str(interview_type),
+            )
+        else:
+            balance_after = credit_store.adjust(claims["sub"], -product.credit_cost)
+            entry = CreditLedger(
+                initial_balance=balance_after + product.credit_cost,
+                is_admin=False,
+            ).consume_for_interview(
+                payload.session_id,
+                credit_cost=product.credit_cost,
+                interview_type=str(interview_type),
+            )
     except InsufficientCreditsError as exc:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="insufficient_credits") from exc
 
-    return InterviewStartResponse(
-        session_id=payload.session_id,
-        interview_type=payload.interview_type or InterviewType.JOB,
+    state = interview_store.create_session(claims["sub"], payload.session_id, interview_type)
+    credit_ledger_store.record(
+        user_email=claims["sub"],
+        change_amount=entry.change_amount,
+        balance_after=entry.balance_after,
+        reason=entry.reason,
+        related_session_id=entry.related_session_id,
+        operator_admin_email=claims["sub"] if is_admin else None,
+    )
+    return build_start_response(
+        state,
         credit_change=entry.change_amount,
         balance_after=entry.balance_after,
         ledger_reason=entry.reason,
     )
+
+
+@router.get("/active", response_model=InterviewAnswerResponse)
+def read_active_interview(
+    claims: TokenClaims = Depends(get_current_user_claims),
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
+) -> InterviewAnswerResponse:
+    state = interview_store.get_active_session(claims["sub"])
+    if state is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="active_interview_not_found")
+    return build_answer_response(state)
+
+
+@router.get("/{session_id}", response_model=InterviewAnswerResponse)
+def read_interview(
+    session_id: str,
+    claims: TokenClaims = Depends(get_current_user_claims),
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
+) -> InterviewAnswerResponse:
+    state = interview_store.get_session(claims["sub"], session_id)
+    if state is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview_session_not_found")
+    return build_answer_response(state)
+
+
+@router.post("/{session_id}/answers", response_model=InterviewAnswerResponse)
+def answer_interview_question(
+    session_id: str,
+    payload: InterviewAnswerRequest,
+    claims: TokenClaims = Depends(get_current_user_claims),
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
+    provider_store: DatabaseProviderConfigStore | InMemoryProviderConfigStore = Depends(get_provider_config_store),
+    ai_call_log_store: AICallLogStore = Depends(get_ai_call_log_store),
+    settings: Settings = Depends(get_settings),
+) -> InterviewAnswerResponse:
+    current_state = interview_store.get_session(claims["sub"], session_id)
+    next_question_override = None
+    if current_state is not None and current_state.current_question is not None:
+        next_question_override = build_next_question_override(
+            current_state=current_state,
+            answer_text=payload.answer_text,
+            provider_store=provider_store,
+            ai_call_log_store=ai_call_log_store,
+            settings=settings,
+        )
+
+    try:
+        state = interview_store.answer_current_question(
+            claims["sub"],
+            session_id,
+            payload.answer_text,
+            next_question_override=next_question_override,
+        )
+    except InterviewSessionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview_session_not_found") from exc
+    return build_answer_response(state)
+
+
+@router.get("/{session_id}/report", response_model=InterviewReportResponse)
+def read_interview_report(
+    session_id: str,
+    claims: TokenClaims = Depends(get_current_user_claims),
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
+) -> InterviewReportResponse:
+    report = interview_store.get_report(claims["sub"], session_id)
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview_report_not_found")
+    return report
+
+
+def build_next_question_override(
+    current_state: InterviewState,
+    answer_text: str,
+    provider_store: DatabaseProviderConfigStore | InMemoryProviderConfigStore,
+    ai_call_log_store: AICallLogStore,
+    settings: Settings,
+) -> str | None:
+    if current_state.current_step_index + 1 >= current_state.total_steps:
+        return None
+    steps = build_interview_steps_for_state(current_state)
+    next_step = steps[current_state.current_step_index + 1]
+    return generate_next_interview_question(
+        router=AIServiceRouter(provider_store.list_configs()),
+        llm_client=OpenAICompatibleLLMClient(settings),
+        interview_type=current_state.interview_type,
+        current_question=current_state.current_question.text,
+        answer_text=answer_text,
+        next_round_name=next_step.round_name,
+        next_static_question=next_step.question_text,
+        call_log_store=ai_call_log_store,
+        session_id=current_state.session_id,
+    )
+
+
+def build_interview_steps_for_state(current_state: InterviewState):
+    from app.services.interview_runtime import build_interview_steps
+
+    return build_interview_steps(current_state.interview_type)

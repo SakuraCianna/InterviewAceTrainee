@@ -1,2 +1,1 @@
-"""SQLAlchemy models for the production database schema."""
-
+"""SQLAlchemy models for the application database schema."""
