@@ -21,15 +21,3 @@ dependencies = [
     "pypdf>=6.12.1",
     "python-docx>=1.2.0",
 ]
-
-[dependency-groups]
-dev = [
-    "httpx>=0.28.0",
-    "pytest>=8.3.0",
-    "pytest-cov>=6.0.0",
-]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["."]
-addopts = "-q"
