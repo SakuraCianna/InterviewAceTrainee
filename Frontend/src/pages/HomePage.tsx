@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { AppIcon } from "../components/AppIcon";
@@ -114,7 +114,7 @@ const adminFeatures = [
 export function HomePage() {
   const rootRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!rootRef.current) {
       return;
     }
@@ -149,23 +149,35 @@ export function HomePage() {
         yoyo: true,
       });
       gsap.utils.toArray<HTMLElement>(".motion-section").forEach((section) => {
-        gsap.from(section.querySelectorAll(".motion-item"), {
+        const items = Array.from(section.querySelectorAll<HTMLElement>(".motion-item"));
+        if (items.length === 0) {
+          return;
+        }
+
+        gsap.set(items, { autoAlpha: 0, y: 54 });
+        gsap.to(items, {
           scrollTrigger: {
             trigger: section,
             start: "top 78%",
             toggleActions: "play none none none",
+            once: true,
           },
-          y: 54,
-          opacity: 0,
+          y: 0,
+          autoAlpha: 1,
           duration: 0.82,
-          immediateRender: false,
+          clearProps: "transform,opacity,visibility",
           stagger: 0.08,
           ease: "power2.out",
         });
       });
     }, rootRef);
 
+    const refreshFrame = window.requestAnimationFrame(() => {
+      ScrollTrigger.refresh(true);
+    });
+
     return () => {
+      window.cancelAnimationFrame(refreshFrame);
       context.revert();
     };
   }, []);
