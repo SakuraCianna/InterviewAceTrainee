@@ -24,11 +24,6 @@ def create_csrf_token() -> str:
     return token_urlsafe(32)
 
 
-def require_admin_role(role: str) -> None:
-    if role != "admin":
-        raise PermissionError("admin role required")
-
-
 def is_email_in_allowlist(email: str, allowlist: str) -> bool:
     allowed_emails = {item.strip().lower() for item in allowlist.split(",") if item.strip()}
     return email.strip().lower() in allowed_emails

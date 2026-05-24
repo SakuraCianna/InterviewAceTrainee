@@ -343,6 +343,7 @@ class InMemoryInterviewRuntimeStore:
         session_id: str,
         interview_type: InterviewType,
         material_context: InterviewMaterialContext | None = None,
+        admin_unlimited_usage: bool = False,
     ) -> InterviewState:
         steps = build_interview_steps(interview_type, material_context)
         record = {
@@ -350,6 +351,7 @@ class InMemoryInterviewRuntimeStore:
             "user_email": user_email,
             "interview_type": interview_type,
             "material_context": material_context,
+            "admin_unlimited_usage": admin_unlimited_usage,
             "status": "in_progress",
             "current_step_index": 0,
             "steps": steps,
@@ -469,6 +471,7 @@ class DatabaseInterviewRuntimeStore:
         session_id: str,
         interview_type: InterviewType,
         material_context: InterviewMaterialContext | None = None,
+        admin_unlimited_usage: bool = False,
     ) -> InterviewState:
         steps = build_interview_steps(interview_type, material_context)
         session_model = InterviewSession(
@@ -479,7 +482,8 @@ class DatabaseInterviewRuntimeStore:
             status="in_progress",
             current_step_index=0,
             total_steps=len(steps),
-            charged_credit=True,
+            charged_credit=not admin_unlimited_usage,
+            admin_unlimited_usage=admin_unlimited_usage,
             started_at=utc_now(),
         )
         self._session.add(session_model)

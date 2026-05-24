@@ -1,9 +1,16 @@
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.core.security import create_access_token
 from app.main import app
+from app.models import entities  # noqa: F401
+from app.models.base import Base
+from app.models.entities import InterviewSession
+from app.schemas.interviews import InterviewType
+from app.services.interview_runtime import DatabaseInterviewRuntimeStore
 
 
 def unique_email(prefix: str) -> str:
@@ -171,6 +178,25 @@ def test_admin_interview_keeps_unlimited_usage():
     assert response.json()["credit_change"] == 0
     assert response.json()["balance_after"] == 0
     assert response.json()["ledger_reason"] == "admin_unlimited_interview"
+
+
+def test_database_interview_session_marks_admin_unlimited_usage_without_charging_credit():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    store = DatabaseInterviewRuntimeStore(session)
+
+    store.create_session(
+        user_email="admin@example.com",
+        session_id="session-admin-db-marker",
+        interview_type=InterviewType.CIVIL_SERVICE,
+        admin_unlimited_usage=True,
+    )
+
+    session_model = session.get(InterviewSession, "session-admin-db-marker")
+    assert session_model is not None
+    assert session_model.admin_unlimited_usage is True
+    assert session_model.charged_credit is False
 
 
 def test_answering_all_questions_completes_session_and_returns_report():

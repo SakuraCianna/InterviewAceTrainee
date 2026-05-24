@@ -183,7 +183,13 @@ def start_interview_with_stores(
     except InsufficientCreditsError as exc:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="insufficient_credits") from exc
 
-    state = interview_store.create_session(claims["sub"], payload.session_id, interview_type, material_context)
+    state = interview_store.create_session(
+        claims["sub"],
+        payload.session_id,
+        interview_type,
+        material_context,
+        admin_unlimited_usage=is_admin,
+    )
     credit_ledger_store.record(
         user_email=claims["sub"],
         change_amount=entry.change_amount,

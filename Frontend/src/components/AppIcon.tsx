@@ -9,7 +9,6 @@ import briefcase from "@iconify-icons/lucide/briefcase";
 import checkCircle2 from "@iconify-icons/lucide/check-circle-2";
 import chevronDown from "@iconify-icons/lucide/chevron-down";
 import coins from "@iconify-icons/lucide/coins";
-import database from "@iconify-icons/lucide/database";
 import fileClock from "@iconify-icons/lucide/file-clock";
 import fileText from "@iconify-icons/lucide/file-text";
 import graduationCap from "@iconify-icons/lucide/graduation-cap";
@@ -26,7 +25,6 @@ import play from "@iconify-icons/lucide/play";
 import radio from "@iconify-icons/lucide/radio";
 import route from "@iconify-icons/lucide/route";
 import rotateCcw from "@iconify-icons/lucide/rotate-ccw";
-import settings from "@iconify-icons/lucide/settings";
 import shieldCheck from "@iconify-icons/lucide/shield-check";
 import sparkles from "@iconify-icons/lucide/sparkles";
 import square from "@iconify-icons/lucide/square";
@@ -39,14 +37,12 @@ const icons: Record<string, IconifyIcon> = {
   "lucide:arrow-left": arrowLeft,
   "lucide:arrow-right": arrowRight,
   "lucide:audio-lines": waves,
-  "lucide:audio-waveform": waves,
   "lucide:bot": bot,
   "lucide:brain": brain,
   "lucide:briefcase-business": briefcase,
   "lucide:check-circle-2": checkCircle2,
   "lucide:chevron-down": chevronDown,
   "lucide:coins": coins,
-  "lucide:database": database,
   "lucide:file-clock": fileClock,
   "lucide:file-text": fileText,
   "lucide:graduation-cap": graduationCap,
@@ -63,7 +59,6 @@ const icons: Record<string, IconifyIcon> = {
   "lucide:radio": radio,
   "lucide:route": route,
   "lucide:rotate-ccw": rotateCcw,
-  "lucide:settings": settings,
   "lucide:shield-check": shieldCheck,
   "lucide:sparkles": sparkles,
   "lucide:square": square,

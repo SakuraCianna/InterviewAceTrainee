@@ -10,6 +10,7 @@ __pycache__/
 Frontend/node_modules/
 Frontend/dist/
 Frontend/.vite/
+Frontend/test-results/
 Frontend/*.tsbuildinfo
 
 database_backups/
