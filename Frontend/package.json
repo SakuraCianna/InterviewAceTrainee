@@ -12,6 +12,7 @@
     "@iconify-icons/lucide": "^1.2.135",
     "@iconify/react": "^6.0.2",
     "@vitejs/plugin-react": "^5.1.1",
+    "echarts": "^6.1.0",
     "gsap": "^3.14.2",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",

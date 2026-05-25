@@ -63,6 +63,52 @@ class AdminAICallLogResponse(BaseModel):
     created_at: str
 
 
+class AdminStatsPoint(BaseModel):
+    label: str
+    value: int | float
+
+
+class AdminDashboardOverview(BaseModel):
+    total_users: int
+    active_users: int
+    disabled_users: int
+    admin_users: int
+    total_credit_balance: int
+    total_credit_granted: int
+    total_sessions: int
+    completed_sessions: int
+    active_sessions: int
+    today_sessions: int
+    total_reports: int
+    average_report_score: float | None = None
+    ai_success_rate: float | None = None
+    failed_login_count: int
+    open_refund_cases: int
+
+
+class AdminTopUserUsage(BaseModel):
+    email: str
+    total_interviews: int
+    completed_interviews: int
+    credit_balance: int
+    last_interview_at: str | None = None
+
+
+class AdminDashboardStatsResponse(BaseModel):
+    database_ready: bool
+    generated_at: str
+    overview: AdminDashboardOverview
+    user_growth: list[AdminStatsPoint]
+    daily_interviews: list[AdminStatsPoint]
+    daily_reports: list[AdminStatsPoint]
+    interview_type_distribution: list[AdminStatsPoint]
+    session_status_distribution: list[AdminStatsPoint]
+    ai_call_success_distribution: list[AdminStatsPoint]
+    login_outcome_distribution: list[AdminStatsPoint]
+    refund_status_distribution: list[AdminStatsPoint]
+    top_users: list[AdminTopUserUsage]
+
+
 class AdminAuthLoginLogResponse(BaseModel):
     id: str
     email: str

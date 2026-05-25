@@ -1,6 +1,17 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import type { EChartsOption } from "echarts";
 import { AppIcon } from "../../components/AppIcon";
 import { csrfHeaders } from "../../lib/api";
+
+type EChartsModule = typeof import("echarts");
+type EChartsInstance = ReturnType<EChartsModule["init"]>;
+
+let echartsLoader: Promise<EChartsModule> | null = null;
+
+function loadECharts() {
+  echartsLoader ??= import("echarts");
+  return echartsLoader;
+}
 
 type CurrentUser = {
   email: string;
@@ -147,6 +158,145 @@ type SystemConfig = {
   updated_at?: string | null;
 };
 
+type AdminStatsPoint = {
+  label: string;
+  value: number;
+};
+
+type AdminDashboardOverview = {
+  total_users: number;
+  active_users: number;
+  disabled_users: number;
+  admin_users: number;
+  total_credit_balance: number;
+  total_credit_granted: number;
+  total_sessions: number;
+  completed_sessions: number;
+  active_sessions: number;
+  today_sessions: number;
+  total_reports: number;
+  average_report_score?: number | null;
+  ai_success_rate?: number | null;
+  failed_login_count: number;
+  open_refund_cases: number;
+};
+
+type AdminTopUserUsage = {
+  email: string;
+  total_interviews: number;
+  completed_interviews: number;
+  credit_balance: number;
+  last_interview_at?: string | null;
+};
+
+type AdminDashboardStats = {
+  database_ready: boolean;
+  generated_at: string;
+  overview: AdminDashboardOverview;
+  user_growth: AdminStatsPoint[];
+  daily_interviews: AdminStatsPoint[];
+  daily_reports: AdminStatsPoint[];
+  interview_type_distribution: AdminStatsPoint[];
+  session_status_distribution: AdminStatsPoint[];
+  ai_call_success_distribution: AdminStatsPoint[];
+  login_outcome_distribution: AdminStatsPoint[];
+  refund_status_distribution: AdminStatsPoint[];
+  top_users: AdminTopUserUsage[];
+};
+
+const chartTextColor = "#475569";
+
+function lineDashboardOption(stats: AdminDashboardStats): EChartsOption {
+  const labels = stats.daily_interviews.map((item) => item.label);
+  return {
+    color: ["#2563eb", "#0ea5a5", "#d6ff5f"],
+    grid: { top: 36, right: 18, bottom: 28, left: 38 },
+    legend: { top: 0, textStyle: { color: chartTextColor, fontWeight: 700 } },
+    tooltip: { trigger: "axis" },
+    xAxis: { type: "category", boundaryGap: false, data: labels, axisLabel: { color: chartTextColor } },
+    yAxis: { type: "value", minInterval: 1, axisLabel: { color: chartTextColor }, splitLine: { lineStyle: { color: "rgba(15,23,42,0.08)" } } },
+    series: [
+      { name: "训练场次", type: "line", smooth: true, areaStyle: { opacity: 0.12 }, data: stats.daily_interviews.map((item) => item.value) },
+      { name: "生成报告", type: "line", smooth: true, areaStyle: { opacity: 0.1 }, data: stats.daily_reports.map((item) => item.value) },
+      { name: "新增用户", type: "line", smooth: true, areaStyle: { opacity: 0.08 }, data: stats.user_growth.map((item) => item.value) },
+    ],
+  };
+}
+
+function donutDashboardOption(points: AdminStatsPoint[], colors: string[]): EChartsOption {
+  return {
+    color: colors,
+    tooltip: { trigger: "item" },
+    legend: { bottom: 0, textStyle: { color: chartTextColor, fontWeight: 700 } },
+    series: [
+      {
+        type: "pie",
+        radius: ["48%", "72%"],
+        center: ["50%", "42%"],
+        avoidLabelOverlap: true,
+        label: { formatter: "{b}\n{c}", color: "#0f172a", fontWeight: 900 },
+        data: points.map((item) => ({ name: item.label, value: item.value })),
+      },
+    ],
+  };
+}
+
+function barDashboardOption(points: AdminStatsPoint[], name: string, color: string): EChartsOption {
+  return {
+    color: [color],
+    grid: { top: 16, right: 18, bottom: 28, left: 38 },
+    tooltip: { trigger: "axis" },
+    xAxis: { type: "category", data: points.map((item) => item.label), axisLabel: { color: chartTextColor } },
+    yAxis: { type: "value", minInterval: 1, axisLabel: { color: chartTextColor }, splitLine: { lineStyle: { color: "rgba(15,23,42,0.08)" } } },
+    series: [
+      {
+        name,
+        type: "bar",
+        barMaxWidth: 42,
+        itemStyle: { borderRadius: [8, 8, 0, 0] },
+        data: points.map((item) => item.value),
+      },
+    ],
+  };
+}
+
+function AdminChart({ option, height = 280 }: { option: EChartsOption; height?: number }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<EChartsInstance | null>(null);
+  const optionRef = useRef(option);
+
+  useEffect(() => {
+    optionRef.current = option;
+    chartRef.current?.setOption(option, true);
+  }, [option]);
+
+  useEffect(() => {
+    let disposed = false;
+    let resizeObserver: ResizeObserver | null = null;
+
+    void loadECharts().then((echarts) => {
+      if (disposed || !containerRef.current) {
+        return;
+      }
+      chartRef.current = echarts.init(containerRef.current);
+      chartRef.current.setOption(optionRef.current);
+      if ("ResizeObserver" in window) {
+        resizeObserver = new ResizeObserver(() => chartRef.current?.resize());
+        resizeObserver.observe(containerRef.current);
+      }
+    });
+
+    return () => {
+      disposed = true;
+      resizeObserver?.disconnect();
+      chartRef.current?.dispose();
+      chartRef.current = null;
+    };
+  }, []);
+
+  return <div className="admin-chart" ref={containerRef} style={{ minHeight: height }} />;
+}
+
 export function AdminShell() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
@@ -157,6 +307,7 @@ export function AdminShell() {
   const [customerServiceNotes, setCustomerServiceNotes] = useState<CustomerServiceNoteEntry[]>([]);
   const [refundCases, setRefundCases] = useState<RefundCaseEntry[]>([]);
   const [systemConfigs, setSystemConfigs] = useState<SystemConfig[]>([]);
+  const [dashboardStats, setDashboardStats] = useState<AdminDashboardStats | null>(null);
   const [providerTestResults, setProviderTestResults] = useState<Record<string, string>>({});
   const [userSearchQuery, setUserSearchQuery] = useState("");
   const [userSearchResults, setUserSearchResults] = useState<AdminUserSearchItem[]>([]);
@@ -183,6 +334,19 @@ export function AdminShell() {
   const [isLoading, setIsLoading] = useState(true);
 
   const enabledProviderCount = useMemo(() => providers.filter((provider) => provider.enabled).length, [providers]);
+  const dashboardChartOptions = useMemo(() => {
+    if (!dashboardStats) {
+      return null;
+    }
+    return {
+      trend: lineDashboardOption(dashboardStats),
+      moduleMix: donutDashboardOption(dashboardStats.interview_type_distribution, ["#2563eb", "#0ea5a5", "#d6ff5f", "#ff8a3d"]),
+      sessionStatus: donutDashboardOption(dashboardStats.session_status_distribution, ["#2563eb", "#22c55e", "#f59e0b", "#ef4444"]),
+      aiQuality: barDashboardOption(dashboardStats.ai_call_success_distribution, "AI 调用", "#2563eb"),
+      loginOutcome: barDashboardOption(dashboardStats.login_outcome_distribution, "登录", "#0ea5a5"),
+      refunds: donutDashboardOption(dashboardStats.refund_status_distribution, ["#f59e0b", "#2563eb", "#22c55e", "#ef4444"]),
+    };
+  }, [dashboardStats]);
 
   useEffect(() => {
     void loadCurrentUser();
@@ -198,6 +362,10 @@ export function AdminShell() {
     }
     const amount = (value / 100).toFixed(2);
     return currency === "CNY" ? `¥${amount}` : `${currency} ${amount}`;
+  }
+
+  function formatDashboardRate(value?: number | null) {
+    return value == null ? "暂无" : `${value}%`;
   }
 
   function parseOptionalInteger(rawValue: string) {
@@ -241,6 +409,7 @@ export function AdminShell() {
     setMessage(`已进入后台：${user.email}`);
     await Promise.all([
       loadProviders(),
+      loadDashboardStats(),
       loadSystemConfigs(),
       loadAuditLogs(),
       loadAiCallLogs(),
@@ -319,6 +488,14 @@ export function AdminShell() {
       return;
     }
     setSystemConfigs((await response.json()) as SystemConfig[]);
+  }
+
+  async function loadDashboardStats() {
+    const response = await fetch("/api/admin/stats", { credentials: "include" });
+    if (!response.ok) {
+      return;
+    }
+    setDashboardStats((await response.json()) as AdminDashboardStats);
   }
 
   async function loadCreditLedger(userEmail = creditUser) {
@@ -463,7 +640,7 @@ export function AdminShell() {
     setCreditAmount("1");
     setCreditReason("manual_grant");
     setCreditNote("");
-    await Promise.all([loadAuditLogs(), loadCreditLedger(creditUser)]);
+    await Promise.all([loadDashboardStats(), loadAuditLogs(), loadCreditLedger(creditUser)]);
   }
 
   async function submitCustomerServiceNote(event: FormEvent<HTMLFormElement>) {
@@ -550,7 +727,7 @@ export function AdminShell() {
     setRefundCreditAdjustment("");
     setRefundSessionId("");
     setMessage(`已创建 ${selectedUserEmail} 的退款纠纷记录。`);
-    await Promise.all([loadRefundCases(selectedUserEmail), loadAuditLogs()]);
+    await Promise.all([loadDashboardStats(), loadRefundCases(selectedUserEmail), loadAuditLogs()]);
   }
 
   async function updateRefundCaseStatus(refundCase: RefundCaseEntry, statusValue: string) {
@@ -570,7 +747,7 @@ export function AdminShell() {
     }
 
     setMessage(`退款纠纷 ${refundCase.id} 已更新为 ${statusValue}。`);
-    await Promise.all([loadRefundCases(selectedUserEmail || undefined), loadAuditLogs()]);
+    await Promise.all([loadDashboardStats(), loadRefundCases(selectedUserEmail || undefined), loadAuditLogs()]);
   }
 
   async function toggleProvider(provider: ProviderConfig) {
@@ -617,7 +794,7 @@ export function AdminShell() {
       return;
     }
     setMessage(`${user.email} 已${isActive ? "启用" : "禁用"}。`);
-    await Promise.all([searchUsers(), loadAuditLogs()]);
+    await Promise.all([loadDashboardStats(), searchUsers(), loadAuditLogs()]);
   }
 
   function configInputValue(value: SystemConfig["value"]) {
@@ -673,6 +850,7 @@ export function AdminShell() {
   async function refreshAdminData() {
     await Promise.all([
       loadProviders(),
+      loadDashboardStats(),
       loadSystemConfigs(),
       loadAuditLogs(),
       loadAiCallLogs(),
@@ -694,6 +872,7 @@ export function AdminShell() {
     setCustomerServiceNotes([]);
     setRefundCases([]);
     setSystemConfigs([]);
+    setDashboardStats(null);
     setProviderTestResults({});
     setUserSearchResults([]);
     setSelectedUserHistory([]);
@@ -786,6 +965,126 @@ export function AdminShell() {
               <p>后台入口仍可隐藏，但真正的权限由服务端校验。</p>
             </article>
           </section>
+
+          {dashboardStats && dashboardChartOptions && (
+            <section className="admin-dashboard">
+              <div className="admin-section-heading admin-dashboard-heading">
+                <div>
+                  <span className="eyebrow">Data Dashboard</span>
+                  <h2>运营数据看板</h2>
+                  <p>聚合数据库里的用户、训练、报告、登录、AI 调用和售后纠纷数据，用来判断推广效果和服务稳定性。</p>
+                </div>
+                <span className={dashboardStats.database_ready ? "admin-dashboard-badge" : "admin-dashboard-badge is-muted"}>
+                  {dashboardStats.database_ready ? "数据库已连接" : "等待数据库迁移"}
+                </span>
+              </div>
+
+              <div className="admin-kpi-grid">
+                <article>
+                  <span>总用户</span>
+                  <strong>{dashboardStats.overview.total_users.toLocaleString("zh-CN")}</strong>
+                  <em>启用 {dashboardStats.overview.active_users} / 停用 {dashboardStats.overview.disabled_users}</em>
+                </article>
+                <article>
+                  <span>训练场次</span>
+                  <strong>{dashboardStats.overview.total_sessions.toLocaleString("zh-CN")}</strong>
+                  <em>今日 {dashboardStats.overview.today_sessions} / 进行中 {dashboardStats.overview.active_sessions}</em>
+                </article>
+                <article>
+                  <span>报告产出</span>
+                  <strong>{dashboardStats.overview.total_reports.toLocaleString("zh-CN")}</strong>
+                  <em>均分 {dashboardStats.overview.average_report_score ?? "暂无"}</em>
+                </article>
+                <article>
+                  <span>剩余次数</span>
+                  <strong>{dashboardStats.overview.total_credit_balance.toLocaleString("zh-CN")}</strong>
+                  <em>累计发放 {dashboardStats.overview.total_credit_granted}</em>
+                </article>
+                <article>
+                  <span>AI 成功率</span>
+                  <strong>{formatDashboardRate(dashboardStats.overview.ai_success_rate)}</strong>
+                  <em>失败登录 {dashboardStats.overview.failed_login_count}</em>
+                </article>
+                <article>
+                  <span>售后风险</span>
+                  <strong>{dashboardStats.overview.open_refund_cases}</strong>
+                  <em>待处理退款 / 纠纷</em>
+                </article>
+              </div>
+
+              {!dashboardStats.database_ready ? (
+                <p className="admin-empty-text">统计接口已经就绪，完成数据库迁移后会自动显示图表。</p>
+              ) : (
+                <>
+                  <div className="admin-chart-grid">
+                    <article className="admin-chart-card admin-chart-card--wide">
+                      <div>
+                        <h3>近 14 天使用趋势</h3>
+                        <span>新增用户、训练场次和报告产出</span>
+                      </div>
+                      <AdminChart option={dashboardChartOptions.trend} height={320} />
+                    </article>
+                    <article className="admin-chart-card">
+                      <div>
+                        <h3>训练模块占比</h3>
+                        <span>四类面试的真实使用分布</span>
+                      </div>
+                      <AdminChart option={dashboardChartOptions.moduleMix} />
+                    </article>
+                    <article className="admin-chart-card">
+                      <div>
+                        <h3>会话状态</h3>
+                        <span>完成、进行中与异常状态</span>
+                      </div>
+                      <AdminChart option={dashboardChartOptions.sessionStatus} />
+                    </article>
+                    <article className="admin-chart-card">
+                      <div>
+                        <h3>AI 调用质量</h3>
+                        <span>模型、ASR、TTS 调用成功情况</span>
+                      </div>
+                      <AdminChart option={dashboardChartOptions.aiQuality} />
+                    </article>
+                    <article className="admin-chart-card">
+                      <div>
+                        <h3>登录结果</h3>
+                        <span>账户登录与验证码闭环是否稳定</span>
+                      </div>
+                      <AdminChart option={dashboardChartOptions.loginOutcome} />
+                    </article>
+                    <article className="admin-chart-card">
+                      <div>
+                        <h3>退款纠纷状态</h3>
+                        <span>跟进中的售后记录分布</span>
+                      </div>
+                      <AdminChart option={dashboardChartOptions.refunds} />
+                    </article>
+                  </div>
+
+                  <section className="admin-top-users">
+                    <div>
+                      <span className="eyebrow">User Usage</span>
+                      <h3>用户使用情况排行</h3>
+                    </div>
+                    {dashboardStats.top_users.length === 0 ? (
+                      <p className="admin-empty-text">暂无训练记录。</p>
+                    ) : (
+                      <div className="admin-top-user-list">
+                        {dashboardStats.top_users.map((user) => (
+                          <article key={user.email}>
+                            <strong>{user.email}</strong>
+                            <span>{user.completed_interviews}/{user.total_interviews} 次完成</span>
+                            <em>余额 {user.credit_balance} 次</em>
+                            <small>{user.last_interview_at ? formatDateTime(user.last_interview_at) : "暂无训练"}</small>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                </>
+              )}
+            </section>
+          )}
 
           <section className="admin-workbench">
             <form className="admin-panel" onSubmit={submitCreditGrant}>
