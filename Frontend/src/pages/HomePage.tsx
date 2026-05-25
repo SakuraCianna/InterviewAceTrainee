@@ -38,9 +38,9 @@ const modules = [
 
 const flow = [
   ["01", "选择目标", "工作、复试、考公、雅思四类场景分别进入不同流程。"],
-  ["02", "AI 开场提问", "系统播放问题，页面不放聊天框，避免用户依赖文字提示。"],
+  ["02", "开场提问", "面试官播放问题，页面不放聊天框，避免用户依赖文字提示。"],
   ["03", "用户语音回答", "用户组织语言并说完后，手动点击“回答完毕”。"],
-  ["04", "继续追问", "模型根据上一轮回答继续深挖，形成真实压力感。"],
+  ["04", "继续追问", "面试官根据上一轮回答继续深挖，形成真实压力感。"],
   ["05", "生成报告", "按场景输出评分、追问记录、短板和下一轮训练建议。"],
 ];
 
@@ -203,7 +203,7 @@ export function HomePage() {
           <p className="home-eyebrow">Voice-first Interview Rehearsal</p>
           <h1 id="home-title">四类面试，按真实流程开练。</h1>
           <p className="home-lead">
-            面霸练习生把工作面试、研究生复试、考公面试和雅思口语拆成独立训练产品。用户不打字、不看聊天框，只和 AI 面试官轮流语音问答，结束后拿到可复盘的完整报告。
+            面霸练习生把工作面试、研究生复试、考公面试和雅思口语拆成独立训练产品。用户不打字、不看聊天框，只和数字面试官轮流语音问答，结束后拿到可复盘的完整报告。
           </p>
           <div className="home-actions">
             <a className="home-primary" href="/register">
@@ -244,7 +244,7 @@ export function HomePage() {
             </aside>
             <div className="live-panel">
               <div className="live-status">
-                <span><AppIcon icon="lucide:radio" size={18} />AI 正在提问</span>
+                <span><AppIcon icon="lucide:radio" size={18} />面试官正在提问</span>
                 <strong>第 1 / 3 轮</strong>
               </div>
               <div className="voice-board">

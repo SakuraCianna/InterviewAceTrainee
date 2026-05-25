@@ -238,12 +238,12 @@ def _score_explanation(
 ) -> str:
     if interview_type == InterviewType.IELTS:
         return (
-            f"综合分 {total_score} 主要来自 {answered_turns} 轮回答的长度、连贯性、词汇和语法信号。"
-            f"当前平均每轮约 {round(average_length)} 个字符，最需要优先提升的是 {weakest_dimension}。"
+            f"这次口语给到 {total_score} 分，主要看 {answered_turns} 轮回答里的长度、连贯性、词汇和语法稳定度。"
+            f"单轮平均约 {round(average_length)} 个字符，下一次先盯住 {weakest_dimension}。"
         )
     return (
-        f"综合分 {total_score} 由 {answered_turns} 轮回答的结构完整度、证据密度、场景匹配和追问承压表现综合得出。"
-        f"当前平均每轮约 {round(average_length)} 个字符，最低维度是「{weakest_dimension}」，下一轮应优先围绕该维度补证据。"
+        f"这次给到 {total_score} 分，依据是 {answered_turns} 轮回答里的结构、例子、场景贴合度和追问下的稳定度。"
+        f"单轮平均约 {round(average_length)} 个字符，最拖后腿的是「{weakest_dimension}」，下一轮先把这一块补实。"
     )
 
 
@@ -252,24 +252,24 @@ def _dimension_evidence(interview_type: InterviewType, name: str, answer_text: s
     hits = [keyword for keyword in keywords if keyword.lower() in answer_text.lower()]
     evidence: list[str] = []
     if hits:
-        evidence.append(f"命中关键词：{' / '.join(hits[:4])}")
+        evidence.append(f"回答里提到了：{' / '.join(hits[:4])}")
     else:
-        evidence.append("暂未捕捉到足够明确的关键词证据")
-    evidence.append(f"平均回答长度约 {round(average_length)} 字符")
+        evidence.append("这一维度还缺少直接材料")
+    evidence.append(f"单轮平均约 {round(average_length)} 字符")
     if _contains_any(answer_text, ["%", "提升", "降低", "指标", "量化", "result", "reduced", "increased"]):
-        evidence.append("回答中出现量化结果或结果导向表达")
+        evidence.append("回答里出现了结果或数字")
     return evidence[:3]
 
 
 def _dimension_action(interview_type: InterviewType, name: str, score: int) -> str:
     if interview_type == InterviewType.IELTS:
         if score >= 85:
-            return f"继续保持 {name}，下一轮重点减少停顿和重复。"
-        return f"围绕 {name} 做 3 组限时回答，每组补一个例子和一个原因。"
+            return f"{name} 已经能撑住，下一轮把停顿和重复再压一压。"
+        return f"{name} 先做 3 组限时回答，每组必须补一个例子和一个原因。"
     if score >= 85:
-        return f"保持「{name}」优势，下一轮改为更高压追问训练。"
+        return f"「{name}」这一块能扛追问，下一轮可以加压。"
     if score >= 75:
-        return f"把「{name}」回答补成结论、证据、取舍、结果四段式。"
+        return f"「{name}」要补成结论、证据、取舍、结果四段式。"
     return f"先为「{name}」准备一个可复用素材，再做 60 秒口头复述。"
 
 
@@ -299,39 +299,39 @@ def _turn_score(interview_type: InterviewType, answer: str) -> int:
 def _turn_evidence(answer: str) -> list[str]:
     evidence: list[str] = []
     if _contains_any(answer, ["首先", "其次", "最后", "第一", "第二", "第三", "first", "second", "finally"]):
-        evidence.append("有结构化连接词")
+        evidence.append("能听到分层表达")
     if _contains_any(answer, ["数据", "指标", "量化", "%", "提升", "降低", "for example", "result", "reduced"]):
-        evidence.append("有结果或例子支撑")
+        evidence.append("带了结果或例子")
     if len(answer.strip()) >= 120:
-        evidence.append("回答长度较充分")
+        evidence.append("展开长度够用")
     if not evidence:
-        evidence.append("证据不足，需要补充例子或结果")
+        evidence.append("缺一个具体例子或结果")
     return evidence
 
 
 def _turn_feedback(interview_type: InterviewType, score: int, answer_length: int, evidence: list[str]) -> str:
     if answer_length < 40:
-        return "本题回答偏短，建议补充背景、行动和结果，至少讲到 45-60 秒。"
+        return "这一轮太短，先补背景、行动和结果，至少撑到 45-60 秒。"
     if score >= 85:
-        return "本题回答较完整，下一轮可以接受更细的反问和压力追问。"
+        return "这一轮站得住，下一次可以接受更细的反问和压力追问。"
     if interview_type == InterviewType.IELTS:
-        return "本题已有内容基础，建议增加连接词、具体例子和自然改写，避免单句式回答。"
+        return "内容有了，下一次多放连接词、具体例子和自然改写，别只给单句答案。"
     if any("结果" in item or "例子" in item for item in evidence):
-        return "本题有证据基础，建议进一步补充取舍、失败复盘或边界条件。"
-    return "本题结构基本成立，但证据密度不足，建议补一个具体案例或量化结果。"
+        return "这一轮有材料，下一次补取舍、失败复盘或边界条件。"
+    return "结构能听懂，但材料还薄，下一次补一个具体案例或量化结果。"
 
 
 def _report_evidence(interview_type: InterviewType, answered_turns: int, average_length: float, answer_text: str) -> list[str]:
     evidence = [
         f"完成 {answered_turns} 轮有效回答",
-        f"平均每轮约 {round(average_length)} 字符",
+        f"单轮平均约 {round(average_length)} 字符",
     ]
     if _contains_any(answer_text, ["首先", "其次", "最后", "first", "second", "finally"]):
-        evidence.append("回答中出现结构化表达")
+        evidence.append("能听到分层表达")
     if _contains_any(answer_text, ["%", "指标", "量化", "提升", "降低", "result", "reduced"]):
-        evidence.append("回答中出现结果导向或量化表达")
+        evidence.append("出现了结果或数字")
     if interview_type == InterviewType.IELTS and _contains_any(answer_text, ["because", "for example", "however", "although"]):
-        evidence.append("口语回答中出现原因、例子或转折连接")
+        evidence.append("口语里出现原因、例子或转折")
     return evidence
 
 
@@ -361,17 +361,17 @@ def _risk_flags(interview_type: InterviewType, answer_lengths: list[int], answer
 def _priority_actions(interview_type: InterviewType, weakest_dimension: str, risk_flags: list[str]) -> list[str]:
     actions = {
         InterviewType.JOB: [
-            f"先修「{weakest_dimension}」：把核心项目改写成 90 秒 STAR 版本。",
+            f"先改「{weakest_dimension}」：把核心项目压成 90 秒 STAR 版本。",
             "为每个项目准备 1 个量化结果、1 个失败复盘、1 个技术取舍。",
             "把目标岗位 JD 拆成 3 个能力点，并逐一绑定经历证据。",
         ],
         InterviewType.POSTGRADUATE: [
-            f"先修「{weakest_dimension}」：把专业基础、研究兴趣和未来计划连成一条线。",
+            f"先改「{weakest_dimension}」：把专业基础、研究兴趣和未来计划连成一条线。",
             "准备 1 篇英文论文的 60 秒口头汇报，覆盖摘要、方法、实验和结论。",
             "为导师沟通题准备 2 个研究切入点和 1 个备选方向。",
         ],
         InterviewType.CIVIL_SERVICE: [
-            f"先修「{weakest_dimension}」：所有回答先搭建总分总结构。",
+            f"先改「{weakest_dimension}」：所有回答先搭建总分总结构。",
             "每道题固定补齐群众立场、政策依据、执行落地和复盘改进。",
             "每天练 1 道综合分析题和 1 道应急应变题，控制在 2 分钟内。",
         ],
@@ -382,7 +382,7 @@ def _priority_actions(interview_type: InterviewType, weakest_dimension: str, ris
         ],
     }[interview_type]
     if risk_flags and "偏短" in risk_flags[0]:
-        actions.insert(0, "优先把每轮回答时长拉到 45-90 秒，避免过早结束。")
+        actions.insert(0, "先把每轮回答拉到 45-90 秒，别太快收尾。")
     return actions[:4]
 
 
@@ -449,22 +449,22 @@ def _dimension_signal_keywords(interview_type: InterviewType) -> dict[str, list[
 
 def _scenario_summary(interview_type: InterviewType, product_name: str, answered_turns: int, total_score: int) -> str:
     templates = {
-        InterviewType.JOB: f"本次{product_name}已完成 {answered_turns} 个问答节点，重点复盘岗位匹配、项目证据、技术取舍和压力追问，当前综合分 {total_score}。",
-        InterviewType.POSTGRADUATE: f"本次{product_name}已完成 {answered_turns} 个问答节点，重点复盘专业基础、科研潜力、文献阅读和导师沟通，当前综合分 {total_score}。",
-        InterviewType.CIVIL_SERVICE: f"本次{product_name}按结构化面试口径完成 {answered_turns} 个问答节点，重点复盘审题、组织协调、应急处置和公共服务价值观，当前综合分 {total_score}。",
-        InterviewType.IELTS: f"This IELTS speaking rehearsal covered {answered_turns} turns across the official speaking flow, with feedback aligned to fluency, lexical resource, grammar and pronunciation. Overall score: {total_score}.",
+        InterviewType.JOB: f"这场{product_name}走完 {answered_turns} 个问答节点，主要看岗位匹配、项目证据、技术取舍和压力追问，当前 {total_score} 分。",
+        InterviewType.POSTGRADUATE: f"这场{product_name}走完 {answered_turns} 个问答节点，主要看专业基础、科研潜力、文献阅读和导师沟通，当前 {total_score} 分。",
+        InterviewType.CIVIL_SERVICE: f"这场{product_name}按结构化口径走完 {answered_turns} 个问答节点，主要看审题、组织协调、应急处置和公共服务立场，当前 {total_score} 分。",
+        InterviewType.IELTS: f"This speaking run covered {answered_turns} turns. The score is {total_score}, mainly based on fluency, vocabulary, grammar and pronunciation.",
     }
     return templates[interview_type]
 
 
 def _scenario_strengths(interview_type: InterviewType, answer_text: str) -> list[str]:
-    common = ["能围绕问题给出直接回应", "已完成完整流程，具备复盘基础"]
+    common = ["能接住问题并给出直接回应", "已经有一份可回看的训练记录"]
     if interview_type == InterviewType.JOB:
-        return ["能够把经历放进项目或岗位语境里表达", "具备继续深挖技术细节和量化结果的基础"]
+        return ["能把经历放进项目或岗位语境里讲", "后面可以继续深挖技术细节和量化结果"]
     if interview_type == InterviewType.POSTGRADUATE:
-        return ["能够围绕专业背景和研究动机展开", "已经覆盖复试常见的自我介绍、专业和导师沟通环节"]
+        return ["能围绕专业背景和研究动机展开", "已经覆盖自我介绍、专业基础和导师沟通环节"]
     if interview_type == InterviewType.CIVIL_SERVICE:
-        return ["能够尝试从公共治理和群众视角回应问题", "具备按照结构化题型继续训练的基础"]
+        return ["能尝试从公共治理和群众视角回应", "可以继续按结构化题型加压训练"]
     if _contains_any(answer_text, ["because", "for example", "would", "could"]):
         return ["Can extend answers beyond one-sentence responses", "Shows usable connectors and examples for spoken development"]
     return common
@@ -473,17 +473,17 @@ def _scenario_strengths(interview_type: InterviewType, answer_text: str) -> list
 def _scenario_improvements(interview_type: InterviewType, weakest_dimension: str, short_answers: int) -> list[str]:
     improvements = {
         InterviewType.JOB: [
-            f"最低维度是「{weakest_dimension}」，下一轮要把答案改成结论、证据、取舍、结果四段式。",
+            f"最该补的是「{weakest_dimension}」，下一轮把答案改成结论、证据、取舍、结果四段式。",
             "项目回答需要主动补充指标、失败案例和复盘，不要只讲职责。",
             "HR 面要把个人动机和岗位 JD 连接起来，避免泛泛说喜欢或感兴趣。",
         ],
         InterviewType.POSTGRADUATE: [
-            f"最低维度是「{weakest_dimension}」，下一轮要把专业概念、研究问题和可执行计划连起来。",
+            f"最该补的是「{weakest_dimension}」，下一轮把专业概念、研究问题和可执行计划连起来。",
             "复试回答要减少背稿感，多补充课程、毕设、论文或实验中的真实证据。",
             "导师沟通题要体现边界感、主动性和学术规范意识。",
         ],
         InterviewType.CIVIL_SERVICE: [
-            f"最低维度是「{weakest_dimension}」，下一轮要先审题，再按背景、问题、对策、落实复盘展开。",
+            f"最该补的是「{weakest_dimension}」，下一轮先审题，再按背景、问题、对策、落实复盘展开。",
             "结构化回答要明确群众立场、依法行政和风险意识。",
             "应急题要先稳控现场和核实事实，再谈处置、上报和复盘。",
         ],
@@ -494,7 +494,7 @@ def _scenario_improvements(interview_type: InterviewType, weakest_dimension: str
         ],
     }[interview_type]
     if short_answers:
-        prefix = "部分回答偏短，下一轮建议把关键例子讲到 60 秒以上。" if interview_type != InterviewType.IELTS else "Some answers are short; aim for longer turns with examples and reasons."
+        prefix = "有几轮收得太快，下一轮把关键例子讲到 60 秒以上。" if interview_type != InterviewType.IELTS else "Some answers are short; aim for longer turns with examples and reasons."
         return [prefix, *improvements]
     return improvements
 
@@ -547,7 +547,7 @@ def _dimension_comment(interview_type: InterviewType, name: str, score: int) -> 
     if score >= 85:
         return f"{name}表现{band}，{scenario_hint}"
     if score >= 75:
-        return f"{name}已有基础但仍{band}，建议补充更具体的证据或例子。"
+        return f"{name}已有基础但仍{band}，再补更具体的证据或例子。"
     return f"{name}{band}，先建立清晰结构，再补充可验证细节。"
 
 

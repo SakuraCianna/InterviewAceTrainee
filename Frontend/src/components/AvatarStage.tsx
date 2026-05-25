@@ -20,7 +20,7 @@ export function AvatarStage({ state, compact = false }: AvatarStageProps) {
       <div className="mentor-orbit mentor-orbit--outer" />
       <div className="mentor-orbit mentor-orbit--inner" />
       <div className="mentor-device">
-        <div className="mentor-glass" aria-label={`AI 面试官正在${stateLabels[state]}`}>
+        <div className="mentor-glass" aria-label={`数字面试官正在${stateLabels[state]}`}>
           <div className="mentor-scanline" />
           <div className="mentor-visor">
             <span />
