@@ -32,3 +32,4 @@ class ProviderConnectivityTestResponse(BaseModel):
     model_name: str
     success: bool
     detail: str
+    message: str | None = None

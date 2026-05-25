@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { EChartsOption } from "echarts";
 import { AppIcon } from "../../components/AppIcon";
-import { csrfHeaders } from "../../lib/api";
+import { csrfHeaders, getApiErrorMessage } from "../../lib/api";
 
 type EChartsModule = typeof import("echarts");
 type EChartsInstance = ReturnType<EChartsModule["init"]>;
@@ -34,6 +34,7 @@ type ProviderConfig = {
 type AdminLoginResponse = {
   access_token?: string;
   detail?: string;
+  message?: string;
   dev_code?: string;
 };
 
@@ -400,7 +401,7 @@ export function AdminShell() {
     if (user.role !== "admin") {
       setCurrentUser(null);
       setIsLoading(false);
-      setMessage("当前账户不是管理员，请使用后台白名单邮箱登录。");
+      setMessage("当前账户不是管理员，请使用管理员账号登录。");
       return;
     }
 
@@ -589,7 +590,7 @@ export function AdminShell() {
     });
     const data = (await response.json()) as AdminLoginResponse;
     if (!response.ok) {
-      setMessage(data.detail ? `验证码发送失败：${data.detail}` : "验证码发送失败。");
+      setMessage(`验证码发送失败：${getApiErrorMessage(data, "请稍后再试。")}`);
       return;
     }
 
@@ -607,7 +608,7 @@ export function AdminShell() {
     });
     const data = (await response.json()) as AdminLoginResponse;
     if (!response.ok || !data.access_token) {
-      setMessage(data.detail ? `后台登录失败：${data.detail}` : "后台登录失败，请检查邮箱、密码和验证码。");
+      setMessage(`后台登录失败：${getApiErrorMessage(data, "请检查邮箱、密码和验证码。")}`);
       return;
     }
 
@@ -632,7 +633,7 @@ export function AdminShell() {
     });
     const data = await response.json();
     if (!response.ok) {
-      setMessage(data.detail ? `次数调整失败：${data.detail}` : "次数调整失败。");
+      setMessage(`次数调整失败：${getApiErrorMessage(data, "请检查用户邮箱和次数。")}`);
       return;
     }
 
@@ -668,7 +669,7 @@ export function AdminShell() {
     });
     const data = await response.json();
     if (!response.ok) {
-      setMessage(data.detail ? `客服备注保存失败：${data.detail}` : "客服备注保存失败。");
+      setMessage(`客服备注保存失败：${getApiErrorMessage(data, "请检查备注内容。")}`);
       return;
     }
 
@@ -717,7 +718,7 @@ export function AdminShell() {
     });
     const data = await response.json();
     if (!response.ok) {
-      setMessage(data.detail ? `退款纠纷记录创建失败：${data.detail}` : "退款纠纷记录创建失败。");
+      setMessage(`退款纠纷记录创建失败：${getApiErrorMessage(data, "请检查纠纷记录内容。")}`);
       return;
     }
 
@@ -742,7 +743,7 @@ export function AdminShell() {
     });
     const data = await response.json();
     if (!response.ok) {
-      setMessage(data.detail ? `退款纠纷状态更新失败：${data.detail}` : "退款纠纷状态更新失败。");
+      setMessage(`退款纠纷状态更新失败：${getApiErrorMessage(data, "请稍后重试。")}`);
       return;
     }
 
@@ -774,9 +775,10 @@ export function AdminShell() {
       headers: csrfHeaders(),
     });
     const data = await response.json();
+    const resultDetail = getApiErrorMessage(data, "服务测试未返回明确结果。");
     const resultText = response.ok
-      ? `${data.success ? "通过" : "未通过"}：${data.detail}`
-      : `测试失败：${data.detail ?? "request_failed"}`;
+      ? `${data.success ? "通过" : "未通过"}：${resultDetail}`
+      : `测试失败：${resultDetail}`;
     setProviderTestResults((previous) => ({ ...previous, [provider.id]: resultText }));
     await loadAuditLogs();
   }
@@ -790,7 +792,7 @@ export function AdminShell() {
     });
     const data = await response.json();
     if (!response.ok) {
-      setMessage(data.detail ? `用户状态更新失败：${data.detail}` : "用户状态更新失败。");
+      setMessage(`用户状态更新失败：${getApiErrorMessage(data, "请稍后重试。")}`);
       return;
     }
     setMessage(`${user.email} 已${isActive ? "启用" : "禁用"}。`);
@@ -806,7 +808,7 @@ export function AdminShell() {
     });
     const data = (await response.json()) as { role?: string; detail?: string };
     if (!response.ok) {
-      setMessage(data.detail ? `用户角色更新失败：${data.detail}` : "用户角色更新失败。");
+      setMessage(`用户角色更新失败：${getApiErrorMessage(data, "请稍后重试。")}`);
       return;
     }
     setUserSearchResults((previous) =>
@@ -859,7 +861,7 @@ export function AdminShell() {
     });
     const data = await response.json();
     if (!response.ok) {
-      setMessage(data.detail ? `系统配置保存失败：${data.detail}` : "系统配置保存失败。");
+      setMessage(`系统配置保存失败：${getApiErrorMessage(data, "请检查配置值。")}`);
       return;
     }
     setMessage(`已更新系统配置：${data.key}`);
@@ -930,7 +932,7 @@ export function AdminShell() {
       <section className="admin-hero">
         <span className="eyebrow">Operator Console</span>
         <h1>运营后台</h1>
-              <p>后台用于手动发放面试次数、查看 AI 服务状态和检查系统日志。管理员必须在邮箱白名单内，并通过密码与邮箱验证码双重认证。</p>
+              <p>后台用于手动发放面试次数、查看 AI 服务状态和检查系统日志。管理员必须拥有管理员权限，并通过密码与邮箱验证码双重认证。</p>
       </section>
 
       <div className="admin-status-row">
@@ -980,7 +982,7 @@ export function AdminShell() {
             </article>
             <article className="admin-card">
               <AppIcon icon="lucide:shield-check" size={24} />
-              <h2>白名单后台</h2>
+              <h2>管理员后台</h2>
               <p>后台入口仍可隐藏，但真正的权限由服务端校验。</p>
             </article>
           </section>
@@ -1495,7 +1497,7 @@ export function AdminShell() {
                       <span>{entry.auth_method} · {entry.role} · {entry.ip_address ?? "unknown-ip"}</span>
                     </div>
                     <em className={entry.success ? "is-success" : "is-failed"}>
-                      {entry.success ? "success" : entry.failure_reason ?? "failed"}
+                      {entry.success ? "成功" : getApiErrorMessage({ detail: entry.failure_reason ?? undefined }, "失败")}
                     </em>
                     <small>{formatDateTime(entry.created_at)}</small>
                   </article>
@@ -1534,7 +1536,7 @@ export function AdminShell() {
                       {entry.provider_request_id ? ` · ${entry.provider_request_id}` : ""}
                     </span>
                   </div>
-                  <em>{entry.success ? "success" : entry.error_message ?? "failed"}</em>
+                  <em>{entry.success ? "成功" : getApiErrorMessage({ detail: entry.error_message ?? undefined }, "调用失败")}</em>
                   <span>
                     {entry.latency_ms != null ? `${entry.latency_ms}ms` : "no-latency"}
                     {entry.input_tokens != null || entry.output_tokens != null

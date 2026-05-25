@@ -21,6 +21,7 @@ from app.services.provider_configs import (
     memory_provider_config_store,
 )
 from app.core.config import Settings, get_settings
+from app.core.error_messages import GENERIC_ERROR_MESSAGE, normalize_error_detail
 
 router = APIRouter(prefix="/ai-providers", tags=["ai-providers"])
 PROVIDER_AUDIT_REQUIRED_TABLES = ("ai_provider_configs", "admin_audit_logs")
@@ -206,6 +207,9 @@ def run_connectivity_test(config: AIProviderConfig, settings: Settings) -> Provi
 
 
 def provider_test_response(config: AIProviderConfig, success: bool, detail: str) -> ProviderConnectivityTestResponse:
+    _code, message = normalize_error_detail(detail)
+    if not success and message == GENERIC_ERROR_MESSAGE:
+        message = "服务测试失败，请检查密钥、模型名称或网络连接。"
     return ProviderConnectivityTestResponse(
         id=config.id,
         provider_type=config.provider_type,
@@ -213,4 +217,5 @@ def provider_test_response(config: AIProviderConfig, success: bool, detail: str)
         model_name=config.model_name,
         success=success,
         detail=detail,
+        message=message,
     )

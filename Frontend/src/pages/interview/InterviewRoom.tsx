@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppIcon } from "../../components/AppIcon";
 import { AvatarStage, AvatarState } from "../../components/AvatarStage";
-import { csrfHeaders } from "../../lib/api";
+import { csrfHeaders, getApiErrorMessage } from "../../lib/api";
 
 type InterviewType = "job" | "postgraduate" | "civil_service" | "ielts";
 
@@ -33,6 +33,7 @@ type InterviewStateResponse = {
   report: InterviewReport | null;
   balance_after?: number;
   detail?: string;
+  message?: string;
 };
 
 type CurrentUserResponse = {
@@ -66,12 +67,14 @@ type InterviewMaterialResponse = {
 type SpeechRecognitionApiResponse = {
   text?: string;
   detail?: string;
+  message?: string;
 };
 
 type SpeechSynthesisApiResponse = {
   audio_base64?: string;
   mime_type?: string;
   detail?: string;
+  message?: string;
 };
 
 type AudioRecorderSession = {
@@ -322,7 +325,7 @@ export function InterviewRoom() {
     setIsStartingSession(false);
 
     if (!response.ok) {
-      setSocketMessage(data.detail === "insufficient_credits" ? "次数不足，请添加官方微信 Teptysuki666 开通面试次数。" : "面试创建失败，请重新登录后再试。");
+      setSocketMessage(`面试创建失败：${getApiErrorMessage(data, "请重新登录后再试。")}`);
       return;
     }
 
@@ -370,20 +373,11 @@ export function InterviewRoom() {
       headers: csrfHeaders(),
       body: formData,
     });
-    const data = (await response.json()) as InterviewMaterialResponse & { detail?: string };
+    const data = (await response.json()) as InterviewMaterialResponse & { detail?: string; message?: string };
     setIsPreparingMaterial(false);
 
     if (!response.ok) {
-      const messageMap: Record<string, string> = {
-        job_material_required_fields: "工作面试需要简历、目标岗位和岗位要求。",
-        postgraduate_major_required: "研究生复试需要报考专业。",
-        resume_file_too_large: "简历文件过大，请控制在 5MB 以内。",
-        image_resume_ocr_not_configured: "当前暂支持 txt、pdf、docx 简历解析，图片简历识别稍后开放。",
-        image_resume_ocr_dependency_missing: "图片 OCR 依赖尚未安装，请先使用 txt、pdf、docx 简历。",
-        unsupported_resume_format: "当前支持 txt、pdf、docx 简历，请换一个文件格式。",
-        resume_text_empty: "简历没有提取到文字，请换成文字版 PDF、docx 或 txt。",
-      };
-      setSocketMessage(messageMap[String(data.detail)] ?? "资料分析失败，请检查文件和填写内容。");
+      setSocketMessage(`资料分析失败：${getApiErrorMessage(data, "请检查文件和填写内容。")}`);
       return;
     }
 
@@ -418,7 +412,7 @@ export function InterviewRoom() {
       });
       const data = (await response.json()) as SpeechSynthesisApiResponse;
       if (!response.ok || !data.audio_base64 || !data.mime_type) {
-        throw new Error(data.detail ?? "tts_failed");
+        throw new Error(getApiErrorMessage(data, "语音合成失败。"));
       }
       window.speechSynthesis?.cancel();
       const audio = new Audio(`data:${data.mime_type};base64,${data.audio_base64}`);
@@ -467,7 +461,7 @@ export function InterviewRoom() {
     });
     const data = (await response.json()) as SpeechRecognitionApiResponse;
     if (!response.ok || !data.text) {
-      throw new Error(data.detail ?? "asr_failed");
+      throw new Error(getApiErrorMessage(data, "语音识别失败。"));
     }
     return data.text;
   }
@@ -539,7 +533,7 @@ export function InterviewRoom() {
     });
     const data = (await response.json()) as InterviewStateResponse;
     if (!response.ok) {
-      setSocketMessage(data.detail ?? "回答提交失败，请稍后重试。");
+      setSocketMessage(`回答提交失败：${getApiErrorMessage(data, "请稍后重试。")}`);
       return;
     }
     setInterviewState(data);

@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import { AppIcon } from "../components/AppIcon";
+import { getApiErrorMessage } from "../lib/api";
 
 type AuthMode = "login" | "register";
 
@@ -12,6 +13,7 @@ type AuthResponse = {
   token_type?: string;
   dev_code?: string;
   detail?: string;
+  message?: string;
 };
 
 export function AuthPage({ mode }: AuthPageProps) {
@@ -36,7 +38,7 @@ export function AuthPage({ mode }: AuthPageProps) {
     });
     const data = (await response.json()) as AuthResponse;
     if (!response.ok) {
-      setMessage(data.detail ? `验证码发送失败：${data.detail}` : "验证码发送失败，请稍后再试。");
+      setMessage(`验证码发送失败：${getApiErrorMessage(data, "请稍后再试。")}`);
       return;
     }
 
@@ -71,7 +73,7 @@ export function AuthPage({ mode }: AuthPageProps) {
     setIsSubmitting(false);
 
     if (!response.ok || !data.access_token) {
-      setMessage(data.detail ? `认证失败：${data.detail}` : "认证失败，请检查输入信息。");
+      setMessage(`认证失败：${getApiErrorMessage(data, "请检查输入信息。")}`);
       return;
     }
 
