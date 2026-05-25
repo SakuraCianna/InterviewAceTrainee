@@ -55,20 +55,54 @@ def build_verification_email(from_address: str, to_email: str, code: str, expire
     return {
         "from": from_address,
         "to": to_email,
-        "subject": "面霸练习生邮箱验证码",
+        "subject": "面霸练习生登录验证码",
         "html": (
-            "<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
-            "line-height:1.7;color:#10141f;max-width:520px\">"
-            "<h2 style=\"margin:0 0 14px\">面霸练习生邮箱验证码</h2>"
-            "<p>你正在登录或验证面霸练习生账号，本次验证码为：</p>"
-            f"<p style=\"font-size:28px;font-weight:800;letter-spacing:6px;margin:18px 0\">{safe_code}</p>"
-            f"<p>验证码 {minutes} 分钟内有效。若非本人操作，请忽略本邮件。</p>"
-            "<p style=\"color:#5c6677;font-size:13px;margin-top:24px\">"
-            "本邮件仅用于账号安全验证，请勿转发给他人。"
-            "</p>"
+            "<div style=\"margin:0;padding:0;background:#f4f7fb;color:#111827;"
+            "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Microsoft YaHei',Arial,sans-serif\">"
+            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" "
+            "style=\"border-collapse:collapse;background:#f4f7fb;padding:0;margin:0\">"
+            "<tr><td align=\"center\" style=\"padding:32px 16px\">"
+            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" "
+            "style=\"border-collapse:collapse;max-width:560px;background:#ffffff;border:1px solid #e5eaf3;"
+            "border-radius:18px;overflow:hidden;box-shadow:0 18px 48px rgba(17,24,39,0.08)\">"
+            "<tr><td style=\"padding:28px 30px 18px;background:#101827;color:#ffffff\">"
+            "<div style=\"font-size:13px;line-height:1.4;color:#c8ff5d;font-weight:800;"
+            "letter-spacing:0.08em;text-transform:uppercase\">AI 面试训练平台</div>"
+            "<h1 style=\"margin:12px 0 0;font-size:24px;line-height:1.35;font-weight:900\">"
+            "邮箱验证码已生成</h1>"
+            "<p style=\"margin:10px 0 0;color:#d7deea;font-size:14px;line-height:1.7\">"
+            "正在验证面霸练习生账号, 请在当前页面完成输入</p>"
+            "</td></tr>"
+            "<tr><td style=\"padding:30px\">"
+            "<p style=\"margin:0 0 14px;color:#4b5563;font-size:15px;line-height:1.8\">"
+            "本次登录验证码为:</p>"
+            "<div style=\"margin:0 0 22px;padding:20px 18px;background:#f7faff;border:1px solid #dbe7ff;"
+            "border-radius:14px;text-align:center\">"
+            f"<span style=\"font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace;"
+            f"font-size:34px;line-height:1.2;font-weight:900;letter-spacing:8px;color:#2563eb\">{safe_code}</span>"
+            "</div>"
+            f"<p style=\"margin:0;color:#4b5563;font-size:14px;line-height:1.8\">"
+            f"验证码将在 <strong style=\"color:#111827\">{minutes} 分钟</strong> 后失效, "
+            "请勿转发或告知他人</p>"
+            "<div style=\"margin-top:24px;padding:16px 18px;background:#fff7ed;border:1px solid #fed7aa;"
+            "border-radius:14px\">"
+            "<div style=\"font-size:14px;font-weight:900;color:#9a3412;margin-bottom:6px\">安全提示</div>"
+            "<div style=\"font-size:13px;line-height:1.7;color:#7c2d12\">"
+            "如果不是本人操作, 可以忽略本邮件账号不会因此受到影响</div>"
+            "</div>"
+            "<p style=\"margin:24px 0 0;color:#8a94a6;font-size:12px;line-height:1.7\">"
+            "本邮件由系统自动发送, 请勿直接回复</p>"
+            "</td></tr>"
+            "</table>"
+            "</td></tr>"
+            "</table>"
             "</div>"
         ),
-        "text": f"面霸练习生邮箱验证码：{code}。验证码 {minutes} 分钟内有效。若非本人操作，请忽略本邮件。",
+        "text": (
+            f"面霸练习生登录验证码: {code}\n"
+            f"验证码将在 {minutes} 分钟后失效, 请勿转发或告知他人\n"
+            "如果不是本人操作, 可以忽略本邮件"
+        ),
     }
 
 
