@@ -112,6 +112,7 @@ class InterviewMaterialResponse(BaseModel):
     interview_type: InterviewType
     job_title: str | None = None
     job_requirements: str | None = None
+    target_school: str | None = None
     major: str | None = None
     research_direction: str | None = None
     resume_filename: str | None = None

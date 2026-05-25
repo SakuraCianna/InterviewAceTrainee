@@ -70,6 +70,7 @@ def build_material_summary(
     resume_text: str | None,
     job_title: str | None,
     job_requirements: str | None,
+    target_school: str | None,
     major: str | None,
     research_direction: str | None,
 ) -> str:
@@ -78,7 +79,7 @@ def build_material_summary(
         jd_part = _preview(job_requirements, 160)
         return f"目标岗位：{job_title or '未填写'}；岗位要求：{jd_part}；简历摘要：{resume_part}"
     direction = research_direction or "暂未填写具体方向"
-    return f"报考专业：{major or '未填写'}；研究方向：{direction}"
+    return f"目标院校：{target_school or '未填写'}；报考专业：{major or '未填写'}；研究方向：{direction}"
 
 
 def extract_keywords(*texts: str | None, limit: int = 10) -> list[str]:

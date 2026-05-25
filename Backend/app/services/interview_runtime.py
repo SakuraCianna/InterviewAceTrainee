@@ -115,6 +115,7 @@ def build_interview_steps(
             *steps[2:],
         ]
     if interview_type == InterviewType.POSTGRADUATE and material_context is not None:
+        target_school = material_context.target_school or "目标院校"
         major = material_context.major or "报考专业"
         direction = material_context.research_direction or "你的研究兴趣"
         preset_title, question_angles, _ = best_preset_hint(interview_type, material_context, "专业基础")
@@ -123,11 +124,11 @@ def build_interview_steps(
         steps = [
             InterviewStep(
                 "复试开场",
-                f"请做一段 90 秒以内的中文自我介绍，围绕「{major_label}」和「{direction}」突出专业背景、复试动机和你能带来的研究基础。",
+                f"请做一段 90 秒以内的中文自我介绍，围绕「{target_school}」「{major_label}」和「{direction}」突出专业背景、复试动机和你能带来的研究基础。",
             ),
             InterviewStep(
                 "专业基础",
-                f"请说明「{major_label}」里你本科阶段最熟悉的一门专业课，并举例说明它如何支撑这些方向：{angle_hint}。",
+                f"结合「{target_school}」复试语境，请说明「{major_label}」里你本科阶段最熟悉的一门专业课，并举例说明它如何支撑这些方向：{angle_hint}。",
             ),
             *steps[2:],
         ]
@@ -881,6 +882,7 @@ class DatabaseInterviewRuntimeStore:
             resume_text=material.resume_text,
             job_title=material.job_title,
             job_requirements=material.job_requirements,
+            target_school=material.target_school,
             major=material.major,
             research_direction=material.research_direction,
             profile_summary=material.profile_summary,

@@ -38,6 +38,7 @@ const API_ERROR_MESSAGES: Record<string, string> = {
   missing_access_token: "请先登录后再继续操作。",
   password_login_disabled: "密码登录暂时关闭，请使用邮箱验证码登录或联系管理员。",
   postgraduate_major_required: "研究生复试需要先填写报考专业。",
+  postgraduate_school_major_required: "研究生复试需要先填写目标院校和报考专业。",
   provider_config_not_found: "未找到该服务配置。",
   provider_disabled: "该服务配置已停用。",
   provider_not_available: "当前没有可用的模型或语音服务配置。",

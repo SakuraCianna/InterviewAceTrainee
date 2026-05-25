@@ -11,7 +11,7 @@ from app.services.interview_material_context import InterviewMaterialContext
 
 
 PRESET_ROOT = Path(__file__).resolve().parents[1] / "interview_presets"
-PRESET_INDEX_FILE = PRESET_ROOT / "preset_index.json"
+PRESET_INDEX_GLOB = "preset_index*.json"
 
 
 @dataclass(frozen=True)
@@ -92,24 +92,31 @@ def best_preset_hint(
 
 @lru_cache(maxsize=1)
 def load_interview_presets() -> tuple[InterviewPreset, ...]:
-    if not PRESET_INDEX_FILE.exists():
+    index_files = sorted(PRESET_ROOT.glob(PRESET_INDEX_GLOB))
+    if not index_files:
         return ()
-    payload = json.loads(PRESET_INDEX_FILE.read_text(encoding="utf-8"))
     presets: list[InterviewPreset] = []
-    for item in payload.get("presets", []):
-        presets.append(
-            InterviewPreset(
-                id=str(item["id"]),
-                interview_type=InterviewType(str(item["interview_type"])),
-                title=str(item["title"]),
-                file=str(item["file"]),
-                aliases=tuple(str(alias) for alias in item.get("aliases", [])),
-                question_angles=tuple(str(angle) for angle in item.get("question_angles", [])),
-                report_focus=tuple(str(focus) for focus in item.get("report_focus", [])),
-                default_for_rounds=tuple(str(round_name) for round_name in item.get("default_for_rounds", [])),
-                priority=int(item.get("priority", 50)),
+    seen_ids: set[str] = set()
+    for index_file in index_files:
+        payload = json.loads(index_file.read_text(encoding="utf-8"))
+        for item in payload.get("presets", []):
+            preset_id = str(item["id"])
+            if preset_id in seen_ids:
+                continue
+            seen_ids.add(preset_id)
+            presets.append(
+                InterviewPreset(
+                    id=preset_id,
+                    interview_type=InterviewType(str(item["interview_type"])),
+                    title=str(item["title"]),
+                    file=str(item["file"]),
+                    aliases=tuple(str(alias) for alias in item.get("aliases", [])),
+                    question_angles=tuple(str(angle) for angle in item.get("question_angles", [])),
+                    report_focus=tuple(str(focus) for focus in item.get("report_focus", [])),
+                    default_for_rounds=tuple(str(round_name) for round_name in item.get("default_for_rounds", [])),
+                    priority=int(item.get("priority", 50)),
+                )
             )
-        )
     return tuple(presets)
 
 
@@ -133,6 +140,7 @@ def _query_text(
     parts = [
         str(material_context.job_title or ""),
         str(material_context.job_requirements or ""),
+        str(material_context.target_school or ""),
         str(material_context.major or ""),
         str(material_context.research_direction or ""),
         str(material_context.profile_summary or ""),

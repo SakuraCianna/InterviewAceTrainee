@@ -29,6 +29,7 @@ class InterviewMaterialDraft:
     resume_text: str | None
     job_title: str | None
     job_requirements: str | None
+    target_school: str | None
     major: str | None
     research_direction: str | None
     profile_summary: str
@@ -62,6 +63,7 @@ class InMemoryInterviewMaterialStore(InterviewMaterialStore):
             resume_text=draft.resume_text,
             job_title=draft.job_title,
             job_requirements=draft.job_requirements,
+            target_school=draft.target_school,
             major=draft.major,
             research_direction=draft.research_direction,
             profile_summary=draft.profile_summary,
@@ -100,6 +102,7 @@ class DatabaseInterviewMaterialStore(InterviewMaterialStore):
             resume_text=draft.resume_text,
             job_title=draft.job_title,
             job_requirements=draft.job_requirements,
+            target_school=draft.target_school,
             major=draft.major,
             research_direction=draft.research_direction,
             profile_summary=draft.profile_summary,
@@ -136,6 +139,7 @@ class DatabaseInterviewMaterialStore(InterviewMaterialStore):
             resume_text=model.resume_text,
             job_title=model.job_title,
             job_requirements=model.job_requirements,
+            target_school=model.target_school,
             major=model.major,
             research_direction=model.research_direction,
             profile_summary=model.profile_summary,

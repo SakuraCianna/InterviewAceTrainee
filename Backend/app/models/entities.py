@@ -73,6 +73,7 @@ class InterviewMaterial(Base):
     resume_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     job_title: Mapped[str | None] = mapped_column(String(160), nullable=True)
     job_requirements: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_school: Mapped[str | None] = mapped_column(String(160), nullable=True)
     major: Mapped[str | None] = mapped_column(String(160), nullable=True)
     research_direction: Mapped[str | None] = mapped_column(String(240), nullable=True)
     profile_summary: Mapped[str] = mapped_column(Text)

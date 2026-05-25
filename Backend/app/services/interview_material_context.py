@@ -14,6 +14,7 @@ class InterviewMaterialContext:
     resume_text: str | None
     job_title: str | None
     job_requirements: str | None
+    target_school: str | None
     major: str | None
     research_direction: str | None
     profile_summary: str

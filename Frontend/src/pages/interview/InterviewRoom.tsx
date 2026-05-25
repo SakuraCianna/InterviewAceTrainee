@@ -62,6 +62,7 @@ type InterviewMaterialResponse = {
   id: string;
   interview_type: InterviewType;
   job_title?: string | null;
+  target_school?: string | null;
   major?: string | null;
   research_direction?: string | null;
   resume_text_preview?: string | null;
@@ -206,6 +207,7 @@ export function InterviewRoom() {
   const [jobResumeFile, setJobResumeFile] = useState<File | null>(null);
   const [jobTitle, setJobTitle] = useState("");
   const [jobRequirements, setJobRequirements] = useState("");
+  const [postgraduateSchool, setPostgraduateSchool] = useState("");
   const [postgraduateMajor, setPostgraduateMajor] = useState("");
   const [postgraduateDirection, setPostgraduateDirection] = useState("");
   const [isPreparingMaterial, setIsPreparingMaterial] = useState(false);
@@ -313,7 +315,7 @@ export function InterviewRoom() {
     const targetSessionId = resume && activeSession ? activeSession.session_id : createSessionId();
     const material = resume && activeSession ? materialsByType[activeSession.interview_type] : currentMaterial;
     if (!resume && selectedModuleNeedsMaterial && !material) {
-      setSocketMessage(selectedModule.type === "job" ? "请先上传简历并填写目标岗位/JD。" : "请先填写报考专业，再开始复试模拟。");
+      setSocketMessage(selectedModule.type === "job" ? "请先上传简历并填写目标岗位/JD。" : "请先填写目标院校和报考专业，再开始复试模拟。");
       return;
     }
     setIsStartingSession(true);
@@ -362,11 +364,12 @@ export function InterviewRoom() {
       formData.append("job_requirements", jobRequirements.trim());
     }
     if (selectedModule.type === "postgraduate") {
-      if (!postgraduateMajor.trim()) {
-        setSocketMessage("研究生复试需要先填写报考专业。");
+      if (!postgraduateSchool.trim() || !postgraduateMajor.trim()) {
+        setSocketMessage("研究生复试需要先填写目标院校和报考专业。");
         setIsPreparingMaterial(false);
         return;
       }
+      formData.append("target_school", postgraduateSchool.trim());
       formData.append("major", postgraduateMajor.trim());
       if (postgraduateDirection.trim()) {
         formData.append("research_direction", postgraduateDirection.trim());
@@ -388,7 +391,7 @@ export function InterviewRoom() {
     }
 
     setMaterialsByType((previous) => ({ ...previous, [data.interview_type]: data }));
-    setSocketMessage(data.interview_type === "job" ? "简历和岗位要求已分析，可以开始工作面试。" : "复试专业信息已保存，可以开始模拟。");
+    setSocketMessage(data.interview_type === "job" ? "简历和岗位要求已分析，可以开始工作面试。" : "复试院校和专业信息已保存，可以开始模拟。");
   }
 
   function speakQuestionWithBrowser(questionText: string, interviewType?: InterviewType) {
@@ -686,6 +689,14 @@ export function InterviewRoom() {
                 </div>
               ) : (
                 <div className="material-form">
+                  <label>
+                    <span>目标院校</span>
+                    <input
+                      value={postgraduateSchool}
+                      onChange={(event) => setPostgraduateSchool(event.currentTarget.value)}
+                      placeholder="例如：中国人民大学"
+                    />
+                  </label>
                   <label>
                     <span>报考专业</span>
                     <input
