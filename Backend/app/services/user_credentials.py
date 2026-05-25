@@ -42,6 +42,9 @@ class UserCredentialStore:
     def get_password_hash(self, email: str) -> str | None:
         raise NotImplementedError
 
+    def get_user_record(self, email: str) -> UserAccountRecord | None:
+        raise NotImplementedError
+
     def user_exists(self, email: str) -> bool:
         raise NotImplementedError
 
@@ -55,12 +58,14 @@ class UserCredentialStore:
         raise NotImplementedError
 
     def require_password_hash(self, email: str) -> str:
-        if not self.is_active(email):
-            raise UserDisabledError("user disabled")
-        password_hash = self.get_password_hash(email)
-        if password_hash is None:
+        record = self.get_user_record(email)
+        if record is None:
             raise UserNotFoundError("user not found")
-        return password_hash
+        if not record.is_active:
+            raise UserDisabledError("user disabled")
+        if record.password_hash is None:
+            raise UserNotFoundError("user not found")
+        return record.password_hash
 
 
 class InMemoryUserCredentialStore(UserCredentialStore):
@@ -72,6 +77,7 @@ class InMemoryUserCredentialStore(UserCredentialStore):
                 raise UserDisabledError("user disabled")
             return
         _memory_users[normalized_email] = UserAccountRecord(email=normalized_email)
+        _set_memory_initial_credit(normalized_email, initial_credit_balance)
 
     def create_user(self, email: str, password_hash: str, initial_credit_balance: int = 0) -> None:
         normalized_email = self._normalize_email(email)
@@ -81,12 +87,16 @@ class InMemoryUserCredentialStore(UserCredentialStore):
         if existing is not None and existing.password_hash:
             raise UserAlreadyExistsError("email already registered")
         _memory_users[normalized_email] = UserAccountRecord(email=normalized_email, password_hash=password_hash)
+        _set_memory_initial_credit(normalized_email, initial_credit_balance)
 
     def get_password_hash(self, email: str) -> str | None:
         user = _memory_users.get(self._normalize_email(email))
         if user is None or not user.is_active:
             return None
         return user.password_hash
+
+    def get_user_record(self, email: str) -> UserAccountRecord | None:
+        return _memory_users.get(self._normalize_email(email))
 
     def user_exists(self, email: str) -> bool:
         return self._normalize_email(email) in _memory_users
@@ -130,6 +140,7 @@ class RedisUserCredentialStore(UserCredentialStore):
         self._redis.hsetnx(self._profile_key(normalized_email), "email", normalized_email)
         self._redis.hsetnx(self._profile_key(normalized_email), "role", "user")
         self._redis.hsetnx(self._profile_key(normalized_email), "is_active", "1")
+        _set_redis_initial_credit(self._redis, normalized_email, initial_credit_balance)
 
     def create_user(self, email: str, password_hash: str, initial_credit_balance: int = 0) -> None:
         normalized_email = self._normalize_email(email)
@@ -140,6 +151,7 @@ class RedisUserCredentialStore(UserCredentialStore):
             raise UserAlreadyExistsError("email already registered")
         if hasattr(self._redis, "hset"):
             self._redis.hset(self._profile_key(normalized_email), mapping={"email": normalized_email, "role": "user", "is_active": "1"})
+        _set_redis_initial_credit(self._redis, normalized_email, initial_credit_balance)
 
     def get_password_hash(self, email: str) -> str | None:
         normalized_email = self._normalize_email(email)
@@ -149,6 +161,28 @@ class RedisUserCredentialStore(UserCredentialStore):
         if isinstance(value, bytes):
             return value.decode("utf-8")
         return value
+
+    def get_user_record(self, email: str) -> UserAccountRecord | None:
+        normalized_email = self._normalize_email(email)
+        profile: dict[str | bytes, str | bytes] = {}
+        if hasattr(self._redis, "hgetall"):
+            profile = self._redis.hgetall(self._profile_key(normalized_email)) or {}
+
+        raw_password_hash = self._redis.get(self._key(normalized_email))
+        password_hash = _decode_redis_value(raw_password_hash)
+        if not profile and password_hash is None:
+            return None
+
+        profile_email = _decode_redis_value(profile.get(b"email") or profile.get("email")) or normalized_email
+        role = _decode_redis_value(profile.get(b"role") or profile.get("role")) or "user"
+        active_value = _decode_redis_value(profile.get(b"is_active") or profile.get("is_active"))
+        is_active = active_value != "0"
+        return UserAccountRecord(
+            email=profile_email,
+            role=role,
+            is_active=is_active,
+            password_hash=password_hash,
+        )
 
     def user_exists(self, email: str) -> bool:
         normalized_email = self._normalize_email(email)
@@ -239,6 +273,17 @@ class DatabaseUserCredentialStore(UserCredentialStore):
             return None
         return user.password_hash
 
+    def get_user_record(self, email: str) -> UserAccountRecord | None:
+        user = self._get_user(self._normalize_email(email))
+        if user is None:
+            return None
+        return UserAccountRecord(
+            email=user.email,
+            role=user.role,
+            is_active=user.is_active,
+            password_hash=user.password_hash,
+        )
+
     def user_exists(self, email: str) -> bool:
         return self._get_user(self._normalize_email(email)) is not None
 
@@ -291,3 +336,22 @@ def get_user_credential_store(db_session: Session | None = Depends(get_optional_
     if redis_client is None:
         return InMemoryUserCredentialStore()
     return RedisUserCredentialStore(redis_client)
+
+
+def _decode_redis_value(value: str | bytes | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return value
+
+
+def _set_memory_initial_credit(email: str, initial_credit_balance: int) -> None:
+    from app.services.credit_balances import _memory_balances
+
+    _memory_balances.setdefault(email, initial_credit_balance)
+
+
+def _set_redis_initial_credit(redis_client: Any, email: str, initial_credit_balance: int) -> None:
+    if hasattr(redis_client, "set"):
+        redis_client.set(f"user_credit:{email}", initial_credit_balance, nx=True)

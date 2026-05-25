@@ -33,17 +33,19 @@ class EmailCodeStore:
             raise ValueError("email code expiration must be positive")
 
         issued_at = now or datetime.now(UTC)
+        normalized_email = normalize_email_key(email)
         code = generate_email_code()
-        record = EmailCodeRecord(email=email, code=code, expires_at=issued_at + timedelta(seconds=expires_in_seconds))
-        self._records[email] = record
+        record = EmailCodeRecord(email=normalized_email, code=code, expires_at=issued_at + timedelta(seconds=expires_in_seconds))
+        self._records[normalized_email] = record
         return record
 
     def consume_code(self, email: str, code: str, now: datetime | None = None) -> None:
         checked_at = now or datetime.now(UTC)
-        record = self._records.get(email)
+        normalized_email = normalize_email_key(email)
+        record = self._records.get(normalized_email)
         if record is None or record.code != code or record.expires_at < checked_at:
             raise InvalidEmailCodeError("invalid email verification code")
-        del self._records[email]
+        del self._records[normalized_email]
 
 
 class RedisEmailCodeStore:
@@ -56,9 +58,10 @@ class RedisEmailCodeStore:
             raise ValueError("email code expiration must be positive")
 
         issued_at = now or datetime.now(UTC)
+        normalized_email = normalize_email_key(email)
         code = generate_email_code()
-        self._redis.setex(self._key(email), expires_in_seconds, hash_email_code(code))
-        return EmailCodeRecord(email=email, code=code, expires_at=issued_at + timedelta(seconds=expires_in_seconds))
+        self._redis.setex(self._key(normalized_email), expires_in_seconds, hash_email_code(code))
+        return EmailCodeRecord(email=normalized_email, code=code, expires_at=issued_at + timedelta(seconds=expires_in_seconds))
 
     def consume_code(self, email: str, code: str, now: datetime | None = None) -> None:
         key = self._key(email)
@@ -75,7 +78,7 @@ class RedisEmailCodeStore:
         self._redis.delete(key)
 
     def _key(self, email: str) -> str:
-        return f"{self._key_prefix}:{email}"
+        return f"{self._key_prefix}:{normalize_email_key(email)}"
 
 
 class RedisEmailRateLimiter:
@@ -93,7 +96,7 @@ class RedisEmailRateLimiter:
             raise EmailCodeRateLimitError("too many email verification code requests")
 
     def _key(self, email: str) -> str:
-        return f"{self._key_prefix}:{email}"
+        return f"{self._key_prefix}:{normalize_email_key(email)}"
 
 
 class InMemoryAuthAttemptLimiter:
@@ -152,3 +155,7 @@ def generate_email_code() -> str:
 
 def hash_email_code(code: str) -> str:
     return sha256(code.encode("utf-8")).hexdigest()
+
+
+def normalize_email_key(email: str) -> str:
+    return email.strip().lower()

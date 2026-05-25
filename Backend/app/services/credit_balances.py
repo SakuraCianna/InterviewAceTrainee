@@ -80,7 +80,8 @@ class DatabaseCreditBalanceStore(CreditBalanceStore):
         user = self._get_or_create_user(user_id)
         balance_after = user.credit_balance + change_amount
         if balance_after < 0:
-            self._session.rollback()
+            if self._commit_on_write:
+                self._session.rollback()
             raise InsufficientCreditsError("credit balance cannot be negative")
         user.credit_balance = balance_after
         if self._commit_on_write:
