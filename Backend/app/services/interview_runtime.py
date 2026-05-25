@@ -129,19 +129,24 @@ def build_interview_steps(
 
 def build_report(session_id: str, interview_type: InterviewType, turns: list[dict[str, str]]) -> InterviewReportResponse:
     product = get_interview_product(interview_type)
-    answer_text = " ".join(turn["answer"].strip() for turn in turns)
-    answer_lengths = [len(turn["answer"].strip()) for turn in turns]
+    answered_turns = [turn for turn in turns if turn.get("answer", "").strip()]
+    answer_text = " ".join(turn["answer"].strip() for turn in answered_turns)
+    answer_lengths = [len(turn["answer"].strip()) for turn in answered_turns]
     average_length = sum(answer_lengths) / max(len(answer_lengths), 1)
-    base_score = _base_report_score(answer_text, average_length, len(turns))
+    base_score = _base_report_score(answer_text, average_length, len(answered_turns))
 
     dimensions: list[InterviewReportDimension] = []
     for index, name in enumerate(product.report_focus):
         score = _dimension_score(interview_type, name, answer_text, base_score, index)
+        evidence = _dimension_evidence(interview_type, name, answer_text, average_length)
         dimensions.append(
             InterviewReportDimension(
                 name=name,
                 score=score,
+                level=_score_level(score, interview_type),
                 comment=_dimension_comment(interview_type=interview_type, name=name, score=score),
+                evidence=evidence,
+                action=_dimension_action(interview_type, name, score),
             )
         )
 
@@ -150,18 +155,27 @@ def build_report(session_id: str, interview_type: InterviewType, turns: list[dic
     weakest_dimension = min(dimensions, key=lambda dimension: dimension.score).name if dimensions else product.report_focus[0]
 
     report_turns = [
-        InterviewReportTurn(round_name=turn["round_name"], question=turn["question"], answer=turn["answer"])
-        for turn in turns
+        _turn_report(interview_type, turn["round_name"], turn["question"], turn["answer"])
+        for turn in answered_turns
     ]
+    evidence = _report_evidence(interview_type, len(answered_turns), average_length, answer_text)
+    risk_flags = _risk_flags(interview_type, answer_lengths, answer_text, weakest_dimension)
+    priority_actions = _priority_actions(interview_type, weakest_dimension, risk_flags)
     return InterviewReportResponse(
         session_id=session_id,
         interview_type=interview_type,
         total_score=total_score,
-        summary=_scenario_summary(interview_type, product.name, len(turns), total_score),
+        readiness_level=_readiness_level(interview_type, total_score),
+        score_explanation=_score_explanation(interview_type, total_score, average_length, weakest_dimension, len(answered_turns)),
+        summary=_scenario_summary(interview_type, product.name, len(answered_turns), total_score),
         dimensions=dimensions,
         strengths=_scenario_strengths(interview_type, answer_text),
         improvements=_scenario_improvements(interview_type, weakest_dimension, short_answers),
         next_plan=_scenario_next_plan(interview_type, weakest_dimension),
+        priority_actions=priority_actions,
+        evidence=evidence,
+        risk_flags=risk_flags,
+        recommended_drills=_recommended_drills(interview_type, weakest_dimension),
         turns=report_turns,
     )
 
@@ -179,6 +193,226 @@ def _dimension_score(interview_type: InterviewType, name: str, answer_text: str,
     signal_bonus = min(sum(1 for keyword in signal_keywords if keyword.lower() in answer_text.lower()) * 3, 12)
     offset = ((index * 5) % 9) - 4
     return max(55, min(base_score + signal_bonus + offset, 95))
+
+
+def _score_level(score: int, interview_type: InterviewType) -> str:
+    if interview_type == InterviewType.IELTS:
+        if score >= 86:
+            return "Band 7+ 稳定"
+        if score >= 76:
+            return "Band 6-6.5 可提升"
+        return "需要补基础表达"
+    if score >= 86:
+        return "稳定可上场"
+    if score >= 76:
+        return "可上场但需补强"
+    if score >= 66:
+        return "需要针对性复盘"
+    return "需要重建回答框架"
+
+
+def _readiness_level(interview_type: InterviewType, total_score: int) -> str:
+    if interview_type == InterviewType.IELTS:
+        if total_score >= 86:
+            return "接近 Band 7+，可以继续打磨自然度和准确性"
+        if total_score >= 76:
+            return "约 Band 6-6.5，适合继续做 Part 2 展开和 Part 3 抽象讨论"
+        if total_score >= 66:
+            return "约 Band 5.5-6，优先补回答长度、连接词和语法稳定性"
+        return "暂不建议直接上考场，先建立基础答题模板"
+    if total_score >= 86:
+        return "真实面试准备度较高，可以进入临场节奏训练"
+    if total_score >= 76:
+        return "具备上场基础，但需要补强最低维度"
+    if total_score >= 66:
+        return "能完成流程，但回答证据和结构还不够稳"
+    return "暂不建议直接上场，先重建回答结构和核心素材"
+
+
+def _score_explanation(
+    interview_type: InterviewType,
+    total_score: int,
+    average_length: float,
+    weakest_dimension: str,
+    answered_turns: int,
+) -> str:
+    if interview_type == InterviewType.IELTS:
+        return (
+            f"综合分 {total_score} 主要来自 {answered_turns} 轮回答的长度、连贯性、词汇和语法信号。"
+            f"当前平均每轮约 {round(average_length)} 个字符，最需要优先提升的是 {weakest_dimension}。"
+        )
+    return (
+        f"综合分 {total_score} 由 {answered_turns} 轮回答的结构完整度、证据密度、场景匹配和追问承压表现综合得出。"
+        f"当前平均每轮约 {round(average_length)} 个字符，最低维度是「{weakest_dimension}」，下一轮应优先围绕该维度补证据。"
+    )
+
+
+def _dimension_evidence(interview_type: InterviewType, name: str, answer_text: str, average_length: float) -> list[str]:
+    keywords = _dimension_signal_keywords(interview_type).get(name, [])
+    hits = [keyword for keyword in keywords if keyword.lower() in answer_text.lower()]
+    evidence: list[str] = []
+    if hits:
+        evidence.append(f"命中关键词：{' / '.join(hits[:4])}")
+    else:
+        evidence.append("暂未捕捉到足够明确的关键词证据")
+    evidence.append(f"平均回答长度约 {round(average_length)} 字符")
+    if _contains_any(answer_text, ["%", "提升", "降低", "指标", "量化", "result", "reduced", "increased"]):
+        evidence.append("回答中出现量化结果或结果导向表达")
+    return evidence[:3]
+
+
+def _dimension_action(interview_type: InterviewType, name: str, score: int) -> str:
+    if interview_type == InterviewType.IELTS:
+        if score >= 85:
+            return f"继续保持 {name}，下一轮重点减少停顿和重复。"
+        return f"围绕 {name} 做 3 组限时回答，每组补一个例子和一个原因。"
+    if score >= 85:
+        return f"保持「{name}」优势，下一轮改为更高压追问训练。"
+    if score >= 75:
+        return f"把「{name}」回答补成结论、证据、取舍、结果四段式。"
+    return f"先为「{name}」准备一个可复用素材，再做 60 秒口头复述。"
+
+
+def _turn_report(interview_type: InterviewType, round_name: str, question: str, answer: str) -> InterviewReportTurn:
+    answer_length = len(answer.strip())
+    score = _turn_score(interview_type, answer)
+    evidence = _turn_evidence(answer)
+    return InterviewReportTurn(
+        round_name=round_name,
+        question=question,
+        answer=answer,
+        score=score,
+        feedback=_turn_feedback(interview_type, score, answer_length, evidence),
+        evidence=evidence,
+    )
+
+
+def _turn_score(interview_type: InterviewType, answer: str) -> int:
+    answer_length = len(answer.strip())
+    length_bonus = min(answer_length // 18, 16)
+    structure_bonus = 6 if _contains_any(answer, ["首先", "其次", "最后", "第一", "第二", "第三", "first", "second", "finally"]) else 0
+    evidence_bonus = 8 if _contains_any(answer, ["数据", "指标", "量化", "%", "提升", "降低", "for example", "result", "reduced"]) else 0
+    scenario_bonus = 4 if interview_type != InterviewType.IELTS else 0
+    return max(55, min(60 + length_bonus + structure_bonus + evidence_bonus + scenario_bonus, 95))
+
+
+def _turn_evidence(answer: str) -> list[str]:
+    evidence: list[str] = []
+    if _contains_any(answer, ["首先", "其次", "最后", "第一", "第二", "第三", "first", "second", "finally"]):
+        evidence.append("有结构化连接词")
+    if _contains_any(answer, ["数据", "指标", "量化", "%", "提升", "降低", "for example", "result", "reduced"]):
+        evidence.append("有结果或例子支撑")
+    if len(answer.strip()) >= 120:
+        evidence.append("回答长度较充分")
+    if not evidence:
+        evidence.append("证据不足，需要补充例子或结果")
+    return evidence
+
+
+def _turn_feedback(interview_type: InterviewType, score: int, answer_length: int, evidence: list[str]) -> str:
+    if answer_length < 40:
+        return "本题回答偏短，建议补充背景、行动和结果，至少讲到 45-60 秒。"
+    if score >= 85:
+        return "本题回答较完整，下一轮可以接受更细的反问和压力追问。"
+    if interview_type == InterviewType.IELTS:
+        return "本题已有内容基础，建议增加连接词、具体例子和自然改写，避免单句式回答。"
+    if any("结果" in item or "例子" in item for item in evidence):
+        return "本题有证据基础，建议进一步补充取舍、失败复盘或边界条件。"
+    return "本题结构基本成立，但证据密度不足，建议补一个具体案例或量化结果。"
+
+
+def _report_evidence(interview_type: InterviewType, answered_turns: int, average_length: float, answer_text: str) -> list[str]:
+    evidence = [
+        f"完成 {answered_turns} 轮有效回答",
+        f"平均每轮约 {round(average_length)} 字符",
+    ]
+    if _contains_any(answer_text, ["首先", "其次", "最后", "first", "second", "finally"]):
+        evidence.append("回答中出现结构化表达")
+    if _contains_any(answer_text, ["%", "指标", "量化", "提升", "降低", "result", "reduced"]):
+        evidence.append("回答中出现结果导向或量化表达")
+    if interview_type == InterviewType.IELTS and _contains_any(answer_text, ["because", "for example", "however", "although"]):
+        evidence.append("口语回答中出现原因、例子或转折连接")
+    return evidence
+
+
+def _risk_flags(interview_type: InterviewType, answer_lengths: list[int], answer_text: str, weakest_dimension: str) -> list[str]:
+    flags: list[str] = []
+    if not answer_lengths:
+        return ["没有有效回答，无法形成可靠复盘"]
+    if sum(1 for length in answer_lengths if length < 40) >= 2:
+        flags.append("多轮回答偏短，真实面试中容易显得准备不足")
+    if not _contains_any(answer_text, ["%", "指标", "量化", "提升", "降低", "result", "reduced"]):
+        flags.append("缺少量化结果或具体例子，面试官继续追问时支撑会偏弱")
+    if not _contains_any(answer_text, ["首先", "其次", "最后", "第一", "第二", "第三", "first", "second", "finally"]):
+        flags.append("结构化提示不足，回答听感可能偏散")
+    if interview_type == InterviewType.JOB and not _contains_any(answer_text, ["岗位", "JD", "业务", "目标", "职责"]):
+        flags.append("岗位匹配表达不足，需要把经历和目标岗位连接起来")
+    if interview_type == InterviewType.POSTGRADUATE and not _contains_any(answer_text, ["研究", "课题", "论文", "导师", "方法"]):
+        flags.append("科研问题意识不够突出，需要补研究兴趣和方法路径")
+    if interview_type == InterviewType.CIVIL_SERVICE and not _contains_any(answer_text, ["群众", "依法", "服务", "风险", "落实"]):
+        flags.append("公共服务立场和依法行政表达不足")
+    if interview_type == InterviewType.IELTS and not _contains_any(answer_text, ["because", "for example", "however", "although"]):
+        flags.append("连接词和例子不足，口语连贯性会受影响")
+    if not flags:
+        flags.append(f"暂无明显硬伤，下一轮重点打磨「{weakest_dimension}」")
+    return flags[:4]
+
+
+def _priority_actions(interview_type: InterviewType, weakest_dimension: str, risk_flags: list[str]) -> list[str]:
+    actions = {
+        InterviewType.JOB: [
+            f"先修「{weakest_dimension}」：把核心项目改写成 90 秒 STAR 版本。",
+            "为每个项目准备 1 个量化结果、1 个失败复盘、1 个技术取舍。",
+            "把目标岗位 JD 拆成 3 个能力点，并逐一绑定经历证据。",
+        ],
+        InterviewType.POSTGRADUATE: [
+            f"先修「{weakest_dimension}」：把专业基础、研究兴趣和未来计划连成一条线。",
+            "准备 1 篇英文论文的 60 秒口头汇报，覆盖摘要、方法、实验和结论。",
+            "为导师沟通题准备 2 个研究切入点和 1 个备选方向。",
+        ],
+        InterviewType.CIVIL_SERVICE: [
+            f"先修「{weakest_dimension}」：所有回答先搭建总分总结构。",
+            "每道题固定补齐群众立场、政策依据、执行落地和复盘改进。",
+            "每天练 1 道综合分析题和 1 道应急应变题，控制在 2 分钟内。",
+        ],
+        InterviewType.IELTS: [
+            f"Focus on {weakest_dimension}: record one answer and self-check pauses, examples and grammar.",
+            "Prepare 10 reusable examples for study, work, hometown, technology and learning topics.",
+            "For every Part 3 answer, give one cause, one example and one contrast.",
+        ],
+    }[interview_type]
+    if risk_flags and "偏短" in risk_flags[0]:
+        actions.insert(0, "优先把每轮回答时长拉到 45-90 秒，避免过早结束。")
+    return actions[:4]
+
+
+def _recommended_drills(interview_type: InterviewType, weakest_dimension: str) -> list[str]:
+    return {
+        InterviewType.JOB: [
+            "90 秒 STAR 项目复述",
+            "30 秒岗位匹配说明",
+            "技术方案取舍追问",
+            f"{weakest_dimension} 专项复盘",
+        ],
+        InterviewType.POSTGRADUATE: [
+            "90 秒中文自我介绍",
+            "英文论文 60 秒汇报",
+            "导师研究方向匹配说明",
+            f"{weakest_dimension} 专项复盘",
+        ],
+        InterviewType.CIVIL_SERVICE: [
+            "综合分析总分总表达",
+            "组织协调五要素复述",
+            "应急应变现场处置链路",
+            f"{weakest_dimension} 专项复盘",
+        ],
+        InterviewType.IELTS: [
+            "Part 2 90-second long turn",
+            "Part 3 cause-effect-contrast answer",
+            "Connector and paraphrase drill",
+            f"{weakest_dimension} drill",
+        ],
+    }[interview_type]
 
 
 def _dimension_signal_keywords(interview_type: InterviewType) -> dict[str, list[str]]:

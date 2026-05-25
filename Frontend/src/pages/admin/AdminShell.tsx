@@ -144,12 +144,18 @@ type AdminInterviewReport = {
   session_id: string;
   interview_type: string;
   total_score: number;
+  readiness_level: string;
+  score_explanation: string;
   summary: string;
-  dimensions: { name: string; score: number; comment: string }[];
+  dimensions: { name: string; score: number; comment: string; level?: string | null; evidence?: string[]; action?: string | null }[];
   strengths: string[];
   improvements: string[];
   next_plan: string[];
-  turns: { round_name: string; question: string; answer: string }[];
+  priority_actions: string[];
+  evidence: string[];
+  risk_flags: string[];
+  recommended_drills: string[];
+  turns: { round_name: string; question: string; answer: string; score?: number | null; feedback?: string | null; evidence?: string[] }[];
 };
 
 type SystemConfig = {
@@ -1261,12 +1267,29 @@ export function AdminShell() {
                 {selectedReport && (
                   <>
                     <p className="admin-report-summary">{selectedReport.summary}</p>
+                    <div className="admin-report-snapshot">
+                      <article>
+                        <span>准备度</span>
+                        <strong>{selectedReport.readiness_level || "待复盘"}</strong>
+                        <p>{selectedReport.score_explanation || "暂无评分解释。"}</p>
+                      </article>
+                      <article>
+                        <span>评分依据</span>
+                        {(selectedReport.evidence || []).map((item) => <p key={item}>{item}</p>)}
+                      </article>
+                      <article>
+                        <span>风险提醒</span>
+                        {(selectedReport.risk_flags || []).map((item) => <p key={item}>{item}</p>)}
+                      </article>
+                    </div>
                     <div className="admin-report-dimensions">
                       {selectedReport.dimensions.map((dimension) => (
                         <article key={dimension.name}>
                           <span>{dimension.name}</span>
                           <b>{dimension.score}</b>
+                          {dimension.level && <em>{dimension.level}</em>}
                           <p>{dimension.comment}</p>
+                          {dimension.action && <p>{dimension.action}</p>}
                         </article>
                       ))}
                     </div>
@@ -1283,13 +1306,22 @@ export function AdminShell() {
                         <h4>下一步</h4>
                         {selectedReport.next_plan.map((item) => <p key={item}>{item}</p>)}
                       </section>
+                      <section>
+                        <h4>优先动作</h4>
+                        {(selectedReport.priority_actions || []).map((item) => <p key={item}>{item}</p>)}
+                      </section>
+                      <section>
+                        <h4>推荐训练</h4>
+                        {(selectedReport.recommended_drills || []).map((item) => <p key={item}>{item}</p>)}
+                      </section>
                     </div>
                     <div className="admin-report-turns">
                       {selectedReport.turns.map((turn, index) => (
                         <details key={`${turn.round_name}-${index}`}>
-                          <summary>{turn.round_name}</summary>
+                          <summary>{turn.round_name}{typeof turn.score === "number" ? ` · ${turn.score}` : ""}</summary>
                           <p><b>问：</b>{turn.question}</p>
                           <p><b>答：</b>{turn.answer || "用户未作答"}</p>
+                          {turn.feedback && <p><b>反馈：</b>{turn.feedback}</p>}
                         </details>
                       ))}
                     </div>

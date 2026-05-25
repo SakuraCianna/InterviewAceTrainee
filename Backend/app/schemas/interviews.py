@@ -27,23 +27,35 @@ class InterviewReportDimension(BaseModel):
     name: str
     score: int
     comment: str
+    level: str | None = None
+    evidence: list[str] = Field(default_factory=list)
+    action: str | None = None
 
 
 class InterviewReportTurn(BaseModel):
     round_name: str
     question: str
     answer: str
+    score: int | None = None
+    feedback: str | None = None
+    evidence: list[str] = Field(default_factory=list)
 
 
 class InterviewReportResponse(BaseModel):
     session_id: str
     interview_type: InterviewType
     total_score: int
+    readiness_level: str = "待复盘"
+    score_explanation: str = ""
     summary: str
     dimensions: list[InterviewReportDimension]
     strengths: list[str]
     improvements: list[str]
     next_plan: list[str]
+    priority_actions: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    recommended_drills: list[str] = Field(default_factory=list)
     turns: list[InterviewReportTurn]
 
 

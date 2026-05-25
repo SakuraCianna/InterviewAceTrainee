@@ -15,12 +15,18 @@ type InterviewReport = {
   session_id: string;
   interview_type: InterviewType;
   total_score: number;
+  readiness_level: string;
+  score_explanation: string;
   summary: string;
-  dimensions: { name: string; score: number; comment: string }[];
+  dimensions: { name: string; score: number; comment: string; level?: string | null; evidence?: string[]; action?: string | null }[];
   strengths: string[];
   improvements: string[];
   next_plan: string[];
-  turns: { round_name: string; question: string; answer: string }[];
+  priority_actions: string[];
+  evidence: string[];
+  risk_flags: string[];
+  recommended_drills: string[];
+  turns: { round_name: string; question: string; answer: string; score?: number | null; feedback?: string | null; evidence?: string[] }[];
 };
 
 type InterviewStateResponse = {
@@ -777,9 +783,35 @@ export function InterviewRoom() {
             <section className="room-report">
               <div className="room-report-score">
                 <strong>{interviewState.report.total_score}</strong>
-                <span>综合表现</span>
+                <span>{interviewState.report.readiness_level || "综合表现"}</span>
               </div>
               <p>{interviewState.report.summary}</p>
+              {interviewState.report.score_explanation && (
+                <div className="room-report-summary-card">
+                  <AppIcon icon="lucide:gauge" size={18} />
+                  <span>{interviewState.report.score_explanation}</span>
+                </div>
+              )}
+              <div className="room-report-proof-grid">
+                <article>
+                  <h2>
+                    <AppIcon icon="lucide:list-checks" size={17} />
+                    评分依据
+                  </h2>
+                  {(interviewState.report.evidence || []).map((item) => (
+                    <span key={item}>{item}</span>
+                  ))}
+                </article>
+                <article>
+                  <h2>
+                    <AppIcon icon="lucide:triangle-alert" size={17} />
+                    风险提醒
+                  </h2>
+                  {(interviewState.report.risk_flags || []).map((item) => (
+                    <span key={item}>{item}</span>
+                  ))}
+                </article>
+              </div>
               <div className="room-report-insights">
                 <article>
                   <h2>
@@ -805,13 +837,29 @@ export function InterviewRoom() {
                   <div key={dimension.name}>
                     <span>{dimension.name}</span>
                     <strong>{dimension.score}</strong>
+                    {dimension.level && <small>{dimension.level}</small>}
                     <em>{dimension.comment}</em>
+                    {dimension.evidence?.map((item) => (
+                      <small key={item}>{item}</small>
+                    ))}
+                    {dimension.action && <em>{dimension.action}</em>}
                   </div>
+                ))}
+              </div>
+              <div className="room-report-plan">
+                <h2>优先动作</h2>
+                {(interviewState.report.priority_actions || []).map((item) => (
+                  <span key={item}>{item}</span>
                 ))}
               </div>
               <div className="room-report-plan">
                 <h2>下一轮建议</h2>
                 {interviewState.report.next_plan.map((item) => (
+                  <span key={item}>{item}</span>
+                ))}
+              </div>
+              <div className="room-report-drills">
+                {(interviewState.report.recommended_drills || []).map((item) => (
                   <span key={item}>{item}</span>
                 ))}
               </div>
@@ -822,9 +870,20 @@ export function InterviewRoom() {
                 </h2>
                 {interviewState.report.turns.map((turn, index) => (
                   <details key={`${turn.round_name}-${index}`}>
-                    <summary>{turn.round_name}</summary>
+                    <summary>
+                      <span>{turn.round_name}</span>
+                      {typeof turn.score === "number" && <b>{turn.score}</b>}
+                    </summary>
                     <p>{turn.question}</p>
                     <em>{turn.answer}</em>
+                    {turn.feedback && <p>{turn.feedback}</p>}
+                    {turn.evidence && turn.evidence.length > 0 && (
+                      <div className="room-report-turn-tags">
+                        {turn.evidence.map((item) => (
+                          <span key={item}>{item}</span>
+                        ))}
+                      </div>
+                    )}
                   </details>
                 ))}
               </div>
