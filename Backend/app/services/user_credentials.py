@@ -54,6 +54,9 @@ class UserCredentialStore:
     def set_active(self, email: str, is_active: bool) -> bool:
         raise NotImplementedError
 
+    def set_role(self, email: str, role: str) -> UserAccountRecord:
+        raise NotImplementedError
+
     def search_users(self, query: str, limit: int = 20) -> list[UserAccountRecord]:
         raise NotImplementedError
 
@@ -114,6 +117,14 @@ class InMemoryUserCredentialStore(UserCredentialStore):
         user.is_active = is_active
         return user.is_active
 
+    def set_role(self, email: str, role: str) -> UserAccountRecord:
+        normalized_email = self._normalize_email(email)
+        user = _memory_users.get(normalized_email)
+        if user is None:
+            raise UserNotFoundError("user not found")
+        user.role = role
+        return user
+
     def search_users(self, query: str, limit: int = 20) -> list[UserAccountRecord]:
         normalized_query = self._normalize_email(query)
         return [
@@ -150,7 +161,15 @@ class RedisUserCredentialStore(UserCredentialStore):
         if not created:
             raise UserAlreadyExistsError("email already registered")
         if hasattr(self._redis, "hset"):
-            self._redis.hset(self._profile_key(normalized_email), mapping={"email": normalized_email, "role": "user", "is_active": "1"})
+            existing_record = self.get_user_record(normalized_email)
+            self._redis.hset(
+                self._profile_key(normalized_email),
+                mapping={
+                    "email": normalized_email,
+                    "role": existing_record.role if existing_record is not None else "user",
+                    "is_active": "1",
+                },
+            )
         _set_redis_initial_credit(self._redis, normalized_email, initial_credit_balance)
 
     def get_password_hash(self, email: str) -> str | None:
@@ -205,8 +224,33 @@ class RedisUserCredentialStore(UserCredentialStore):
         normalized_email = self._normalize_email(email)
         if not hasattr(self._redis, "hset"):
             return is_active
-        self._redis.hset(self._profile_key(normalized_email), mapping={"email": normalized_email, "role": "user", "is_active": "1" if is_active else "0"})
+        existing_record = self.get_user_record(normalized_email)
+        self._redis.hset(
+            self._profile_key(normalized_email),
+            mapping={
+                "email": normalized_email,
+                "role": existing_record.role if existing_record is not None else "user",
+                "is_active": "1" if is_active else "0",
+            },
+        )
         return is_active
+
+    def set_role(self, email: str, role: str) -> UserAccountRecord:
+        normalized_email = self._normalize_email(email)
+        record = self.get_user_record(normalized_email)
+        if record is None:
+            raise UserNotFoundError("user not found")
+        if not hasattr(self._redis, "hset"):
+            return UserAccountRecord(email=normalized_email, role=role, is_active=record.is_active, password_hash=record.password_hash)
+        self._redis.hset(
+            self._profile_key(normalized_email),
+            mapping={
+                "email": normalized_email,
+                "role": role,
+                "is_active": "1" if record.is_active else "0",
+            },
+        )
+        return UserAccountRecord(email=normalized_email, role=role, is_active=record.is_active, password_hash=record.password_hash)
 
     def search_users(self, query: str, limit: int = 20) -> list[UserAccountRecord]:
         normalized_query = self._normalize_email(query)
@@ -223,7 +267,10 @@ class RedisUserCredentialStore(UserCredentialStore):
             active = profile.get(b"is_active") or profile.get("is_active") or "1"
             if isinstance(active, bytes):
                 active = active.decode("utf-8")
-            records.append(UserAccountRecord(email=email, is_active=active == "1"))
+            role = profile.get(b"role") or profile.get("role") or "user"
+            if isinstance(role, bytes):
+                role = role.decode("utf-8")
+            records.append(UserAccountRecord(email=email, role=role, is_active=active == "1"))
             if len(records) >= limit:
                 break
         return records
@@ -301,6 +348,20 @@ class DatabaseUserCredentialStore(UserCredentialStore):
             user.is_active = is_active
         self._session.commit()
         return user.is_active
+
+    def set_role(self, email: str, role: str) -> UserAccountRecord:
+        normalized_email = self._normalize_email(email)
+        user = self._get_user(normalized_email)
+        if user is None:
+            raise UserNotFoundError("user not found")
+        user.role = role
+        self._session.commit()
+        return UserAccountRecord(
+            email=user.email,
+            role=user.role,
+            is_active=user.is_active,
+            password_hash=user.password_hash,
+        )
 
     def search_users(self, query: str, limit: int = 20) -> list[UserAccountRecord]:
         normalized_query = f"%{self._normalize_email(query)}%"

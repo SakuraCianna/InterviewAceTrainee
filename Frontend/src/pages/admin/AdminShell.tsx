@@ -797,6 +797,25 @@ export function AdminShell() {
     await Promise.all([loadDashboardStats(), searchUsers(), loadAuditLogs()]);
   }
 
+  async function updateUserRole(user: AdminUserSearchItem, role: "user" | "admin") {
+    const response = await fetch(`/api/admin/users/${encodeURIComponent(user.email)}/role`, {
+      method: "PUT",
+      credentials: "include",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ role, reason: role === "admin" ? "grant_admin" : "revoke_admin" }),
+    });
+    const data = (await response.json()) as { role?: string; detail?: string };
+    if (!response.ok) {
+      setMessage(data.detail ? `用户角色更新失败：${data.detail}` : "用户角色更新失败。");
+      return;
+    }
+    setUserSearchResults((previous) =>
+      previous.map((item) => (item.email === user.email ? { ...item, role: data.role ?? role } : item)),
+    );
+    setMessage(`${user.email} 已${role === "admin" ? "设为管理员" : "撤销管理员"}，该账号需要重新登录后生效。`);
+    await Promise.all([loadDashboardStats(), loadAuditLogs()]);
+  }
+
   function configInputValue(value: SystemConfig["value"]) {
     if (typeof value === "string") {
       return value;
@@ -1179,13 +1198,22 @@ export function AdminShell() {
                       </span>
                       <b>{user.completed_interviews}/{user.total_interviews}</b>
                     </button>
-                    <button
-                      type="button"
-                      className="admin-history-action"
-                      onClick={() => void updateUserStatus(user, !user.is_active)}
-                    >
-                      {user.is_active ? "禁用" : "启用"}
-                    </button>
+                    <div className="admin-user-actions">
+                      <button
+                        type="button"
+                        className="admin-history-action"
+                        onClick={() => void updateUserStatus(user, !user.is_active)}
+                      >
+                        {user.is_active ? "禁用" : "启用"}
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-history-action"
+                        onClick={() => void updateUserRole(user, user.role === "admin" ? "user" : "admin")}
+                      >
+                        {user.role === "admin" ? "撤销管理员" : "设为管理员"}
+                      </button>
+                    </div>
                   </article>
                 ))}
               </div>

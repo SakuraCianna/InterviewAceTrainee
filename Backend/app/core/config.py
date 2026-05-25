@@ -10,7 +10,6 @@ class Settings(BaseSettings):
     database_url: str = Field(default="postgresql+psycopg://mianba:mianba@postgres:5432/mianba")
     redis_url: str = Field(default="redis://redis:6379/0")
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,https://sakuracianna.icu,https://www.sakuracianna.icu"
-    admin_email_allowlist: str = ""
     auth_cookie_secure: bool = False
     auth_cookie_samesite: str = "lax"
     access_token_secret: str = "change-me-before-deploy"

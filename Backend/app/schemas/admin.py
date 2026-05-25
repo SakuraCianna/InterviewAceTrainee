@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from app.schemas.interviews import InterviewHistoryItem, InterviewReportResponse
@@ -203,6 +205,16 @@ class AdminUserStatusUpdateRequest(BaseModel):
 class AdminUserStatusResponse(BaseModel):
     email: str
     is_active: bool
+
+
+class AdminUserRoleUpdateRequest(BaseModel):
+    role: Literal["user", "admin"]
+    reason: str = Field(min_length=2, max_length=120)
+
+
+class AdminUserRoleResponse(BaseModel):
+    email: str
+    role: str
 
 
 class SystemConfigResponse(BaseModel):

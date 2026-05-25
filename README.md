@@ -20,7 +20,7 @@
 - 后端：FastAPI、Python 3.12、uv、SQLAlchemy、Alembic。
 - 数据：PostgreSQL、Redis。
 - 部署：Docker Compose、Nginx、HTTPS 证书挂载。
-- 认证：JWT、HttpOnly Cookie、CSRF Token、管理员邮箱白名单与二次验证。
+- 认证：JWT、HttpOnly Cookie、CSRF Token、管理员角色与二次验证。
 
 ## 项目结构
 
@@ -43,7 +43,6 @@ DATABASE_URL=postgresql+psycopg://用户名:密码@127.0.0.1:5432/mianba
 REDIS_URL=redis://127.0.0.1:6379/0
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://sakuracianna.icu,https://www.sakuracianna.icu
 ADMIN_ENTRY_PATH=/console-mianba
-ADMIN_EMAIL_ALLOWLIST=你的管理员邮箱
 ACCESS_TOKEN_SECRET=随机长字符串
 AUTH_COOKIE_SECURE=false
 EMAIL_PROVIDER=dev
@@ -201,5 +200,5 @@ https://sakuracianna.icu/
 - `Backend/.env` 中 `CORS_ORIGINS` 包含正式域名。
 - HTTPS 可用后设置 `AUTH_COOKIE_SECURE=true`。
 - Resend 或其他邮件服务的发信域名完成 DNS 验证。
-- 管理员邮箱加入 `ADMIN_EMAIL_ALLOWLIST`。
+- 管理员账号需要在后台或数据库中拥有 `admin` 角色，并使用密码 + 邮箱验证码登录后台。
 - 首次上线前执行 `uv run python -m app.cli.safe_migrate` 或通过 Docker 启动自动迁移。

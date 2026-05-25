@@ -24,16 +24,11 @@ def create_csrf_token() -> str:
     return token_urlsafe(32)
 
 
-def is_email_in_allowlist(email: str, allowlist: str) -> bool:
-    allowed_emails = {item.strip().lower() for item in allowlist.split(",") if item.strip()}
-    return email.strip().lower() in allowed_emails
-
-
-def create_access_token(subject: str, role: str) -> str:
+def create_access_token(subject: str, role: str, session_id: str) -> str:
     settings = get_settings()
     issued_at = datetime.now(timezone.utc)
     expires_at = issued_at + timedelta(minutes=settings.access_token_expire_minutes)
-    payload = {"sub": subject, "role": role, "iat": issued_at, "exp": expires_at}
+    payload = {"sub": subject, "role": role, "sid": session_id, "iat": issued_at, "exp": expires_at}
     return jwt.encode(payload, settings.access_token_secret, algorithm=settings.access_token_algorithm)
 
 
@@ -46,6 +41,7 @@ def decode_access_token(token: str) -> dict[str, str]:
 
     subject = payload.get("sub")
     role = payload.get("role")
-    if not isinstance(subject, str) or not isinstance(role, str):
+    session_id = payload.get("sid")
+    if not isinstance(subject, str) or not isinstance(role, str) or not isinstance(session_id, str):
         raise ValueError("invalid access token claims")
-    return {"sub": subject, "role": role}
+    return {"sub": subject, "role": role, "session_id": session_id}

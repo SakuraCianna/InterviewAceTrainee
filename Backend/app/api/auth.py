@@ -7,8 +7,8 @@ from app.core.security import (
     CSRF_TOKEN_COOKIE_NAME,
     create_access_token,
     create_csrf_token,
+    decode_access_token,
     hash_password,
-    is_email_in_allowlist,
     verify_password,
 )
 from app.schemas.auth import (
@@ -22,6 +22,7 @@ from app.schemas.auth import (
     PasswordRegisterRequest,
 )
 from app.services.auth_login_logs import AuthLoginLogStore, get_auth_login_log_store
+from app.services.auth_sessions import AuthSessionStore, get_auth_session_store
 from app.services.credit_balances import CreditBalanceStore, get_credit_balance_store
 from app.services.email_codes import (
     AuthAttemptRateLimitError,
@@ -50,8 +51,15 @@ _demo_codes = EmailCodeStore()
 _auth_attempt_limiter = InMemoryAuthAttemptLimiter()
 
 
-def issue_login_response(response: Response, subject: str, role: str, settings) -> PasswordLoginResponse:
-    access_token = create_access_token(subject, role)
+def issue_login_response(
+    response: Response,
+    subject: str,
+    role: str,
+    settings,
+    auth_session_store: AuthSessionStore,
+) -> PasswordLoginResponse:
+    session_id = auth_session_store.create_session(subject, settings.access_token_expire_minutes * 60)
+    access_token = create_access_token(subject, role, session_id)
     csrf_token = create_csrf_token()
     response.set_cookie(
         key=ACCESS_TOKEN_COOKIE_NAME,
@@ -170,6 +178,7 @@ def register_with_password(
     user_store: UserCredentialStore = Depends(get_user_credential_store),
     system_config_store: DatabaseSystemConfigStore | InMemorySystemConfigStore = Depends(get_system_config_store),
     login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
+    auth_session_store: AuthSessionStore = Depends(get_auth_session_store),
 ) -> PasswordLoginResponse:
     email = normalize_auth_email(payload.email)
     attempt_key = auth_attempt_key("password_register", email)
@@ -199,7 +208,7 @@ def register_with_password(
 
     reset_auth_failures(attempt_key)
     record_login_event(login_log_store, request, email=email, auth_method="password_register", role="user", success=True)
-    return issue_login_response(response, email, "user", settings)
+    return issue_login_response(response, email, "user", settings, auth_session_store)
 
 
 @router.post("/password/login", response_model=PasswordLoginResponse)
@@ -211,6 +220,7 @@ def login_with_password(
     user_store: UserCredentialStore = Depends(get_user_credential_store),
     system_config_store: DatabaseSystemConfigStore | InMemorySystemConfigStore = Depends(get_system_config_store),
     login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
+    auth_session_store: AuthSessionStore = Depends(get_auth_session_store),
 ) -> PasswordLoginResponse:
     email = normalize_auth_email(payload.email)
     attempt_key = auth_attempt_key("password_login", email)
@@ -236,7 +246,7 @@ def login_with_password(
 
     reset_auth_failures(attempt_key)
     record_login_event(login_log_store, request, email=email, auth_method="password", role="user", success=True)
-    return issue_login_response(response, email, "user", settings)
+    return issue_login_response(response, email, "user", settings, auth_session_store)
 
 
 @router.post("/email-code/request", response_model=EmailCodeRequestResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -276,6 +286,7 @@ def login_with_email_code(
     user_store: UserCredentialStore = Depends(get_user_credential_store),
     system_config_store: DatabaseSystemConfigStore | InMemorySystemConfigStore = Depends(get_system_config_store),
     login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
+    auth_session_store: AuthSessionStore = Depends(get_auth_session_store),
 ) -> PasswordLoginResponse:
     email = normalize_auth_email(payload.email)
     attempt_key = auth_attempt_key("email_code_login", email)
@@ -304,7 +315,7 @@ def login_with_email_code(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user_disabled") from exc
     reset_auth_failures(attempt_key)
     record_login_event(login_log_store, request, email=email, auth_method="email_code", role="user", success=True)
-    return issue_login_response(response, email, "user", settings)
+    return issue_login_response(response, email, "user", settings, auth_session_store)
 
 
 @router.post("/admin/login", response_model=PasswordLoginResponse)
@@ -316,6 +327,7 @@ def login_admin(
     code_store: EmailCodeStore | RedisEmailCodeStore = Depends(get_email_code_store),
     user_store: UserCredentialStore = Depends(get_user_credential_store),
     login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
+    auth_session_store: AuthSessionStore = Depends(get_auth_session_store),
 ) -> PasswordLoginResponse:
     email = normalize_auth_email(payload.email)
     attempt_key = auth_attempt_key("admin_login", email)
@@ -336,11 +348,6 @@ def login_admin(
         record_login_event(login_log_store, request, email=email, auth_method="admin_password_email_code", role="admin", success=False, failure_reason="invalid_credentials")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_credentials")
 
-    if not is_email_in_allowlist(email, settings.admin_email_allowlist):
-        record_auth_failure(attempt_key, settings)
-        record_login_event(login_log_store, request, email=email, auth_method="admin_password_email_code", role="admin", success=False, failure_reason="admin_email_not_allowed")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin_email_not_allowed")
-
     user_record = user_store.get_user_record(email)
     if user_record is None or user_record.role != "admin":
         record_auth_failure(attempt_key, settings)
@@ -356,13 +363,23 @@ def login_admin(
 
     reset_auth_failures(attempt_key)
     record_login_event(login_log_store, request, email=email, auth_method="admin_password_email_code", role="admin", success=True)
-    return issue_login_response(response, email, "admin", settings)
+    return issue_login_response(response, email, "admin", settings, auth_session_store)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(request: Request, response: Response, settings=Depends(get_settings)) -> None:
+def logout(
+    request: Request,
+    response: Response,
+    settings=Depends(get_settings),
+    auth_session_store: AuthSessionStore = Depends(get_auth_session_store),
+) -> None:
     if request.cookies.get(ACCESS_TOKEN_COOKIE_NAME):
         require_csrf_for_cookie_auth(request)
+        try:
+            claims = decode_access_token(request.cookies[ACCESS_TOKEN_COOKIE_NAME])
+            auth_session_store.clear_session(claims["sub"], claims["session_id"])
+        except ValueError:
+            pass
     response.delete_cookie(
         key=ACCESS_TOKEN_COOKIE_NAME,
         path="/",

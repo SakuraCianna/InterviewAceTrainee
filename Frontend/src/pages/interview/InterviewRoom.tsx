@@ -233,7 +233,18 @@ export function InterviewRoom() {
       setSocketMessage((message) => (message.includes("未完成") ? message : "实时面试通道已建立。"));
     };
     websocket.onmessage = (event) => {
-      const payload = JSON.parse(event.data) as { type?: string; received_type?: string; state?: string };
+      const payload = JSON.parse(event.data) as { type?: string; received_type?: string; state?: string; message?: string };
+      if (payload.type === "session_kicked") {
+        setSocketState("已下线");
+        setSocketMessage("账号已在其他设备登录，当前训练页已下线，请重新登录。");
+        setCurrentUser(null);
+        setInterviewState(null);
+        setActiveSession(null);
+        window.setTimeout(() => {
+          window.location.assign("/login");
+        }, 1200);
+        return;
+      }
       if (payload.type === "event_ack") {
         setSocketMessage(`系统已记录：${payload.received_type}`);
         return;

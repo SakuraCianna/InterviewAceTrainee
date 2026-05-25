@@ -29,6 +29,8 @@ from app.schemas.admin import (
     AdminTopUserUsage,
     AdminUserDetailResponse,
     AdminUserInterviewReportResponse,
+    AdminUserRoleResponse,
+    AdminUserRoleUpdateRequest,
     AdminUserSearchItem,
     AdminUserStatusResponse,
     AdminUserStatusUpdateRequest,
@@ -43,6 +45,7 @@ from app.schemas.admin import (
 from app.schemas.interviews import InterviewHistoryItem
 from app.services.audit_logs import DatabaseAuditLogStore, InMemoryAuditLogStore, get_audit_log_store
 from app.services.ai_call_logs import AICallLogStore, get_ai_call_log_store
+from app.services.auth_sessions import AuthSessionStore, get_auth_session_store
 from app.services.auth_login_logs import AuthLoginLogStore, get_auth_login_log_store
 from app.services.credit_balances import CreditBalanceStore, DatabaseCreditBalanceStore, get_credit_balance_store
 from app.services.credit_ledger import CreditLedgerStore, DatabaseCreditLedgerStore, get_credit_ledger_store
@@ -62,7 +65,7 @@ from app.services.system_configs import (
     get_system_config_store,
 )
 from app.services.refund_cases import RefundCaseNotFoundError, RefundCaseStore, get_refund_case_store
-from app.services.user_credentials import UserAccountRecord, UserCredentialStore, get_user_credential_store
+from app.services.user_credentials import UserAccountRecord, UserCredentialStore, UserNotFoundError, get_user_credential_store
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 ADMIN_INTERVIEW_REQUIRED_TABLES = ("interview_sessions", "interview_turns", "interview_reports", "interview_materials")
@@ -506,6 +509,7 @@ def update_user_status(
     admin_claims: TokenClaims = Depends(require_admin_user),
     user_store: UserCredentialStore = Depends(get_user_credential_store),
     audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+    auth_session_store: AuthSessionStore = Depends(get_auth_session_store),
 ) -> AdminUserStatusResponse:
     normalized_user_id = normalize_user_email(user_id)
     before_active = user_store.is_active(normalized_user_id)
@@ -520,7 +524,42 @@ def update_user_status(
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
+    if not after_active:
+        auth_session_store.clear_session(normalized_user_id)
     return AdminUserStatusResponse(email=normalized_user_id, is_active=after_active)
+
+
+@router.put("/users/{user_id}/role", response_model=AdminUserRoleResponse)
+def update_user_role(
+    request: Request,
+    user_id: str,
+    payload: AdminUserRoleUpdateRequest,
+    admin_claims: TokenClaims = Depends(require_admin_user),
+    user_store: UserCredentialStore = Depends(get_user_credential_store),
+    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+    auth_session_store: AuthSessionStore = Depends(get_auth_session_store),
+) -> AdminUserRoleResponse:
+    normalized_user_id = normalize_user_email(user_id)
+    before_record = user_store.get_user_record(normalized_user_id)
+    if before_record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user_not_found")
+    try:
+        updated_record = user_store.set_role(normalized_user_id, payload.role)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user_not_found") from exc
+
+    auth_session_store.clear_session(normalized_user_id)
+    audit_store.record(
+        admin_email=admin_claims["sub"],
+        action="user_role_update",
+        target_type="user",
+        target_id=normalized_user_id,
+        before_snapshot={"role": before_record.role},
+        after_snapshot={"role": updated_record.role, "reason": payload.reason},
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    return AdminUserRoleResponse(email=normalized_user_id, role=updated_record.role)
 
 
 @router.post("/users/{user_id}/credits", response_model=AdminCreditAdjustmentResponse)

@@ -2875,6 +2875,12 @@ button {
   min-width: 64px;
 }
 
+.admin-user-actions {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
 .admin-user-results button.is-selected {
   background: #101826;
   color: #ffffff;
