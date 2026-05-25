@@ -34,6 +34,7 @@ from app.services.interview_materials import DatabaseInterviewMaterialStore
 from app.services.ai_router import AIServiceRouter
 from app.services.interview_ai import generate_next_interview_question
 from app.services.interview_products import get_interview_product
+from app.services.interview_presets import build_preset_prompt_context
 from app.services.llm_gateway import OpenAICompatibleLLMClient
 from app.services.provider_configs import DatabaseProviderConfigStore, InMemoryProviderConfigStore
 
@@ -304,6 +305,11 @@ def build_next_question_override(
         return None
     steps = build_interview_steps_for_state(current_state)
     next_step = steps[current_state.current_step_index + 1]
+    preset_context = build_preset_prompt_context(
+        current_state.interview_type,
+        current_state.material_context,
+        round_name=next_step.round_name,
+    )
     return generate_next_interview_question(
         router=AIServiceRouter(provider_store.list_configs()),
         llm_client=OpenAICompatibleLLMClient(settings),
@@ -312,6 +318,7 @@ def build_next_question_override(
         answer_text=answer_text,
         next_round_name=next_step.round_name,
         next_static_question=next_step.question_text,
+        preset_context=preset_context,
         call_log_store=ai_call_log_store,
         session_id=current_state.session_id,
     )

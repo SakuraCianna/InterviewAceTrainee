@@ -15,6 +15,7 @@ from app.schemas.interviews import (
 )
 from app.services.interview_products import get_interview_product
 from app.services.interview_material_context import InterviewMaterialContext
+from app.services.interview_presets import best_preset_hint
 
 
 def utc_now() -> datetime:
@@ -99,35 +100,46 @@ def build_interview_steps(
     if interview_type == InterviewType.JOB and material_context is not None:
         job_title = material_context.job_title or "目标岗位"
         jd_focus = material_keywords or _compact_prompt_hint(material_context.job_requirements)
+        preset_title, question_angles, _ = best_preset_hint(interview_type, material_context, "专业一面")
+        role_label = preset_title or job_title
+        angle_hint = "、".join(question_angles[:4]) if question_angles else jd_focus
         steps = [
             InterviewStep(
                 "专业一面",
-                f"你正在面试「{job_title}」。请用 90 秒按 STAR 结构介绍一个最能匹配该岗位的项目，并优先覆盖这些要求：{jd_focus}。",
+                f"你正在面试「{job_title}」，我会按「{role_label}」的真实要求看证据。请用 90 秒介绍一个最能证明你能胜任这个岗位的项目、作品或经历，优先覆盖：{angle_hint}。",
             ),
             InterviewStep(
                 "专业一面",
-                f"结合你的简历和「{job_title}」岗位 JD，请展开一个关键技术决策，说明你比较过哪些方案、为什么这样取舍。",
+                f"结合你的简历和「{job_title}」岗位 JD，请展开一个关键选择或方案取舍，说明你比较过什么、为什么这样做、最后效果如何。",
             ),
             *steps[2:],
         ]
     if interview_type == InterviewType.POSTGRADUATE and material_context is not None:
         major = material_context.major or "报考专业"
         direction = material_context.research_direction or "你的研究兴趣"
+        preset_title, question_angles, _ = best_preset_hint(interview_type, material_context, "专业基础")
+        major_label = preset_title or major
+        angle_hint = "、".join(question_angles[:4]) if question_angles else direction
         steps = [
             InterviewStep(
                 "复试开场",
-                f"请做一段 90 秒以内的中文自我介绍，围绕「{major}」和「{direction}」突出专业背景、复试动机和你能带来的研究基础。",
+                f"请做一段 90 秒以内的中文自我介绍，围绕「{major_label}」和「{direction}」突出专业背景、复试动机和你能带来的研究基础。",
             ),
             InterviewStep(
                 "专业基础",
-                f"请说明「{major}」里你本科阶段最熟悉的一门专业课，并举例说明它如何支撑「{direction}」。",
+                f"请说明「{major_label}」里你本科阶段最熟悉的一门专业课，并举例说明它如何支撑这些方向：{angle_hint}。",
             ),
             *steps[2:],
         ]
     return steps
 
 
-def build_report(session_id: str, interview_type: InterviewType, turns: list[dict[str, str]]) -> InterviewReportResponse:
+def build_report(
+    session_id: str,
+    interview_type: InterviewType,
+    turns: list[dict[str, str]],
+    material_context: InterviewMaterialContext | None = None,
+) -> InterviewReportResponse:
     product = get_interview_product(interview_type)
     answered_turns = [turn for turn in turns if turn.get("answer", "").strip()]
     answer_text = " ".join(turn["answer"].strip() for turn in answered_turns)
@@ -159,6 +171,9 @@ def build_report(session_id: str, interview_type: InterviewType, turns: list[dic
         for turn in answered_turns
     ]
     evidence = _report_evidence(interview_type, len(answered_turns), average_length, answer_text)
+    preset_title, _, preset_focus = best_preset_hint(interview_type, material_context)
+    if preset_title:
+        evidence.insert(0, f"匹配训练预设：{preset_title}")
     risk_flags = _risk_flags(interview_type, answer_lengths, answer_text, weakest_dimension)
     priority_actions = _priority_actions(interview_type, weakest_dimension, risk_flags)
     return InterviewReportResponse(
@@ -175,7 +190,7 @@ def build_report(session_id: str, interview_type: InterviewType, turns: list[dic
         priority_actions=priority_actions,
         evidence=evidence,
         risk_flags=risk_flags,
-        recommended_drills=_recommended_drills(interview_type, weakest_dimension),
+        recommended_drills=_recommended_drills(interview_type, weakest_dimension, preset_focus),
         turns=report_turns,
     )
 
@@ -386,8 +401,12 @@ def _priority_actions(interview_type: InterviewType, weakest_dimension: str, ris
     return actions[:4]
 
 
-def _recommended_drills(interview_type: InterviewType, weakest_dimension: str) -> list[str]:
-    return {
+def _recommended_drills(
+    interview_type: InterviewType,
+    weakest_dimension: str,
+    preset_focus: list[str] | None = None,
+) -> list[str]:
+    drills = {
         InterviewType.JOB: [
             "90 秒 STAR 项目复述",
             "30 秒岗位匹配说明",
@@ -413,6 +432,9 @@ def _recommended_drills(interview_type: InterviewType, weakest_dimension: str) -
             f"{weakest_dimension} drill",
         ],
     }[interview_type]
+    if preset_focus:
+        drills.insert(0, f"{preset_focus[0]} 专项追问")
+    return drills[:5]
 
 
 def _dimension_signal_keywords(interview_type: InterviewType) -> dict[str, list[str]]:
@@ -617,6 +639,7 @@ class InMemoryInterviewRuntimeStore:
                 session_id=session_id,
                 interview_type=record["interview_type"],
                 turns=self._turn_dicts(record),
+                material_context=record.get("material_context"),
             )
         else:
             if next_question_override:
@@ -766,6 +789,7 @@ class DatabaseInterviewRuntimeStore:
                 session_id=session_id,
                 interview_type=InterviewType(session_model.interview_type),
                 turns=self._turn_dicts(session_id),
+                material_context=self._material_context(session_model.material_id),
             )
             self._session.add(
                 InterviewReport(session_id=session_id, total_score=report.total_score, report_json=report.model_dump(mode="json"))
