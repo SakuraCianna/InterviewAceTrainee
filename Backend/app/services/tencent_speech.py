@@ -23,12 +23,31 @@ class SpeechProviderError(RuntimeError):
 @dataclass(frozen=True)
 class SpeechRecognitionResult:
     text: str
+    provider_request_id: str | None = None
+    audio_duration_ms: int | None = None
+
+    @property
+    def call_metadata(self) -> dict:
+        return {
+            "provider_request_id": self.provider_request_id,
+            "audio_duration_ms": self.audio_duration_ms,
+            "characters": len(self.text),
+        }
 
 
 @dataclass(frozen=True)
 class SpeechSynthesisResult:
     audio_base64: str
     mime_type: str
+    provider_request_id: str | None = None
+    characters: int | None = None
+
+    @property
+    def call_metadata(self) -> dict:
+        return {
+            "provider_request_id": self.provider_request_id,
+            "characters": self.characters,
+        }
 
 
 class TencentSpeechClient:
@@ -72,7 +91,11 @@ class TencentSpeechClient:
         text = str(payload.get("Result") or "").strip()
         if not text:
             raise SpeechProviderError("tencent_asr_empty_result")
-        return SpeechRecognitionResult(text=text)
+        return SpeechRecognitionResult(
+            text=text,
+            provider_request_id=str(payload.get("RequestId") or "") or None,
+            audio_duration_ms=_estimate_audio_duration_ms(audio_bytes, audio_format),
+        )
 
     def synthesize(
         self,
@@ -105,7 +128,12 @@ class TencentSpeechClient:
         audio = str(payload.get("Audio") or "").strip()
         if not audio:
             raise SpeechProviderError("tencent_tts_empty_audio")
-        return SpeechSynthesisResult(audio_base64=audio, mime_type="audio/mpeg")
+        return SpeechSynthesisResult(
+            audio_base64=audio,
+            mime_type="audio/mpeg",
+            provider_request_id=str(payload.get("RequestId") or "") or None,
+            characters=len(text),
+        )
 
     def _ensure_tencent_provider(self, config: AIProviderConfig) -> None:
         if config.provider_name.strip().lower() != "tencent":
@@ -149,3 +177,19 @@ class TencentSpeechClient:
         if interview_type == InterviewType.IELTS:
             return self._settings.tencent_asr_ielts_engine_model_type
         return self._settings.tencent_asr_engine_model_type
+
+
+def _estimate_audio_duration_ms(audio_bytes: bytes, audio_format: str) -> int | None:
+    if audio_format != "wav" or len(audio_bytes) < 44 or audio_bytes[:4] != b"RIFF":
+        return None
+    try:
+        channels = int.from_bytes(audio_bytes[22:24], "little")
+        sample_rate = int.from_bytes(audio_bytes[24:28], "little")
+        bits_per_sample = int.from_bytes(audio_bytes[34:36], "little")
+        data_size = int.from_bytes(audio_bytes[40:44], "little")
+    except ValueError:
+        return None
+    bytes_per_second = sample_rate * channels * bits_per_sample / 8
+    if bytes_per_second <= 0:
+        return None
+    return int(data_size / bytes_per_second * 1000)

@@ -16,6 +16,10 @@ REQUIRED_TABLES = (
     "interview_turns",
     "interview_reports",
     "ai_provider_configs",
+    "ai_call_logs",
+    "auth_login_logs",
+    "customer_service_notes",
+    "refund_cases",
     "admin_audit_logs",
     "system_configs",
 )

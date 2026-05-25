@@ -140,9 +140,60 @@ class AICallLog(Base):
     purpose: Mapped[str] = mapped_column(String(80))
     success: Mapped[bool] = mapped_column(Boolean)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    provider_request_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    audio_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    characters: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    estimated_cost_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     usage_json: Mapped[dict | None] = mapped_column(json_type, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class AuthLoginLog(Base):
+    __tablename__ = "auth_login_logs"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_pk)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    auth_method: Mapped[str] = mapped_column(String(40))
+    role: Mapped[str] = mapped_column(String(32))
+    success: Mapped[bool] = mapped_column(Boolean)
+    failure_reason: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class CustomerServiceNote(Base):
+    __tablename__ = "customer_service_notes"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_pk)
+    user_email: Mapped[str] = mapped_column(String(255), index=True)
+    admin_email: Mapped[str] = mapped_column(String(255), index=True)
+    category: Mapped[str] = mapped_column(String(80))
+    content: Mapped[str] = mapped_column(Text)
+    related_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class RefundCase(Base):
+    __tablename__ = "refund_cases"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_pk)
+    user_email: Mapped[str] = mapped_column(String(255), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True, default="open")
+    reason: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(Text)
+    amount_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currency: Mapped[str] = mapped_column(String(16), default="CNY")
+    credit_adjustment: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    related_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_admin_email: Mapped[str] = mapped_column(String(255))
+    updated_by_admin_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 class AdminAuditLog(Base):

@@ -15,6 +15,16 @@ class LLMProviderError(RuntimeError):
 class LLMCompletionResponse:
     content: str
     usage: dict[str, Any]
+    provider_request_id: str | None = None
+
+    @property
+    def call_metadata(self) -> dict[str, Any]:
+        return {
+            "provider_request_id": self.provider_request_id,
+            "input_tokens": self.usage.get("prompt_tokens"),
+            "output_tokens": self.usage.get("completion_tokens"),
+            "usage_json": self.usage,
+        }
 
 
 class OpenAICompatibleLLMClient:
@@ -60,7 +70,11 @@ class OpenAICompatibleLLMClient:
             raise LLMProviderError("provider_response_invalid") from exc
         if not content:
             raise LLMProviderError("provider_response_empty")
-        return LLMCompletionResponse(content=content, usage=data.get("usage") or {})
+        return LLMCompletionResponse(
+            content=content,
+            usage=data.get("usage") or {},
+            provider_request_id=response.headers.get("x-ds-request-id") or response.headers.get("x-request-id"),
+        )
 
     def _resolve_endpoint(self, config: AIProviderConfig) -> str:
         provider_name = config.provider_name.strip().lower()

@@ -9,6 +9,7 @@ from app.db.session import get_optional_db_session
 from app.models.entities import User
 from app.schemas.admin import (
     AdminAICallLogResponse,
+    AdminAuthLoginLogResponse,
     AdminAuditLogResponse,
     AdminCreditAdjustmentRequest,
     AdminCreditAdjustmentResponse,
@@ -18,14 +19,21 @@ from app.schemas.admin import (
     AdminUserSearchItem,
     AdminUserStatusResponse,
     AdminUserStatusUpdateRequest,
+    CustomerServiceNoteCreateRequest,
+    CustomerServiceNoteResponse,
+    RefundCaseCreateRequest,
+    RefundCaseResponse,
+    RefundCaseUpdateRequest,
     SystemConfigResponse,
     SystemConfigUpdateRequest,
 )
 from app.schemas.interviews import InterviewHistoryItem
 from app.services.audit_logs import DatabaseAuditLogStore, InMemoryAuditLogStore, get_audit_log_store
 from app.services.ai_call_logs import AICallLogStore, get_ai_call_log_store
+from app.services.auth_login_logs import AuthLoginLogStore, get_auth_login_log_store
 from app.services.credit_balances import CreditBalanceStore, DatabaseCreditBalanceStore, get_credit_balance_store
 from app.services.credit_ledger import CreditLedgerStore, DatabaseCreditLedgerStore, get_credit_ledger_store
+from app.services.customer_service_notes import CustomerServiceNoteStore, get_customer_service_note_store
 from app.services.credits import InsufficientCreditsError
 from app.services.interview_runtime import (
     DatabaseInterviewRuntimeStore,
@@ -40,6 +48,7 @@ from app.services.system_configs import (
     SystemConfigNotFoundError,
     get_system_config_store,
 )
+from app.services.refund_cases import RefundCaseNotFoundError, RefundCaseStore, get_refund_case_store
 from app.services.user_credentials import UserAccountRecord, UserCredentialStore, get_user_credential_store
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -126,6 +135,25 @@ def system_config_to_response(config: SystemConfig) -> SystemConfigResponse:
         description=config.description,
         updated_at=config.updated_at.isoformat() if config.updated_at else None,
     )
+
+
+def auth_login_log_to_response(log) -> AdminAuthLoginLogResponse:
+    return AdminAuthLoginLogResponse(**log.__dict__)
+
+
+def customer_service_note_to_response(note) -> CustomerServiceNoteResponse:
+    return CustomerServiceNoteResponse(**note.__dict__)
+
+
+def refund_case_to_response(refund_case) -> RefundCaseResponse:
+    return RefundCaseResponse(**refund_case.__dict__)
+
+
+def client_ip(request: Request) -> str | None:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host if request.client else None
 
 
 def search_database_users(query: str, db_session: Session | None) -> list[User]:
@@ -356,6 +384,142 @@ def read_user_credit_ledger(
     credit_ledger_store: CreditLedgerStore = Depends(get_credit_ledger_store),
 ) -> list[AdminCreditLedgerResponse]:
     return credit_ledger_store.list_for_user(user_id, limit=80)
+
+
+@router.get("/auth-login-logs", response_model=list[AdminAuthLoginLogResponse])
+def read_auth_login_logs(
+    _admin_claims: TokenClaims = Depends(require_admin_user),
+    auth_login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
+) -> list[AdminAuthLoginLogResponse]:
+    return [auth_login_log_to_response(log) for log in auth_login_log_store.list_recent(limit=100)]
+
+
+@router.get("/users/{user_id}/auth-login-logs", response_model=list[AdminAuthLoginLogResponse])
+def read_user_auth_login_logs(
+    user_id: str,
+    _admin_claims: TokenClaims = Depends(require_admin_user),
+    auth_login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
+) -> list[AdminAuthLoginLogResponse]:
+    return [auth_login_log_to_response(log) for log in auth_login_log_store.list_for_user(user_id, limit=50)]
+
+
+@router.get("/users/{user_id}/notes", response_model=list[CustomerServiceNoteResponse])
+def read_user_customer_service_notes(
+    user_id: str,
+    _admin_claims: TokenClaims = Depends(require_admin_user),
+    note_store: CustomerServiceNoteStore = Depends(get_customer_service_note_store),
+) -> list[CustomerServiceNoteResponse]:
+    return [customer_service_note_to_response(note) for note in note_store.list_for_user(user_id, limit=80)]
+
+
+@router.post("/users/{user_id}/notes", response_model=CustomerServiceNoteResponse, status_code=status.HTTP_201_CREATED)
+def create_user_customer_service_note(
+    request: Request,
+    user_id: str,
+    payload: CustomerServiceNoteCreateRequest,
+    admin_claims: TokenClaims = Depends(require_admin_user),
+    note_store: CustomerServiceNoteStore = Depends(get_customer_service_note_store),
+    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+) -> CustomerServiceNoteResponse:
+    normalized_user_id = normalize_user_email(user_id)
+    note = note_store.create(
+        user_email=normalized_user_id,
+        admin_email=admin_claims["sub"],
+        category=payload.category,
+        content=payload.content,
+        related_session_id=payload.related_session_id,
+    )
+    audit_store.record(
+        admin_email=admin_claims["sub"],
+        action="customer_service_note_create",
+        target_type="customer_service_note",
+        target_id=note.id,
+        after_snapshot={"user_email": normalized_user_id, "category": payload.category, "related_session_id": payload.related_session_id},
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    return customer_service_note_to_response(note)
+
+
+@router.get("/refund-cases", response_model=list[RefundCaseResponse])
+def read_refund_cases(
+    _admin_claims: TokenClaims = Depends(require_admin_user),
+    refund_case_store: RefundCaseStore = Depends(get_refund_case_store),
+) -> list[RefundCaseResponse]:
+    return [refund_case_to_response(refund_case) for refund_case in refund_case_store.list_recent(limit=100)]
+
+
+@router.get("/users/{user_id}/refund-cases", response_model=list[RefundCaseResponse])
+def read_user_refund_cases(
+    user_id: str,
+    _admin_claims: TokenClaims = Depends(require_admin_user),
+    refund_case_store: RefundCaseStore = Depends(get_refund_case_store),
+) -> list[RefundCaseResponse]:
+    return [refund_case_to_response(refund_case) for refund_case in refund_case_store.list_for_user(user_id, limit=80)]
+
+
+@router.post("/users/{user_id}/refund-cases", response_model=RefundCaseResponse, status_code=status.HTTP_201_CREATED)
+def create_user_refund_case(
+    request: Request,
+    user_id: str,
+    payload: RefundCaseCreateRequest,
+    admin_claims: TokenClaims = Depends(require_admin_user),
+    refund_case_store: RefundCaseStore = Depends(get_refund_case_store),
+    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+) -> RefundCaseResponse:
+    normalized_user_id = normalize_user_email(user_id)
+    case = refund_case_store.create(
+        user_email=normalized_user_id,
+        reason=payload.reason,
+        description=payload.description,
+        amount_cents=payload.amount_cents,
+        currency=payload.currency,
+        credit_adjustment=payload.credit_adjustment,
+        related_session_id=payload.related_session_id,
+        created_by_admin_email=admin_claims["sub"],
+    )
+    audit_store.record(
+        admin_email=admin_claims["sub"],
+        action="refund_case_create",
+        target_type="refund_case",
+        target_id=case.id,
+        after_snapshot={"user_email": normalized_user_id, "reason": payload.reason, "status": case.status},
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    return refund_case_to_response(case)
+
+
+@router.put("/refund-cases/{case_id}", response_model=RefundCaseResponse)
+def update_refund_case(
+    request: Request,
+    case_id: str,
+    payload: RefundCaseUpdateRequest,
+    admin_claims: TokenClaims = Depends(require_admin_user),
+    refund_case_store: RefundCaseStore = Depends(get_refund_case_store),
+    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+) -> RefundCaseResponse:
+    try:
+        updated_case = refund_case_store.update(
+            case_id=case_id,
+            updated_by_admin_email=admin_claims["sub"],
+            status=payload.status,
+            resolution=payload.resolution,
+            credit_adjustment=payload.credit_adjustment,
+            amount_cents=payload.amount_cents,
+        )
+    except RefundCaseNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="refund_case_not_found") from exc
+    audit_store.record(
+        admin_email=admin_claims["sub"],
+        action="refund_case_update",
+        target_type="refund_case",
+        target_id=case_id,
+        after_snapshot={"status": updated_case.status, "resolution": updated_case.resolution},
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+    return refund_case_to_response(updated_case)
 
 
 @router.get("/ai-call-logs", response_model=list[AdminAICallLogResponse])

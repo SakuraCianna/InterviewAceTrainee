@@ -88,7 +88,7 @@ def generate_next_interview_question(
         result = router.run_with_fallback(
             provider_type="llm",
             purpose="interview",
-            operation=lambda config: llm_client.complete(config, messages).content,
+            operation=lambda config: llm_client.complete(config, messages),
         )
     except AllProvidersFailedError as exc:
         if call_log_store is not None:
@@ -98,4 +98,4 @@ def generate_next_interview_question(
         return None
     if call_log_store is not None:
         call_log_store.record_attempts(session_id=session_id, provider_type="llm", purpose="interview", attempts=result.attempts)
-    return result.value
+    return result.value.content

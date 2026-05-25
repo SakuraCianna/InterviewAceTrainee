@@ -2435,6 +2435,7 @@ button {
 .admin-primary-button,
 .admin-code-row button,
 .admin-action-row button,
+.admin-ops-card button,
 .provider-row button {
   align-items: center;
   border: 0;
@@ -2450,6 +2451,7 @@ button {
 
 .admin-status-row button,
 .admin-action-row button,
+.admin-ops-card button,
 .provider-row button {
   background: #eef4ff;
   color: #2563eb;
@@ -2498,7 +2500,9 @@ button {
 }
 
 .admin-login-panel input,
-.admin-panel input {
+.admin-panel input,
+.admin-ops-card input,
+.admin-ops-card textarea {
   background: #f8fafc;
   border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 8px;
@@ -2507,6 +2511,13 @@ button {
   min-height: 46px;
   outline: 0;
   padding: 0 14px;
+}
+
+.admin-ops-card textarea {
+  line-height: 1.6;
+  min-height: 120px;
+  padding: 12px 14px;
+  resize: vertical;
 }
 
 .admin-code-row {
@@ -2571,6 +2582,37 @@ button {
   font-size: 13px;
   font-weight: 800;
   text-align: right;
+}
+
+.admin-trace-summary p {
+  color: #64748b;
+  font-weight: 800;
+  line-height: 1.7;
+  margin: 0;
+}
+
+.admin-mini-metrics {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-mini-metrics span {
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  color: #64748b;
+  display: grid;
+  font-size: 12px;
+  font-weight: 900;
+  gap: 4px;
+  padding: 12px;
+}
+
+.admin-mini-metrics b {
+  color: #2563eb;
+  font-size: 24px;
+  line-height: 1;
 }
 
 .admin-provider-table {
@@ -2874,6 +2916,160 @@ button {
   margin: 8px 0 0;
 }
 
+.admin-ops-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.admin-ops-card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.08);
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+
+.admin-ops-card-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.admin-ops-card-head > svg {
+  color: #2563eb;
+}
+
+.admin-ops-card h3,
+.admin-trace-list h3 {
+  color: #0f172a;
+  font-size: 22px;
+  line-height: 1.15;
+  margin: 2px 0 0;
+}
+
+.admin-ops-card label {
+  color: #475569;
+  display: grid;
+  font-size: 14px;
+  font-weight: 800;
+  gap: 8px;
+}
+
+.admin-note-list {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.admin-note-list article {
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.admin-note-list strong {
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.admin-note-list p {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.7;
+  margin: 0;
+}
+
+.admin-note-list span,
+.admin-note-list em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.admin-note-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.admin-trace-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-trace-list {
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.admin-trace-list article {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 12px;
+}
+
+.admin-trace-list article div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.admin-trace-list strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.admin-trace-list span,
+.admin-trace-list small {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.admin-trace-list small {
+  grid-column: 1 / -1;
+}
+
+.admin-trace-list em {
+  border-radius: 999px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 1000;
+  padding: 6px 10px;
+}
+
+.admin-trace-list em.is-success {
+  background: rgba(22, 163, 74, 0.1);
+  color: #15803d;
+}
+
+.admin-trace-list em.is-failed {
+  background: rgba(220, 38, 38, 0.09);
+  color: #b91c1c;
+}
+
 .admin-provider-list {
   display: grid;
   gap: 12px;
@@ -3015,6 +3211,9 @@ button {
   .provider-row,
   .admin-search-form,
   .admin-user-grid,
+  .admin-ops-grid,
+  .admin-trace-grid,
+  .admin-mini-metrics,
   .admin-report-dimensions,
   .admin-report-lists,
   .admin-form-grid,

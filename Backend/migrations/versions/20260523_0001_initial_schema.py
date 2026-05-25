@@ -138,11 +138,66 @@ def upgrade() -> None:
         sa.Column("purpose", sa.String(length=80), nullable=False),
         sa.Column("success", sa.Boolean(), nullable=False),
         sa.Column("latency_ms", sa.Integer(), nullable=True),
+        sa.Column("provider_request_id", sa.String(length=160), nullable=True),
+        sa.Column("input_tokens", sa.Integer(), nullable=True),
+        sa.Column("output_tokens", sa.Integer(), nullable=True),
+        sa.Column("audio_duration_ms", sa.Integer(), nullable=True),
+        sa.Column("characters", sa.Integer(), nullable=True),
+        sa.Column("estimated_cost_cents", sa.Integer(), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("usage_json", postgresql.JSONB(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
     )
     op.create_index("ix_ai_call_logs_session_id", "ai_call_logs", ["session_id"])
+
+    op.create_table(
+        "auth_login_logs",
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("email", sa.String(length=255), nullable=False),
+        sa.Column("auth_method", sa.String(length=40), nullable=False),
+        sa.Column("role", sa.String(length=32), nullable=False),
+        sa.Column("success", sa.Boolean(), nullable=False),
+        sa.Column("failure_reason", sa.String(length=120), nullable=True),
+        sa.Column("ip_address", sa.String(length=80), nullable=True),
+        sa.Column("user_agent", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+    )
+    op.create_index("ix_auth_login_logs_email", "auth_login_logs", ["email"])
+
+    op.create_table(
+        "customer_service_notes",
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("user_email", sa.String(length=255), nullable=False),
+        sa.Column("admin_email", sa.String(length=255), nullable=False),
+        sa.Column("category", sa.String(length=80), nullable=False),
+        sa.Column("content", sa.Text(), nullable=False),
+        sa.Column("related_session_id", sa.String(length=120), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+    )
+    op.create_index("ix_customer_service_notes_user_email", "customer_service_notes", ["user_email"])
+    op.create_index("ix_customer_service_notes_admin_email", "customer_service_notes", ["admin_email"])
+    op.create_index("ix_customer_service_notes_related_session_id", "customer_service_notes", ["related_session_id"])
+
+    op.create_table(
+        "refund_cases",
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("user_email", sa.String(length=255), nullable=False),
+        sa.Column("status", sa.String(length=32), nullable=False),
+        sa.Column("reason", sa.String(length=120), nullable=False),
+        sa.Column("description", sa.Text(), nullable=False),
+        sa.Column("amount_cents", sa.Integer(), nullable=True),
+        sa.Column("currency", sa.String(length=16), nullable=False),
+        sa.Column("credit_adjustment", sa.Integer(), nullable=True),
+        sa.Column("related_session_id", sa.String(length=120), nullable=True),
+        sa.Column("resolution", sa.Text(), nullable=True),
+        sa.Column("created_by_admin_email", sa.String(length=255), nullable=False),
+        sa.Column("updated_by_admin_email", sa.String(length=255), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=False),
+    )
+    op.create_index("ix_refund_cases_user_email", "refund_cases", ["user_email"])
+    op.create_index("ix_refund_cases_status", "refund_cases", ["status"])
+    op.create_index("ix_refund_cases_related_session_id", "refund_cases", ["related_session_id"])
 
     op.create_table(
         "admin_audit_logs",
@@ -163,6 +218,16 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_admin_audit_logs_admin_email", table_name="admin_audit_logs")
     op.drop_table("admin_audit_logs")
+    op.drop_index("ix_refund_cases_related_session_id", table_name="refund_cases")
+    op.drop_index("ix_refund_cases_status", table_name="refund_cases")
+    op.drop_index("ix_refund_cases_user_email", table_name="refund_cases")
+    op.drop_table("refund_cases")
+    op.drop_index("ix_customer_service_notes_related_session_id", table_name="customer_service_notes")
+    op.drop_index("ix_customer_service_notes_admin_email", table_name="customer_service_notes")
+    op.drop_index("ix_customer_service_notes_user_email", table_name="customer_service_notes")
+    op.drop_table("customer_service_notes")
+    op.drop_index("ix_auth_login_logs_email", table_name="auth_login_logs")
+    op.drop_table("auth_login_logs")
     op.drop_index("ix_ai_call_logs_session_id", table_name="ai_call_logs")
     op.drop_table("ai_call_logs")
     op.drop_table("system_configs")

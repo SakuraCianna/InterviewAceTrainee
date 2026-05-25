@@ -21,6 +21,7 @@ from app.schemas.auth import (
     PasswordLoginResponse,
     PasswordRegisterRequest,
 )
+from app.services.auth_login_logs import AuthLoginLogStore, get_auth_login_log_store
 from app.services.credit_balances import CreditBalanceStore, get_credit_balance_store
 from app.services.email_codes import (
     AuthAttemptRateLimitError,
@@ -127,23 +128,55 @@ def reset_auth_failures(key: str) -> None:
     get_auth_attempt_limiter().reset(key)
 
 
+def client_ip(request: Request) -> str | None:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
+def record_login_event(
+    log_store: AuthLoginLogStore,
+    request: Request,
+    *,
+    email: str,
+    auth_method: str,
+    role: str,
+    success: bool,
+    failure_reason: str | None = None,
+) -> None:
+    log_store.record(
+        email=email,
+        auth_method=auth_method,
+        role=role,
+        success=success,
+        failure_reason=failure_reason,
+        ip_address=client_ip(request),
+        user_agent=request.headers.get("user-agent"),
+    )
+
+
 @router.post("/password/register", response_model=PasswordLoginResponse, status_code=status.HTTP_201_CREATED)
 def register_with_password(
+    request: Request,
     payload: PasswordRegisterRequest,
     response: Response,
     settings=Depends(get_settings),
     code_store: EmailCodeStore | RedisEmailCodeStore = Depends(get_email_code_store),
     user_store: UserCredentialStore = Depends(get_user_credential_store),
     system_config_store: DatabaseSystemConfigStore | InMemorySystemConfigStore = Depends(get_system_config_store),
+    login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
 ) -> PasswordLoginResponse:
     attempt_key = auth_attempt_key("password_register", str(payload.email))
     check_auth_attempts(attempt_key, settings)
     if not system_config_store.get_bool("registration_open"):
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="password_register", role="user", success=False, failure_reason="registration_closed")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="registration_closed")
     try:
         code_store.consume_code(str(payload.email), payload.code)
     except InvalidEmailCodeError as exc:
         record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="password_register", role="user", success=False, failure_reason="invalid_email_code")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_email_code") from exc
 
     try:
@@ -153,40 +186,50 @@ def register_with_password(
             initial_credit_balance=system_config_store.get_int("new_user_default_credits"),
         )
     except UserAlreadyExistsError as exc:
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="password_register", role="user", success=False, failure_reason="email_already_registered")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email_already_registered") from exc
     except UserDisabledError as exc:
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="password_register", role="user", success=False, failure_reason="user_disabled")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user_disabled") from exc
 
     reset_auth_failures(attempt_key)
+    record_login_event(login_log_store, request, email=str(payload.email), auth_method="password_register", role="user", success=True)
     return issue_login_response(response, str(payload.email), "user", settings)
 
 
 @router.post("/password/login", response_model=PasswordLoginResponse)
 def login_with_password(
+    request: Request,
     payload: PasswordLoginRequest,
     response: Response,
     settings=Depends(get_settings),
     user_store: UserCredentialStore = Depends(get_user_credential_store),
     system_config_store: DatabaseSystemConfigStore | InMemorySystemConfigStore = Depends(get_system_config_store),
+    login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
 ) -> PasswordLoginResponse:
     attempt_key = auth_attempt_key("password_login", str(payload.email))
     check_auth_attempts(attempt_key, settings)
     if not system_config_store.get_bool("password_login_enabled"):
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="password", role="user", success=False, failure_reason="password_login_disabled")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="password_login_disabled")
     try:
         password_hash = user_store.require_password_hash(str(payload.email))
     except UserNotFoundError as exc:
         record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="password", role="user", success=False, failure_reason="invalid_credentials")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_credentials") from exc
     except UserDisabledError as exc:
         record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="password", role="user", success=False, failure_reason="user_disabled")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user_disabled") from exc
 
     if not verify_password(payload.password, password_hash):
         record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="password", role="user", success=False, failure_reason="invalid_credentials")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_credentials")
 
     reset_auth_failures(attempt_key)
+    record_login_event(login_log_store, request, email=str(payload.email), auth_method="password", role="user", success=True)
     return issue_login_response(response, str(payload.email), "user", settings)
 
 
@@ -218,23 +261,28 @@ def request_email_code(
 
 @router.post("/email-code/login", response_model=PasswordLoginResponse)
 def login_with_email_code(
+    request: Request,
     payload: EmailCodeLoginRequest,
     response: Response,
     settings=Depends(get_settings),
     code_store: EmailCodeStore | RedisEmailCodeStore = Depends(get_email_code_store),
     user_store: UserCredentialStore = Depends(get_user_credential_store),
     system_config_store: DatabaseSystemConfigStore | InMemorySystemConfigStore = Depends(get_system_config_store),
+    login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
 ) -> PasswordLoginResponse:
     attempt_key = auth_attempt_key("email_code_login", str(payload.email))
     check_auth_attempts(attempt_key, settings)
     if not system_config_store.get_bool("email_code_login_enabled"):
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="email_code", role="user", success=False, failure_reason="email_code_login_disabled")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="email_code_login_disabled")
     if not user_store.user_exists(str(payload.email)) and not system_config_store.get_bool("registration_open"):
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="email_code", role="user", success=False, failure_reason="registration_closed")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="registration_closed")
     try:
         code_store.consume_code(str(payload.email), payload.code)
     except InvalidEmailCodeError as exc:
         record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="email_code", role="user", success=False, failure_reason="invalid_email_code")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_email_code") from exc
 
     try:
@@ -244,18 +292,22 @@ def login_with_email_code(
         )
     except UserDisabledError as exc:
         record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="email_code", role="user", success=False, failure_reason="user_disabled")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user_disabled") from exc
     reset_auth_failures(attempt_key)
+    record_login_event(login_log_store, request, email=str(payload.email), auth_method="email_code", role="user", success=True)
     return issue_login_response(response, str(payload.email), "user", settings)
 
 
 @router.post("/admin/login", response_model=PasswordLoginResponse)
 def login_admin(
+    request: Request,
     payload: AdminLoginRequest,
     response: Response,
     settings=Depends(get_settings),
     code_store: EmailCodeStore | RedisEmailCodeStore = Depends(get_email_code_store),
     user_store: UserCredentialStore = Depends(get_user_credential_store),
+    login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
 ) -> PasswordLoginResponse:
     attempt_key = auth_attempt_key("admin_login", str(payload.email))
     check_auth_attempts(attempt_key, settings)
@@ -263,26 +315,32 @@ def login_admin(
         password_hash = user_store.require_password_hash(str(payload.email))
     except UserNotFoundError as exc:
         record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="admin_password_email_code", role="admin", success=False, failure_reason="invalid_credentials")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_credentials") from exc
     except UserDisabledError as exc:
         record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="admin_password_email_code", role="admin", success=False, failure_reason="user_disabled")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user_disabled") from exc
 
     if not verify_password(payload.password, password_hash):
         record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="admin_password_email_code", role="admin", success=False, failure_reason="invalid_credentials")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_credentials")
 
     if not is_email_in_allowlist(str(payload.email), settings.admin_email_allowlist):
         record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="admin_password_email_code", role="admin", success=False, failure_reason="admin_email_not_allowed")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin_email_not_allowed")
 
     try:
         code_store.consume_code(str(payload.email), payload.code)
     except InvalidEmailCodeError as exc:
         record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=str(payload.email), auth_method="admin_password_email_code", role="admin", success=False, failure_reason="invalid_email_code")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_email_code") from exc
 
     reset_auth_failures(attempt_key)
+    record_login_event(login_log_store, request, email=str(payload.email), auth_method="admin_password_email_code", role="admin", success=True)
     return issue_login_response(response, str(payload.email), "admin", settings)
 
 

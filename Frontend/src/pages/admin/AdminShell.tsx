@@ -57,8 +57,54 @@ type AICallLogEntry = {
   model_name: string;
   purpose: string;
   success: boolean;
+  latency_ms?: number | null;
+  provider_request_id?: string | null;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  audio_duration_ms?: number | null;
+  characters?: number | null;
+  estimated_cost_cents?: number | null;
   error_message?: string | null;
   created_at: string;
+};
+
+type AuthLoginLogEntry = {
+  id: string;
+  email: string;
+  auth_method: string;
+  role: string;
+  success: boolean;
+  failure_reason?: string | null;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  created_at: string;
+};
+
+type CustomerServiceNoteEntry = {
+  id: string;
+  user_email: string;
+  admin_email: string;
+  category: string;
+  content: string;
+  related_session_id?: string | null;
+  created_at: string;
+};
+
+type RefundCaseEntry = {
+  id: string;
+  user_email: string;
+  status: string;
+  reason: string;
+  description: string;
+  amount_cents?: number | null;
+  currency: string;
+  credit_adjustment?: number | null;
+  related_session_id?: string | null;
+  resolution?: string | null;
+  created_by_admin_email: string;
+  updated_by_admin_email?: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 type AdminUserSearchItem = {
@@ -107,6 +153,9 @@ export function AdminShell() {
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [creditLedger, setCreditLedger] = useState<CreditLedgerEntry[]>([]);
   const [aiCallLogs, setAiCallLogs] = useState<AICallLogEntry[]>([]);
+  const [authLoginLogs, setAuthLoginLogs] = useState<AuthLoginLogEntry[]>([]);
+  const [customerServiceNotes, setCustomerServiceNotes] = useState<CustomerServiceNoteEntry[]>([]);
+  const [refundCases, setRefundCases] = useState<RefundCaseEntry[]>([]);
   const [systemConfigs, setSystemConfigs] = useState<SystemConfig[]>([]);
   const [providerTestResults, setProviderTestResults] = useState<Record<string, string>>({});
   const [userSearchQuery, setUserSearchQuery] = useState("");
@@ -120,6 +169,14 @@ export function AdminShell() {
   const [creditAmount, setCreditAmount] = useState("1");
   const [creditReason, setCreditReason] = useState("manual_grant");
   const [creditNote, setCreditNote] = useState("");
+  const [noteCategory, setNoteCategory] = useState("general");
+  const [noteContent, setNoteContent] = useState("");
+  const [noteSessionId, setNoteSessionId] = useState("");
+  const [refundReason, setRefundReason] = useState("refund_request");
+  const [refundDescription, setRefundDescription] = useState("");
+  const [refundAmountYuan, setRefundAmountYuan] = useState("");
+  const [refundCreditAdjustment, setRefundCreditAdjustment] = useState("");
+  const [refundSessionId, setRefundSessionId] = useState("");
   const [selectedReport, setSelectedReport] = useState<AdminInterviewReport | null>(null);
   const [reportMessage, setReportMessage] = useState("");
   const [message, setMessage] = useState("正在检查管理员会话。");
@@ -130,6 +187,36 @@ export function AdminShell() {
   useEffect(() => {
     void loadCurrentUser();
   }, []);
+
+  function formatDateTime(value: string) {
+    return new Date(value).toLocaleString("zh-CN");
+  }
+
+  function formatCents(value?: number | null, currency = "CNY") {
+    if (value == null) {
+      return "未记录金额";
+    }
+    const amount = (value / 100).toFixed(2);
+    return currency === "CNY" ? `¥${amount}` : `${currency} ${amount}`;
+  }
+
+  function parseOptionalInteger(rawValue: string) {
+    const trimmed = rawValue.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const value = Number.parseInt(trimmed, 10);
+    return Number.isNaN(value) ? null : value;
+  }
+
+  function parseOptionalAmountCents(rawValue: string) {
+    const trimmed = rawValue.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+    const value = Number.parseFloat(trimmed);
+    return Number.isNaN(value) || value < 0 ? null : Math.round(value * 100);
+  }
 
   async function loadCurrentUser() {
     setIsLoading(true);
@@ -152,7 +239,14 @@ export function AdminShell() {
     setCurrentUser(user);
     setIsLoading(false);
     setMessage(`已进入后台：${user.email}`);
-    await Promise.all([loadProviders(), loadSystemConfigs(), loadAuditLogs(), loadAiCallLogs()]);
+    await Promise.all([
+      loadProviders(),
+      loadSystemConfigs(),
+      loadAuditLogs(),
+      loadAiCallLogs(),
+      loadAuthLoginLogs(),
+      loadRefundCases(),
+    ]);
   }
 
   async function loadProviders() {
@@ -178,6 +272,45 @@ export function AdminShell() {
       return;
     }
     setAiCallLogs((await response.json()) as AICallLogEntry[]);
+  }
+
+  async function loadAuthLoginLogs(userEmail?: string) {
+    const normalizedEmail = userEmail?.trim();
+    const url = normalizedEmail
+      ? `/api/admin/users/${encodeURIComponent(normalizedEmail)}/auth-login-logs`
+      : "/api/admin/auth-login-logs";
+    const response = await fetch(url, { credentials: "include" });
+    if (!response.ok) {
+      return;
+    }
+    setAuthLoginLogs((await response.json()) as AuthLoginLogEntry[]);
+  }
+
+  async function loadCustomerServiceNotes(userEmail?: string) {
+    const normalizedEmail = userEmail?.trim();
+    if (!normalizedEmail) {
+      setCustomerServiceNotes([]);
+      return;
+    }
+    const response = await fetch(`/api/admin/users/${encodeURIComponent(normalizedEmail)}/notes`, {
+      credentials: "include",
+    });
+    if (!response.ok) {
+      return;
+    }
+    setCustomerServiceNotes((await response.json()) as CustomerServiceNoteEntry[]);
+  }
+
+  async function loadRefundCases(userEmail?: string) {
+    const normalizedEmail = userEmail?.trim();
+    const url = normalizedEmail
+      ? `/api/admin/users/${encodeURIComponent(normalizedEmail)}/refund-cases`
+      : "/api/admin/refund-cases";
+    const response = await fetch(url, { credentials: "include" });
+    if (!response.ok) {
+      return;
+    }
+    setRefundCases((await response.json()) as RefundCaseEntry[]);
   }
 
   async function loadSystemConfigs() {
@@ -232,7 +365,12 @@ export function AdminShell() {
     setCreditUser(userEmail);
     setSelectedReport(null);
     setReportMessage("");
-    await loadCreditLedger(userEmail);
+    await Promise.all([
+      loadCreditLedger(userEmail),
+      loadCustomerServiceNotes(userEmail),
+      loadRefundCases(userEmail),
+      loadAuthLoginLogs(userEmail),
+    ]);
     const response = await fetch(`/api/admin/users/${encodeURIComponent(userEmail)}/interviews`, {
       credentials: "include",
     });
@@ -326,6 +464,113 @@ export function AdminShell() {
     setCreditReason("manual_grant");
     setCreditNote("");
     await Promise.all([loadAuditLogs(), loadCreditLedger(creditUser)]);
+  }
+
+  async function submitCustomerServiceNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedUserEmail) {
+      setMessage("请先在用户检索里选择一个用户。");
+      return;
+    }
+    const content = noteContent.trim();
+    const category = noteCategory.trim() || "general";
+    if (content.length < 2) {
+      setMessage("客服备注至少需要 2 个字符。");
+      return;
+    }
+
+    const response = await fetch(`/api/admin/users/${encodeURIComponent(selectedUserEmail)}/notes`, {
+      method: "POST",
+      credentials: "include",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        category,
+        content,
+        related_session_id: noteSessionId.trim() || undefined,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setMessage(data.detail ? `客服备注保存失败：${data.detail}` : "客服备注保存失败。");
+      return;
+    }
+
+    setNoteCategory("general");
+    setNoteContent("");
+    setNoteSessionId("");
+    setMessage(`已为 ${selectedUserEmail} 添加客服备注。`);
+    await Promise.all([loadCustomerServiceNotes(selectedUserEmail), loadAuditLogs()]);
+  }
+
+  async function submitRefundCase(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedUserEmail) {
+      setMessage("请先在用户检索里选择一个用户。");
+      return;
+    }
+    const reason = refundReason.trim();
+    const description = refundDescription.trim();
+    const amountCents = parseOptionalAmountCents(refundAmountYuan);
+    const creditAdjustment = parseOptionalInteger(refundCreditAdjustment);
+    if (reason.length < 2 || description.length < 2) {
+      setMessage("退款纠纷需要填写原因和处理描述。");
+      return;
+    }
+    if (amountCents === null) {
+      setMessage("退款金额需要填写为合法的非负数字，例如 19.90。");
+      return;
+    }
+    if (creditAdjustment === null) {
+      setMessage("次数补偿需要填写整数，例如 1、0 或 -1。");
+      return;
+    }
+
+    const response = await fetch(`/api/admin/users/${encodeURIComponent(selectedUserEmail)}/refund-cases`, {
+      method: "POST",
+      credentials: "include",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        reason,
+        description,
+        amount_cents: amountCents,
+        currency: "CNY",
+        credit_adjustment: creditAdjustment,
+        related_session_id: refundSessionId.trim() || undefined,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setMessage(data.detail ? `退款纠纷记录创建失败：${data.detail}` : "退款纠纷记录创建失败。");
+      return;
+    }
+
+    setRefundReason("refund_request");
+    setRefundDescription("");
+    setRefundAmountYuan("");
+    setRefundCreditAdjustment("");
+    setRefundSessionId("");
+    setMessage(`已创建 ${selectedUserEmail} 的退款纠纷记录。`);
+    await Promise.all([loadRefundCases(selectedUserEmail), loadAuditLogs()]);
+  }
+
+  async function updateRefundCaseStatus(refundCase: RefundCaseEntry, statusValue: string) {
+    const response = await fetch(`/api/admin/refund-cases/${encodeURIComponent(refundCase.id)}`, {
+      method: "PUT",
+      credentials: "include",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        status: statusValue,
+        resolution: statusValue === "resolved" ? refundCase.resolution || "已人工处理完成" : refundCase.resolution,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setMessage(data.detail ? `退款纠纷状态更新失败：${data.detail}` : "退款纠纷状态更新失败。");
+      return;
+    }
+
+    setMessage(`退款纠纷 ${refundCase.id} 已更新为 ${statusValue}。`);
+    await Promise.all([loadRefundCases(selectedUserEmail || undefined), loadAuditLogs()]);
   }
 
   async function toggleProvider(provider: ProviderConfig) {
@@ -426,7 +671,16 @@ export function AdminShell() {
   }
 
   async function refreshAdminData() {
-    await Promise.all([loadProviders(), loadSystemConfigs(), loadAuditLogs(), loadAiCallLogs(), loadCreditLedger()]);
+    await Promise.all([
+      loadProviders(),
+      loadSystemConfigs(),
+      loadAuditLogs(),
+      loadAiCallLogs(),
+      loadCreditLedger(),
+      loadAuthLoginLogs(selectedUserEmail || undefined),
+      loadRefundCases(selectedUserEmail || undefined),
+      loadCustomerServiceNotes(selectedUserEmail || undefined),
+    ]);
   }
 
   async function logout() {
@@ -436,6 +690,9 @@ export function AdminShell() {
     setAuditLogs([]);
     setCreditLedger([]);
     setAiCallLogs([]);
+    setAuthLoginLogs([]);
+    setCustomerServiceNotes([]);
+    setRefundCases([]);
     setSystemConfigs([]);
     setProviderTestResults({});
     setUserSearchResults([]);
@@ -443,6 +700,14 @@ export function AdminShell() {
     setSelectedUserEmail("");
     setSelectedReport(null);
     setReportMessage("");
+    setNoteCategory("general");
+    setNoteContent("");
+    setNoteSessionId("");
+    setRefundReason("refund_request");
+    setRefundDescription("");
+    setRefundAmountYuan("");
+    setRefundCreditAdjustment("");
+    setRefundSessionId("");
     setMessage("已退出后台，请重新完成管理员双重认证。");
   }
 
@@ -557,6 +822,26 @@ export function AdminShell() {
                 ))}
               </div>
             </form>
+            <article className="admin-panel admin-trace-summary">
+              <h2>运营追溯</h2>
+              <div className="admin-mini-metrics">
+                <span>
+                  <b>{authLoginLogs.filter((entry) => !entry.success).length}</b>
+                  登录失败
+                </span>
+                <span>
+                  <b>{refundCases.filter((entry) => entry.status !== "resolved").length}</b>
+                  待处理退款
+                </span>
+                <span>
+                  <b>{aiCallLogs.filter((entry) => !entry.success).length}</b>
+                  AI 调用失败
+                </span>
+              </div>
+              <p>
+                售后纠纷优先从训练报告、次数流水、登录日志和 AI 调用日志四条线交叉核对，避免只凭聊天截图判断。
+              </p>
+            </article>
           </section>
 
           <section className="admin-provider-table admin-user-table">
@@ -683,6 +968,107 @@ export function AdminShell() {
                 )}
               </div>
             )}
+            {selectedUserEmail && (
+              <div className="admin-ops-grid">
+                <form className="admin-ops-card" onSubmit={submitCustomerServiceNote}>
+                  <div className="admin-ops-card-head">
+                    <AppIcon icon="lucide:notebook-pen" size={22} />
+                    <div>
+                      <span className="eyebrow">Service Notes</span>
+                      <h3>客服备注</h3>
+                    </div>
+                  </div>
+                  <label>
+                    备注类型
+                    <input value={noteCategory} onChange={(event) => setNoteCategory(event.target.value)} placeholder="general / refund / complaint" />
+                  </label>
+                  <label>
+                    关联训练 ID
+                    <input value={noteSessionId} onChange={(event) => setNoteSessionId(event.target.value)} placeholder="可选，复制 session_id" />
+                  </label>
+                  <label>
+                    沟通内容
+                    <textarea
+                      value={noteContent}
+                      onChange={(event) => setNoteContent(event.target.value)}
+                      placeholder="记录用户来源、沟通结论、补偿口径或后续跟进点"
+                      rows={5}
+                    />
+                  </label>
+                  <button type="submit" className="admin-primary-button">保存备注</button>
+                  <div className="admin-note-list">
+                    {customerServiceNotes.length === 0 && <p className="admin-empty-text">暂无客服备注。</p>}
+                    {customerServiceNotes.slice(0, 5).map((note) => (
+                      <article key={note.id}>
+                        <strong>{note.category}</strong>
+                        <p>{note.content}</p>
+                        <span>{note.admin_email} · {formatDateTime(note.created_at)}{note.related_session_id ? ` · ${note.related_session_id}` : ""}</span>
+                      </article>
+                    ))}
+                  </div>
+                </form>
+
+                <form className="admin-ops-card" onSubmit={submitRefundCase}>
+                  <div className="admin-ops-card-head">
+                    <AppIcon icon="lucide:receipt-text" size={22} />
+                    <div>
+                      <span className="eyebrow">Refund Cases</span>
+                      <h3>退款纠纷</h3>
+                    </div>
+                  </div>
+                  <div className="admin-form-grid">
+                    <label>
+                      原因
+                      <input value={refundReason} onChange={(event) => setRefundReason(event.target.value)} placeholder="refund_request / service_dispute" />
+                    </label>
+                    <label>
+                      退款金额
+                      <input value={refundAmountYuan} onChange={(event) => setRefundAmountYuan(event.target.value)} placeholder="例如 19.90，可空" inputMode="decimal" />
+                    </label>
+                    <label>
+                      次数补偿
+                      <input value={refundCreditAdjustment} onChange={(event) => setRefundCreditAdjustment(event.target.value)} placeholder="例如 1，可空" inputMode="numeric" />
+                    </label>
+                    <label>
+                      关联训练 ID
+                      <input value={refundSessionId} onChange={(event) => setRefundSessionId(event.target.value)} placeholder="可选" />
+                    </label>
+                  </div>
+                  <label>
+                    纠纷描述
+                    <textarea
+                      value={refundDescription}
+                      onChange={(event) => setRefundDescription(event.target.value)}
+                      placeholder="记录用户诉求、核对依据、处理口径和下一步动作"
+                      rows={5}
+                    />
+                  </label>
+                  <button type="submit" className="admin-primary-button">创建纠纷记录</button>
+                  <div className="admin-note-list">
+                    {refundCases.length === 0 && <p className="admin-empty-text">暂无退款纠纷记录。</p>}
+                    {refundCases.slice(0, 5).map((refundCase) => (
+                      <article key={refundCase.id}>
+                        <div className="admin-note-row">
+                          <strong>{refundCase.reason}</strong>
+                          <em>{refundCase.status}</em>
+                        </div>
+                        <p>{refundCase.description}</p>
+                        <span>
+                          {formatCents(refundCase.amount_cents, refundCase.currency)}
+                          {refundCase.credit_adjustment != null ? ` · 次数 ${refundCase.credit_adjustment}` : ""}
+                          {refundCase.related_session_id ? ` · ${refundCase.related_session_id}` : ""}
+                        </span>
+                        <div className="provider-row-actions">
+                          <button type="button" onClick={() => void updateRefundCaseStatus(refundCase, "processing")}>处理中</button>
+                          <button type="button" onClick={() => void updateRefundCaseStatus(refundCase, "resolved")}>已解决</button>
+                          <button type="button" onClick={() => void updateRefundCaseStatus(refundCase, "rejected")}>驳回</button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </form>
+              </div>
+            )}
           </section>
 
           <section className="admin-provider-table">
@@ -768,6 +1154,45 @@ export function AdminShell() {
 
           <section className="admin-provider-table admin-audit-table">
             <div className="admin-section-heading">
+              <span className="eyebrow">Account Trace</span>
+              <h2>{selectedUserEmail ? `${selectedUserEmail} 的认证与售后记录` : "最近认证与售后记录"}</h2>
+            </div>
+            <div className="admin-trace-grid">
+              <div className="admin-trace-list">
+                <h3>登录日志</h3>
+                {authLoginLogs.length === 0 && <p className="admin-empty-text">暂无登录日志。</p>}
+                {authLoginLogs.slice(0, 8).map((entry) => (
+                  <article key={entry.id}>
+                    <div>
+                      <strong>{entry.email}</strong>
+                      <span>{entry.auth_method} · {entry.role} · {entry.ip_address ?? "unknown-ip"}</span>
+                    </div>
+                    <em className={entry.success ? "is-success" : "is-failed"}>
+                      {entry.success ? "success" : entry.failure_reason ?? "failed"}
+                    </em>
+                    <small>{formatDateTime(entry.created_at)}</small>
+                  </article>
+                ))}
+              </div>
+              <div className="admin-trace-list">
+                <h3>退款纠纷</h3>
+                {refundCases.length === 0 && <p className="admin-empty-text">暂无退款纠纷。</p>}
+                {refundCases.slice(0, 8).map((entry) => (
+                  <article key={entry.id}>
+                    <div>
+                      <strong>{entry.user_email}</strong>
+                      <span>{entry.reason} · {formatCents(entry.amount_cents, entry.currency)}</span>
+                    </div>
+                    <em className={entry.status === "resolved" ? "is-success" : "is-failed"}>{entry.status}</em>
+                    <small>{formatDateTime(entry.updated_at)}</small>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="admin-provider-table admin-audit-table">
+            <div className="admin-section-heading">
               <span className="eyebrow">AI Call Logs</span>
               <h2>模型调用记录</h2>
             </div>
@@ -777,10 +1202,23 @@ export function AdminShell() {
                 <article className="provider-row" key={entry.id}>
                   <div>
                     <strong>{entry.provider_name} / {entry.model_name}</strong>
-                    <span>{entry.session_id ?? "no-session"} · {entry.purpose}</span>
+                    <span>
+                      {entry.session_id ?? "no-session"} · {entry.purpose}
+                      {entry.provider_request_id ? ` · ${entry.provider_request_id}` : ""}
+                    </span>
                   </div>
                   <em>{entry.success ? "success" : entry.error_message ?? "failed"}</em>
-                  <span>{entry.created_at}</span>
+                  <span>
+                    {entry.latency_ms != null ? `${entry.latency_ms}ms` : "no-latency"}
+                    {entry.input_tokens != null || entry.output_tokens != null
+                      ? ` · ${entry.input_tokens ?? 0}/${entry.output_tokens ?? 0} tokens`
+                      : ""}
+                    {entry.audio_duration_ms != null ? ` · ${Math.round(entry.audio_duration_ms / 1000)}s audio` : ""}
+                    {entry.characters != null ? ` · ${entry.characters} chars` : ""}
+                    {entry.estimated_cost_cents != null ? ` · ${formatCents(entry.estimated_cost_cents)}` : ""}
+                    {" · "}
+                    {formatDateTime(entry.created_at)}
+                  </span>
                 </article>
               ))}
             </div>

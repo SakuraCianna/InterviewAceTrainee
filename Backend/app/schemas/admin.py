@@ -52,9 +52,76 @@ class AdminAICallLogResponse(BaseModel):
     purpose: str
     success: bool
     latency_ms: int | None = None
+    provider_request_id: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    audio_duration_ms: int | None = None
+    characters: int | None = None
+    estimated_cost_cents: int | None = None
     error_message: str | None = None
     usage_json: dict | None = None
     created_at: str
+
+
+class AdminAuthLoginLogResponse(BaseModel):
+    id: str
+    email: str
+    auth_method: str
+    role: str
+    success: bool
+    failure_reason: str | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
+    created_at: str
+
+
+class CustomerServiceNoteCreateRequest(BaseModel):
+    category: str = Field(default="general", min_length=2, max_length=80)
+    content: str = Field(min_length=2, max_length=2000)
+    related_session_id: str | None = Field(default=None, max_length=120)
+
+
+class CustomerServiceNoteResponse(BaseModel):
+    id: str
+    user_email: str
+    admin_email: str
+    category: str
+    content: str
+    related_session_id: str | None = None
+    created_at: str
+
+
+class RefundCaseCreateRequest(BaseModel):
+    reason: str = Field(min_length=2, max_length=120)
+    description: str = Field(min_length=2, max_length=3000)
+    amount_cents: int | None = Field(default=None, ge=0)
+    currency: str = Field(default="CNY", min_length=3, max_length=16)
+    credit_adjustment: int | None = None
+    related_session_id: str | None = Field(default=None, max_length=120)
+
+
+class RefundCaseUpdateRequest(BaseModel):
+    status: str | None = Field(default=None, min_length=2, max_length=32)
+    resolution: str | None = Field(default=None, max_length=3000)
+    amount_cents: int | None = Field(default=None, ge=0)
+    credit_adjustment: int | None = None
+
+
+class RefundCaseResponse(BaseModel):
+    id: str
+    user_email: str
+    status: str
+    reason: str
+    description: str
+    amount_cents: int | None = None
+    currency: str
+    credit_adjustment: int | None = None
+    related_session_id: str | None = None
+    resolution: str | None = None
+    created_by_admin_email: str
+    updated_by_admin_email: str | None = None
+    created_at: str
+    updated_at: str
 
 
 class AdminUserSearchItem(BaseModel):

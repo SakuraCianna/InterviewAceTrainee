@@ -24,6 +24,12 @@ class AICallLogRecord:
     purpose: str
     success: bool
     latency_ms: int | None
+    provider_request_id: str | None
+    input_tokens: int | None
+    output_tokens: int | None
+    audio_duration_ms: int | None
+    characters: int | None
+    estimated_cost_cents: int | None
     error_message: str | None
     usage_json: dict | None
     created_at: str
@@ -64,9 +70,15 @@ class InMemoryAICallLogStore(AICallLogStore):
                     model_name=attempt.model_name,
                     purpose=purpose,
                     success=attempt.success,
-                    latency_ms=None,
+                    latency_ms=attempt.latency_ms,
+                    provider_request_id=attempt.provider_request_id,
+                    input_tokens=attempt.input_tokens,
+                    output_tokens=attempt.output_tokens,
+                    audio_duration_ms=attempt.audio_duration_ms,
+                    characters=attempt.characters,
+                    estimated_cost_cents=attempt.estimated_cost_cents,
                     error_message=attempt.error_message or None,
-                    usage_json=None,
+                    usage_json=attempt.usage_json,
                     created_at=utc_now().isoformat(),
                 )
             )
@@ -95,7 +107,15 @@ class DatabaseAICallLogStore(AICallLogStore):
                     model_name=attempt.model_name,
                     purpose=purpose,
                     success=attempt.success,
+                    latency_ms=attempt.latency_ms,
+                    provider_request_id=attempt.provider_request_id,
+                    input_tokens=attempt.input_tokens,
+                    output_tokens=attempt.output_tokens,
+                    audio_duration_ms=attempt.audio_duration_ms,
+                    characters=attempt.characters,
+                    estimated_cost_cents=attempt.estimated_cost_cents,
                     error_message=attempt.error_message or None,
+                    usage_json=attempt.usage_json,
                 )
             )
         self._session.commit()
@@ -116,6 +136,12 @@ class DatabaseAICallLogStore(AICallLogStore):
             purpose=model.purpose,
             success=model.success,
             latency_ms=model.latency_ms,
+            provider_request_id=model.provider_request_id,
+            input_tokens=model.input_tokens,
+            output_tokens=model.output_tokens,
+            audio_duration_ms=model.audio_duration_ms,
+            characters=model.characters,
+            estimated_cost_cents=model.estimated_cost_cents,
             error_message=model.error_message,
             usage_json=model.usage_json,
             created_at=model.created_at.isoformat(),
