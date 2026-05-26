@@ -3,7 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import admin, auth, health, interview_materials, interview_products, interviews, providers, speech, websocket
+from app.api import admin, auth, health, interview_materials, interview_products, interviews, providers, speech, speech_realtime, websocket
 from app.core.config import get_settings
 from app.core.exceptions import http_exception_handler, unhandled_exception_handler, validation_exception_handler
 from app.core.logging import configure_logging
@@ -31,6 +31,7 @@ def create_app() -> FastAPI:
     application.include_router(interview_materials.router, prefix=settings.api_prefix)
     application.include_router(interviews.router, prefix=settings.api_prefix)
     application.include_router(speech.router, prefix=settings.api_prefix)
+    application.include_router(speech_realtime.router, prefix=settings.api_prefix)
     application.include_router(providers.router, prefix=settings.api_prefix)
     application.include_router(admin.router, prefix=settings.api_prefix)
     application.include_router(websocket.router, prefix=settings.api_prefix)

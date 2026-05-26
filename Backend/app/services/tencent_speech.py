@@ -1,6 +1,11 @@
 import base64
+import hashlib
+import hmac
 import json
 from dataclasses import dataclass
+from random import randint
+from time import time
+from urllib.parse import urlencode
 from uuid import uuid4
 
 from tencentcloud.asr.v20190614 import asr_client, models as asr_models
@@ -135,13 +140,54 @@ class TencentSpeechClient:
             characters=len(text),
         )
 
+    def build_realtime_asr_url(
+        self,
+        config: AIProviderConfig,
+        *,
+        voice_id: str,
+        interview_type: InterviewType | None = None,
+    ) -> str:
+        self._ensure_tencent_provider(config)
+        self._ensure_credentials()
+        self._ensure_app_id()
+        timestamp = int(time())
+        params: dict[str, str | int] = {
+            "engine_model_type": self._resolve_asr_engine(interview_type),
+            "expired": timestamp + 3600,
+            "filter_dirty": 0,
+            "filter_modal": 0,
+            "filter_punc": 0,
+            "needvad": self._settings.tencent_realtime_asr_need_vad,
+            "nonce": randint(100000, 9999999999),
+            "secretid": self._settings.tencent_cloud_secret_id,
+            "timestamp": timestamp,
+            "voice_format": 1,
+            "voice_id": voice_id,
+        }
+        query_without_signature = urlencode(sorted(params.items()))
+        signing_text = f"asr.cloud.tencent.com/asr/v2/{self._settings.tencent_cloud_app_id}?{query_without_signature}"
+        signature = base64.b64encode(
+            hmac.new(
+                self._settings.tencent_cloud_secret_key.encode("utf-8"),
+                signing_text.encode("utf-8"),
+                hashlib.sha1,
+            ).digest()
+        ).decode("utf-8")
+        params["signature"] = signature
+        query = urlencode(sorted(params.items()))
+        return f"wss://asr.cloud.tencent.com/asr/v2/{self._settings.tencent_cloud_app_id}?{query}"
+
     def _ensure_tencent_provider(self, config: AIProviderConfig) -> None:
         if config.provider_name.strip().lower() != "tencent":
-            raise SpeechProviderError("speech_provider_not_supported")
+            raise SpeechProviderError("provider_not_supported")
 
     def _ensure_credentials(self) -> None:
         if not self._settings.tencent_cloud_secret_id or not self._settings.tencent_cloud_secret_key:
             raise SpeechProviderError("tencent_cloud_credentials_missing")
+
+    def _ensure_app_id(self) -> None:
+        if not self._settings.tencent_cloud_app_id:
+            raise SpeechProviderError("tencent_cloud_app_id_missing")
 
     def _credential(self) -> credential.Credential:
         return credential.Credential(self._settings.tencent_cloud_secret_id, self._settings.tencent_cloud_secret_key)

@@ -25,10 +25,13 @@ class Settings(BaseSettings):
     email_code_rate_window_seconds: int = 600
     resend_api_key: str = ""
     deepseek_api_key: str = ""
+    tencent_cloud_app_id: str = ""
     tencent_cloud_secret_id: str = ""
     tencent_cloud_secret_key: str = ""
     tencent_asr_engine_model_type: str = "16k_zh"
     tencent_asr_ielts_engine_model_type: str = "16k_en"
+    tencent_realtime_asr_need_vad: int = 1
+    tencent_realtime_asr_max_seconds: int = 240
     tencent_tts_voice_type: int = 101001
     provider_secret_encryption_key: str = ""
     interview_material_max_upload_bytes: int = 5 * 1024 * 1024

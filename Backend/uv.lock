@@ -402,6 +402,7 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "tencentcloud-sdk-python" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -422,6 +423,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0.0" },
     { name = "tencentcloud-sdk-python", specifier = ">=3.1.101" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
+    { name = "websockets", specifier = ">=16.0" },
 ]
 
 [[package]]

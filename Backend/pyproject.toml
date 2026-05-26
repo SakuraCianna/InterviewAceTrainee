@@ -21,4 +21,5 @@ dependencies = [
     "pypdf>=6.12.1",
     "python-docx>=1.2.0",
     "tencentcloud-sdk-python>=3.1.101",
+    "websockets>=16.0",
 ]

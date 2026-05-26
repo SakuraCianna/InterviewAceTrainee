@@ -71,12 +71,6 @@ type InterviewMaterialResponse = {
   keywords: string[];
 };
 
-type SpeechRecognitionApiResponse = {
-  text?: string;
-  detail?: string;
-  message?: string;
-};
-
 type SpeechSynthesisApiResponse = {
   audio_base64?: string;
   mime_type?: string;
@@ -84,13 +78,39 @@ type SpeechSynthesisApiResponse = {
   message?: string;
 };
 
+type RealtimeAsrMessage = {
+  type?: string;
+  text?: string;
+  current_text?: string;
+  detail?: string;
+  message?: string;
+  provider_code?: number;
+  sample_rate?: number;
+  chunk_ms?: number;
+};
+
+type TranscriptWaiter = {
+  promise: Promise<string>;
+  resolve: (text: string) => void;
+  reject: (error: Error) => void;
+  settled: boolean;
+};
+
 type AudioRecorderSession = {
   context: AudioContext;
   source: MediaStreamAudioSourceNode;
   processor: ScriptProcessorNode;
   stream: MediaStream;
-  chunks: Float32Array[];
+  socket: WebSocket;
+  pendingSamples: Float32Array;
   sampleRate: number;
+};
+
+type MicrophoneTestSession = {
+  context: AudioContext;
+  source: MediaStreamAudioSourceNode;
+  analyser: AnalyserNode;
+  stream: MediaStream;
 };
 
 declare global {
@@ -106,7 +126,10 @@ const modules: { icon: string; title: string; meta: string; type: InterviewType;
   { icon: "lucide:landmark", title: "考公面试", meta: "综合分析、组织协调、应急应变", type: "civil_service", lang: "zh-CN" },
   { icon: "lucide:languages", title: "雅思口语", meta: "Part 1 / 2 / 3 全流程", type: "ielts", lang: "en-US" },
 ];
-const MAX_RECORDING_MS = 60_000;
+const PCM_SAMPLE_RATE = 16000;
+const PCM_CHUNK_MS = 200;
+const PCM_CHUNK_SAMPLES = Math.floor(PCM_SAMPLE_RATE * (PCM_CHUNK_MS / 1000));
+const FINAL_TRANSCRIPT_TIMEOUT_MS = 10_000;
 
 function createSessionId() {
   const random = Math.random().toString(36).slice(2, 8);
@@ -115,23 +138,6 @@ function createSessionId() {
 
 function moduleByType(type: InterviewType) {
   return modules.find((module) => module.type === type) ?? modules[0];
-}
-
-function mergeAudioChunks(chunks: Float32Array[]) {
-  const totalLength = chunks.reduce((total, chunk) => total + chunk.length, 0);
-  const samples = new Float32Array(totalLength);
-  let offset = 0;
-  chunks.forEach((chunk) => {
-    samples.set(chunk, offset);
-    offset += chunk.length;
-  });
-  return samples;
-}
-
-function writeAscii(view: DataView, offset: number, value: string) {
-  for (let index = 0; index < value.length; index += 1) {
-    view.setUint8(offset + index, value.charCodeAt(index));
-  }
 }
 
 function resampleAudio(samples: Float32Array, inputSampleRate: number, outputSampleRate: number) {
@@ -151,32 +157,49 @@ function resampleAudio(samples: Float32Array, inputSampleRate: number, outputSam
   return output;
 }
 
-function encodeWav(samples: Float32Array, sampleRate: number) {
-  const outputSampleRate = 16000;
-  const outputSamples = resampleAudio(samples, sampleRate, outputSampleRate);
-  const bytesPerSample = 2;
-  const buffer = new ArrayBuffer(44 + outputSamples.length * bytesPerSample);
+function appendSamples(first: Float32Array, second: Float32Array) {
+  if (first.length === 0) {
+    return second;
+  }
+  const merged = new Float32Array(first.length + second.length);
+  merged.set(first, 0);
+  merged.set(second, first.length);
+  return merged;
+}
+
+function encodePcm16(samples: Float32Array) {
+  const buffer = new ArrayBuffer(samples.length * 2);
   const view = new DataView(buffer);
-  writeAscii(view, 0, "RIFF");
-  view.setUint32(4, 36 + outputSamples.length * bytesPerSample, true);
-  writeAscii(view, 8, "WAVE");
-  writeAscii(view, 12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, outputSampleRate, true);
-  view.setUint32(28, outputSampleRate * bytesPerSample, true);
-  view.setUint16(32, bytesPerSample, true);
-  view.setUint16(34, 8 * bytesPerSample, true);
-  writeAscii(view, 36, "data");
-  view.setUint32(40, outputSamples.length * bytesPerSample, true);
-  let offset = 44;
-  outputSamples.forEach((sample) => {
+  samples.forEach((sample, index) => {
     const clamped = Math.max(-1, Math.min(1, sample));
-    view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
-    offset += bytesPerSample;
+    view.setInt16(index * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
   });
-  return new Blob([view], { type: "audio/wav" });
+  return buffer;
+}
+
+function getAnswerLimitMs(interviewType: InterviewType, roundName?: string) {
+  if (interviewType === "ielts") {
+    if (roundName?.toLowerCase().includes("part 2")) {
+      return 130_000;
+    }
+    return 120_000;
+  }
+  return 180_000;
+}
+
+function formatAnswerLimit(interviewType: InterviewType, roundName?: string) {
+  const limitSeconds = Math.round(getAnswerLimitMs(interviewType, roundName) / 1000);
+  if (limitSeconds >= 180) {
+    return "最多 3 分钟";
+  }
+  if (limitSeconds >= 130) {
+    return "最多 2 分钟";
+  }
+  return `最多 ${limitSeconds} 秒`;
+}
+
+function microphoneLabel(device: MediaDeviceInfo, index: number) {
+  return device.label || `麦克风 ${index + 1}`;
 }
 
 function statusLabel(status: string) {
@@ -214,11 +237,25 @@ export function InterviewRoom() {
   const [isPreparingMaterial, setIsPreparingMaterial] = useState(false);
   const [isStartingSession, setIsStartingSession] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isPreparingAnswer, setIsPreparingAnswer] = useState(false);
+  const [isFinishingAnswer, setIsFinishingAnswer] = useState(false);
+  const [microphoneReady, setMicrophoneReady] = useState(false);
+  const [microphoneDevices, setMicrophoneDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedMicrophoneId, setSelectedMicrophoneId] = useState("");
+  const [microphoneLevel, setMicrophoneLevel] = useState(0);
+  const [microphoneStatus, setMicrophoneStatus] = useState<"idle" | "testing" | "ready" | "failed">("idle");
+  const [microphoneMessage, setMicrophoneMessage] = useState("正式进入面试前，请先选择并检测麦克风。");
+  const [transcriptPreview, setTranscriptPreview] = useState("");
+  const transcriptPreviewRef = useRef("");
   const [socketState, setSocketState] = useState("连接中");
   const [socketMessage, setSocketMessage] = useState("正在检查是否有未完成训练。");
   const socketRef = useRef<WebSocket | null>(null);
+  const asrSocketRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<AudioRecorderSession | null>(null);
   const recordingTimeoutRef = useRef<number | null>(null);
+  const finalTranscriptWaiterRef = useRef<TranscriptWaiter | null>(null);
+  const microphoneTestRef = useRef<MicrophoneTestSession | null>(null);
+  const microphoneAnimationRef = useRef<number | null>(null);
   const state = states[stateIndex];
   const selectedModule = modules[selectedModuleIndex];
   const currentMaterial = materialsByType[selectedModule.type] ?? null;
@@ -234,13 +271,29 @@ export function InterviewRoom() {
     void loadAccount();
     void loadActiveSession();
     void loadHistory();
+    void loadMicrophoneDevices();
   }, []);
 
   useEffect(() => {
     return () => {
       window.speechSynthesis?.cancel();
       stopRecorder();
+      stopMicrophoneTest();
+      asrSocketRef.current?.close();
       socketRef.current?.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!navigator.mediaDevices?.addEventListener) {
+      return;
+    }
+    const handleDeviceChange = () => {
+      void loadMicrophoneDevices();
+    };
+    navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
+    return () => {
+      navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
     };
   }, []);
 
@@ -292,6 +345,114 @@ export function InterviewRoom() {
       websocket.close();
     };
   }, [socketSessionId]);
+
+  async function loadMicrophoneDevices() {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      setMicrophoneStatus("failed");
+      setMicrophoneMessage("当前浏览器不支持麦克风设备枚举，请使用新版 Chrome 或 Edge。");
+      return;
+    }
+    const devices = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === "audioinput");
+    setMicrophoneDevices(devices);
+    setSelectedMicrophoneId((currentDeviceId) => currentDeviceId || devices[0]?.deviceId || "");
+  }
+
+  function handleMicrophoneChange(deviceId: string) {
+    stopMicrophoneTest();
+    setSelectedMicrophoneId(deviceId);
+    setMicrophoneReady(false);
+    setMicrophoneLevel(0);
+    setMicrophoneStatus("idle");
+    setMicrophoneMessage("已切换输入设备，请重新检测麦克风。");
+  }
+
+  function microphoneConstraints(): MediaStreamConstraints {
+    const audio: MediaTrackConstraints = {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    };
+    if (selectedMicrophoneId) {
+      audio.deviceId = { exact: selectedMicrophoneId };
+    }
+    return { audio };
+  }
+
+  function stopMicrophoneTest() {
+    if (microphoneAnimationRef.current !== null) {
+      window.cancelAnimationFrame(microphoneAnimationRef.current);
+      microphoneAnimationRef.current = null;
+    }
+    const session = microphoneTestRef.current;
+    microphoneTestRef.current = null;
+    if (!session) {
+      return;
+    }
+    session.source.disconnect();
+    session.stream.getTracks().forEach((track) => track.stop());
+    void session.context.close();
+  }
+
+  async function runMicrophoneCheck() {
+    const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
+    if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) {
+      setMicrophoneStatus("failed");
+      setMicrophoneMessage("当前浏览器不支持录音，请使用新版 Chrome 或 Edge。");
+      return;
+    }
+    stopMicrophoneTest();
+    setMicrophoneStatus("testing");
+    setMicrophoneReady(false);
+    setMicrophoneMessage("正在打开麦克风，请试着说一句话。");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints());
+      await loadMicrophoneDevices();
+      const context = new AudioContextCtor();
+      const source = context.createMediaStreamSource(stream);
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      microphoneTestRef.current = { context, source, analyser, stream };
+      const samples = new Uint8Array(analyser.fftSize);
+      let hasDetectedVoice = false;
+      const updateLevel = () => {
+        analyser.getByteTimeDomainData(samples);
+        let sum = 0;
+        samples.forEach((sample) => {
+          const normalized = (sample - 128) / 128;
+          sum += normalized * normalized;
+        });
+        const rms = Math.sqrt(sum / samples.length);
+        const level = Math.min(1, rms * 8);
+        setMicrophoneLevel(level);
+        if (level > 0.08 && !hasDetectedVoice) {
+          hasDetectedVoice = true;
+          setMicrophoneStatus("ready");
+          setMicrophoneMessage("麦克风可用，声音已经能被系统采集。");
+        }
+        microphoneAnimationRef.current = window.requestAnimationFrame(updateLevel);
+      };
+      updateLevel();
+      window.setTimeout(() => {
+        if (!hasDetectedVoice && microphoneTestRef.current) {
+          setMicrophoneMessage("麦克风已打开，但声音偏小。请靠近麦克风或换一个输入设备。");
+        }
+      }, 1800);
+    } catch {
+      setMicrophoneStatus("failed");
+      setMicrophoneMessage("无法打开麦克风，请在浏览器地址栏允许麦克风权限后重新检测。");
+      setMicrophoneLevel(0);
+    }
+  }
+
+  function enterInterviewRoom() {
+    if (microphoneStatus !== "ready") {
+      setMicrophoneMessage("请先完成一次麦克风检测，确认系统能听到声音。");
+      return;
+    }
+    stopMicrophoneTest();
+    setMicrophoneReady(true);
+  }
 
   async function loadAccount() {
     const response = await fetch("/api/auth/me", { credentials: "include" });
@@ -460,7 +621,16 @@ export function InterviewRoom() {
     socketRef.current.send(JSON.stringify({ type, session_id: socketSessionId, avatar_state: state }));
   }
 
-  function stopRecorder() {
+  function flushRecorderAudio(recorder: AudioRecorderSession) {
+    if (recorder.pendingSamples.length === 0 || recorder.socket.readyState !== WebSocket.OPEN) {
+      recorder.pendingSamples = new Float32Array();
+      return;
+    }
+    recorder.socket.send(encodePcm16(recorder.pendingSamples));
+    recorder.pendingSamples = new Float32Array();
+  }
+
+  function stopRecorder(options: { sendEnd?: boolean } = {}) {
     const recorder = recorderRef.current;
     recorderRef.current = null;
     if (recordingTimeoutRef.current !== null) {
@@ -468,36 +638,157 @@ export function InterviewRoom() {
       recordingTimeoutRef.current = null;
     }
     if (!recorder) {
-      return null;
+      return false;
+    }
+    flushRecorderAudio(recorder);
+    if (options.sendEnd && recorder.socket.readyState === WebSocket.OPEN) {
+      recorder.socket.send(JSON.stringify({ type: "end" }));
     }
     recorder.processor.disconnect();
     recorder.source.disconnect();
     recorder.stream.getTracks().forEach((track) => track.stop());
     void recorder.context.close();
-    return encodeWav(mergeAudioChunks(recorder.chunks), recorder.sampleRate);
+    return true;
   }
 
-  async function transcribeAnswerAudio(audioBlob: Blob, targetSessionId: string, interviewType: InterviewType) {
-    const formData = new FormData();
-    formData.append("audio_file", audioBlob, `${targetSessionId}.wav`);
-    formData.append("session_id", targetSessionId);
-    formData.append("interview_type", interviewType);
-    const response = await fetch("/api/speech/asr", {
-      method: "POST",
-      credentials: "include",
-      headers: csrfHeaders(),
-      body: formData,
-    });
-    const data = (await response.json()) as SpeechRecognitionApiResponse;
-    if (!response.ok || !data.text) {
-      throw new Error(getApiErrorMessage(data, "语音识别失败。"));
+  function createTranscriptWaiter() {
+    let resolveWaiter: (text: string) => void = () => undefined;
+    let rejectWaiter: (error: Error) => void = () => undefined;
+    const waiter: TranscriptWaiter = {
+      promise: new Promise<string>((resolve, reject) => {
+        resolveWaiter = resolve;
+        rejectWaiter = reject;
+      }),
+      resolve: resolveWaiter,
+      reject: rejectWaiter,
+      settled: false,
+    };
+    finalTranscriptWaiterRef.current = waiter;
+    return waiter;
+  }
+
+  function resolveTranscriptWaiter(text: string) {
+    const waiter = finalTranscriptWaiterRef.current;
+    if (!waiter || waiter.settled) {
+      return;
     }
-    return data.text;
+    waiter.settled = true;
+    waiter.resolve(text);
+  }
+
+  function rejectTranscriptWaiter(error: Error) {
+    const waiter = finalTranscriptWaiterRef.current;
+    if (!waiter || waiter.settled) {
+      return;
+    }
+    waiter.settled = true;
+    waiter.reject(error);
+  }
+
+  function setTranscript(text: string) {
+    transcriptPreviewRef.current = text;
+    setTranscriptPreview(text);
+  }
+
+  async function waitForFinalTranscript() {
+    const waiter = finalTranscriptWaiterRef.current;
+    if (!waiter) {
+      return transcriptPreviewRef.current.trim();
+    }
+    const fallbackPromise = new Promise<string>((resolve) => {
+      window.setTimeout(() => resolve(transcriptPreviewRef.current.trim()), FINAL_TRANSCRIPT_TIMEOUT_MS);
+    });
+    const text = await Promise.race([waiter.promise, fallbackPromise]);
+    finalTranscriptWaiterRef.current = null;
+    return text.trim();
+  }
+
+  function openRealtimeAsrSocket(targetSessionId: string, interviewType: InterviewType) {
+    return new Promise<WebSocket>((resolve, reject) => {
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const websocket = new WebSocket(`${protocol}://${window.location.host}/api/ws/speech/asr/${encodeURIComponent(targetSessionId)}`);
+      let ready = false;
+      const timeoutId = window.setTimeout(() => {
+        if (!ready) {
+          websocket.close();
+          reject(new Error("实时语音识别连接超时，请稍后重试。"));
+        }
+      }, 10_000);
+      asrSocketRef.current = websocket;
+      websocket.binaryType = "arraybuffer";
+      websocket.onopen = () => {
+        websocket.send(JSON.stringify({ type: "start", interview_type: interviewType, sample_rate: PCM_SAMPLE_RATE }));
+      };
+      websocket.onmessage = (event) => {
+        let payload: RealtimeAsrMessage;
+        try {
+          payload = JSON.parse(String(event.data)) as RealtimeAsrMessage;
+        } catch {
+          return;
+        }
+        if (payload.type === "asr_ready") {
+          ready = true;
+          window.clearTimeout(timeoutId);
+          setSocketMessage("实时语音识别已连接，开始回答后会边说边转写。");
+          resolve(websocket);
+          return;
+        }
+        if (payload.type === "asr_result") {
+          setTranscript(payload.text || "");
+          return;
+        }
+        if (payload.type === "asr_completed") {
+          setTranscript(payload.text || "");
+          resolveTranscriptWaiter(payload.text || "");
+          return;
+        }
+        if (payload.type === "asr_error") {
+          const message = getApiErrorMessage(payload, payload.message || "实时语音识别失败，请稍后重试。");
+          setSocketMessage(message);
+          if (!ready) {
+            window.clearTimeout(timeoutId);
+            reject(new Error(message));
+          } else {
+            rejectTranscriptWaiter(new Error(message));
+          }
+        }
+      };
+      websocket.onerror = () => {
+        const error = new Error("实时语音识别连接异常，请检查腾讯云配置或网络状态。");
+        if (!ready) {
+          window.clearTimeout(timeoutId);
+          reject(error);
+        } else {
+          rejectTranscriptWaiter(error);
+        }
+      };
+      websocket.onclose = () => {
+        window.clearTimeout(timeoutId);
+        if (!ready) {
+          reject(new Error("实时语音识别连接未能建立。"));
+          return;
+        }
+        if (finalTranscriptWaiterRef.current && !finalTranscriptWaiterRef.current.settled) {
+          rejectTranscriptWaiter(new Error("实时语音识别连接已断开。"));
+        }
+      };
+    });
   }
 
   async function startAnswer() {
     if (!interviewState || interviewState.status === "completed") {
       setSocketMessage("请先开始或恢复一场训练。");
+      return;
+    }
+    if (isRecording) {
+      setSocketMessage("当前正在回答，请说完后点击“回答完毕”。");
+      return;
+    }
+    if (isPreparingAnswer) {
+      setSocketMessage("正在准备麦克风和实时识别通道，请稍等。");
+      return;
+    }
+    if (isFinishingAnswer) {
       return;
     }
 
@@ -507,35 +798,63 @@ export function InterviewRoom() {
       return;
     }
 
+    let stream: MediaStream | null = null;
+    let context: AudioContext | null = null;
+    setIsPreparingAnswer(true);
     try {
       stopRecorder();
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const context = new AudioContextCtor();
+      setTranscript("");
+      createTranscriptWaiter();
+      setSocketMessage("正在打开麦克风并建立实时语音识别通道。");
+      stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints());
+      context = new AudioContextCtor();
+      const asrSocket = await openRealtimeAsrSocket(interviewState.session_id, interviewState.interview_type);
       const source = context.createMediaStreamSource(stream);
       const processor = context.createScriptProcessor(4096, 1, 1);
-      const chunks: Float32Array[] = [];
+      const recorder: AudioRecorderSession = {
+        context,
+        source,
+        processor,
+        stream,
+        socket: asrSocket,
+        pendingSamples: new Float32Array(),
+        sampleRate: context.sampleRate,
+      };
       processor.onaudioprocess = (event) => {
-        chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+        const inputSamples = new Float32Array(event.inputBuffer.getChannelData(0));
+        const pcmSamples = resampleAudio(inputSamples, recorder.sampleRate, PCM_SAMPLE_RATE);
+        recorder.pendingSamples = appendSamples(recorder.pendingSamples, pcmSamples);
+        while (recorder.pendingSamples.length >= PCM_CHUNK_SAMPLES && recorder.socket.readyState === WebSocket.OPEN) {
+          const chunk = recorder.pendingSamples.slice(0, PCM_CHUNK_SAMPLES);
+          recorder.pendingSamples = recorder.pendingSamples.slice(PCM_CHUNK_SAMPLES);
+          recorder.socket.send(encodePcm16(chunk));
+        }
         event.outputBuffer.getChannelData(0).fill(0);
       };
       source.connect(processor);
       processor.connect(context.destination);
-      recorderRef.current = { context, source, processor, stream, chunks, sampleRate: context.sampleRate };
+      recorderRef.current = recorder;
       recordingTimeoutRef.current = window.setTimeout(() => {
         if (recorderRef.current) {
-          setSocketMessage("已到 60 秒，本轮回答将自动提交识别。");
+          setSocketMessage("已到建议回答时长，本轮回答将自动收尾并提交转写。");
           void finishAnswer();
         }
-      }, MAX_RECORDING_MS);
-    } catch {
+      }, getAnswerLimitMs(interviewState.interview_type, interviewState.current_question?.round_name));
+    } catch (error) {
+      stream?.getTracks().forEach((track) => track.stop());
+      void context?.close();
+      rejectTranscriptWaiter(error instanceof Error ? error : new Error("实时语音识别启动失败。"));
+      finalTranscriptWaiterRef.current = null;
+      setIsPreparingAnswer(false);
       setIsRecording(false);
-      setSocketMessage("无法打开麦克风，请检查浏览器权限后重新点击开始回答。");
+      setSocketMessage(error instanceof Error ? error.message : "无法打开麦克风或实时识别通道，请检查权限后重试。");
       return;
     }
 
+    setIsPreparingAnswer(false);
     setIsRecording(true);
     setStateIndex(2);
-    setSocketMessage("正在录制你的回答，请控制在 60 秒以内。说完后点击“回答完毕”，系统会用腾讯云语音识别转写。");
+    setSocketMessage(`正在实时转写回答，${formatAnswerLimit(interviewState.interview_type, interviewState.current_question?.round_name)}。说完后点击“回答完毕”。`);
     sendSocketEvent("answer_started");
   }
 
@@ -544,21 +863,34 @@ export function InterviewRoom() {
       setSocketMessage("请先开始或恢复一场训练。");
       return;
     }
-    const audioBlob = stopRecorder();
+    if (isFinishingAnswer) {
+      return;
+    }
+    if (!recorderRef.current) {
+      setSocketMessage("当前还没有开始录音，请先点击“开始回答”。");
+      return;
+    }
+    setIsFinishingAnswer(true);
+    stopRecorder({ sendEnd: true });
     setIsRecording(false);
     setStateIndex(3);
     sendSocketEvent("answer_finished");
 
-    let answerText = "语音识别没有返回文本，但用户已完成本轮口头回答。";
-    if (audioBlob && audioBlob.size > 44) {
-      try {
-        setSocketMessage("正在用腾讯云语音识别转写回答。");
-        answerText = await transcribeAnswerAudio(audioBlob, interviewState.session_id, interviewState.interview_type);
-      } catch {
-        setStateIndex(0);
-        setSocketMessage("腾讯云语音识别暂时不可用，本轮回答没有提交。请稍后重新点击开始回答。");
-        return;
-      }
+    let answerText = "";
+    try {
+      setSocketMessage("正在收尾实时转写结果。");
+      answerText = await waitForFinalTranscript();
+    } catch (error) {
+      setStateIndex(0);
+      setIsFinishingAnswer(false);
+      setSocketMessage(error instanceof Error ? error.message : "腾讯云实时语音识别暂时不可用，本轮回答没有提交。");
+      return;
+    }
+    if (!answerText) {
+      setStateIndex(0);
+      setIsFinishingAnswer(false);
+      setSocketMessage("没有识别到有效回答，请重新点击“开始回答”后再试。");
+      return;
     }
     const response = await fetch(`/api/interviews/${encodeURIComponent(interviewState.session_id)}/answers`, {
       method: "POST",
@@ -568,10 +900,12 @@ export function InterviewRoom() {
     });
     const data = (await response.json()) as InterviewStateResponse;
     if (!response.ok) {
+      setIsFinishingAnswer(false);
       setSocketMessage(`回答提交失败：${getApiErrorMessage(data, "请稍后重试。")}`);
       return;
     }
     setInterviewState(data);
+    setIsFinishingAnswer(false);
     await loadHistory();
     if (data.status === "completed") {
       setStateIndex(0);
@@ -603,20 +937,122 @@ export function InterviewRoom() {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrfHeaders() });
     window.speechSynthesis?.cancel();
     stopRecorder();
+    stopMicrophoneTest();
+    asrSocketRef.current?.close();
     socketRef.current?.close();
     setCurrentUser(null);
     setInterviewState(null);
     setActiveSession(null);
     setHistoryItems([]);
+    setIsPreparingAnswer(false);
+    setIsRecording(false);
+    setIsFinishingAnswer(false);
     setSocketState("已退出");
     setSocketMessage("已退出登录，可以重新登录其他账号。");
   }
 
   function startFresh() {
+    stopRecorder();
+    asrSocketRef.current?.close();
+    setTranscript("");
+    setIsRecording(false);
+    setIsPreparingAnswer(false);
+    setIsFinishingAnswer(false);
     setInterviewState(null);
     setActiveSession(null);
     setSessionId(createSessionId());
     setSocketMessage("已切换到新训练，选择模块后开始。");
+  }
+
+  if (!microphoneReady) {
+    return (
+      <main className="workspace-page interview-page">
+        <header className="workspace-header">
+          <a href="/" className="brand-mark">
+            <AppIcon icon="solar:soundwave-circle-bold-duotone" size={24} />
+            面霸练习生
+          </a>
+          <div className="workspace-header-actions">
+            <span className="session-pill">{socketState} · 设备检测</span>
+            <span className="credit-pill">
+              <AppIcon icon="lucide:coins" size={16} />
+              {currentUser ? `${currentUser.credit_balance} 次` : "未登录"}
+            </span>
+            {currentUser && (
+              <button type="button" className="logout-button" onClick={() => void logout()}>
+                <AppIcon icon="lucide:log-out" size={16} />
+                退出
+              </button>
+            )}
+          </div>
+        </header>
+
+        <section className="microphone-gate">
+          <div className="microphone-copy">
+            <span className="eyebrow">Microphone Check</span>
+            <h1>先确认系统能听清，再进入正式面试。</h1>
+            <p>
+              面试环节会采用腾讯云实时语音识别，回答时边说边转写，适合 2 到 3 分钟的完整表达。进入前先选择麦克风并说一句话，音量条有明显波动后再进入训练房间。
+            </p>
+            <div className="microphone-proof">
+              <span>
+                <AppIcon icon="lucide:mic-2" size={17} />
+                实时采集
+              </span>
+              <span>
+                <AppIcon icon="lucide:audio-lines" size={17} />
+                边说边识别
+              </span>
+              <span>
+                <AppIcon icon="lucide:shield-check" size={17} />
+                本轮提交前可重试
+              </span>
+            </div>
+          </div>
+
+          <div className="microphone-card">
+            <div className="material-card-heading">
+              <span>
+                <AppIcon icon="lucide:settings-2" size={18} />
+                输入设备
+              </span>
+              <em>{microphoneStatus === "ready" ? "已通过" : microphoneStatus === "testing" ? "检测中" : "待检测"}</em>
+            </div>
+
+            <label className="microphone-select">
+              <span>麦克风</span>
+              <select value={selectedMicrophoneId} onChange={(event) => handleMicrophoneChange(event.currentTarget.value)}>
+                {microphoneDevices.length === 0 ? (
+                  <option value="">使用系统默认麦克风</option>
+                ) : (
+                  microphoneDevices.map((device, index) => (
+                    <option key={device.deviceId || `device-${index}`} value={device.deviceId}>
+                      {microphoneLabel(device, index)}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+
+            <div className="microphone-meter" aria-label="麦克风音量">
+              <span style={{ transform: `scaleX(${Math.max(0.04, microphoneLevel)})` }} />
+            </div>
+            <p>{microphoneMessage}</p>
+
+            <div className="microphone-actions">
+              <button type="button" onClick={() => void runMicrophoneCheck()} disabled={microphoneStatus === "testing"}>
+                <AppIcon icon="lucide:waveform" size={18} />
+                {microphoneStatus === "testing" ? "检测中" : "检测麦克风"}
+              </button>
+              <button type="button" onClick={enterInterviewRoom} disabled={microphoneStatus !== "ready"}>
+                <AppIcon icon="lucide:arrow-right" size={18} />
+                进入面试房间
+              </button>
+            </div>
+          </div>
+        </section>
+      </main>
+    );
   }
 
   return (
@@ -651,6 +1087,16 @@ export function InterviewRoom() {
             <AppIcon icon="lucide:radio" size={18} />
             <span>{socketMessage}</span>
           </div>
+
+          {(transcriptPreview || isRecording || isFinishingAnswer) && (
+            <div className="transcript-card">
+              <div>
+                <AppIcon icon="lucide:captions" size={17} />
+                <span>{isFinishingAnswer ? "正在整理本轮回答" : isRecording ? "实时转写预览" : "上一轮转写"}</span>
+              </div>
+              <p>{transcriptPreview || "已经开始监听，说话后这里会显示实时转写内容。"}</p>
+            </div>
+          )}
 
           {!interviewState && activeSession && (
             <div className="resume-card">
@@ -766,15 +1212,19 @@ export function InterviewRoom() {
                 </button>
               ) : (
                 <>
-                  <button type="button" disabled={isRecording} onClick={() => void startAnswer()}>
+                  <button type="button" disabled={isRecording || isPreparingAnswer || isFinishingAnswer} onClick={() => void startAnswer()}>
                     <AppIcon icon="lucide:mic" size={18} />
-                    开始回答
+                    {isPreparingAnswer ? "准备中" : isRecording ? "回答中" : "开始回答"}
                   </button>
-                  <button type="button" onClick={() => void finishAnswer()}>
+                  <button type="button" disabled={!isRecording || isPreparingAnswer || isFinishingAnswer} onClick={() => void finishAnswer()}>
                     <AppIcon icon="lucide:square" size={18} />
-                    回答完毕
+                    {isFinishingAnswer ? "提交中" : "回答完毕"}
                   </button>
-                  <button type="button" onClick={() => void speakQuestion(interviewState.current_question?.text, interviewState.interview_type, interviewState.session_id)}>
+                  <button
+                    type="button"
+                    disabled={isRecording || isPreparingAnswer || isFinishingAnswer}
+                    onClick={() => void speakQuestion(interviewState.current_question?.text, interviewState.interview_type, interviewState.session_id)}
+                  >
                     <AppIcon icon="lucide:volume-2" size={18} />
                     重播问题
                   </button>

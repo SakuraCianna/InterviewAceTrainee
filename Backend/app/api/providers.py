@@ -198,6 +198,8 @@ def run_connectivity_test(config: AIProviderConfig, settings: Settings) -> Provi
     if config.provider_type in CONFIG_VALIDATED_PROVIDER_TYPES:
         provider_name = config.provider_name.strip().lower()
         if provider_name in CONFIG_VALIDATED_PROVIDERS:
+            if not settings.tencent_cloud_app_id:
+                return provider_test_response(config, success=False, detail="tencent_cloud_app_id_missing")
             if not settings.tencent_cloud_secret_id or not settings.tencent_cloud_secret_key:
                 return provider_test_response(config, success=False, detail="tencent_cloud_credentials_missing")
             return provider_test_response(config, success=True, detail="tencent_cloud_configuration_validated")
