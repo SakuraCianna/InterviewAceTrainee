@@ -106,6 +106,7 @@ const modules: { icon: string; title: string; meta: string; type: InterviewType;
   { icon: "lucide:landmark", title: "考公面试", meta: "综合分析、组织协调、应急应变", type: "civil_service", lang: "zh-CN" },
   { icon: "lucide:languages", title: "雅思口语", meta: "Part 1 / 2 / 3 全流程", type: "ielts", lang: "en-US" },
 ];
+const MAX_RECORDING_MS = 60_000;
 
 function createSessionId() {
   const random = Math.random().toString(36).slice(2, 8);
@@ -217,6 +218,7 @@ export function InterviewRoom() {
   const [socketMessage, setSocketMessage] = useState("正在检查是否有未完成训练。");
   const socketRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<AudioRecorderSession | null>(null);
+  const recordingTimeoutRef = useRef<number | null>(null);
   const state = states[stateIndex];
   const selectedModule = modules[selectedModuleIndex];
   const currentMaterial = materialsByType[selectedModule.type] ?? null;
@@ -235,6 +237,14 @@ export function InterviewRoom() {
   }, []);
 
   useEffect(() => {
+    return () => {
+      window.speechSynthesis?.cancel();
+      stopRecorder();
+      socketRef.current?.close();
+    };
+  }, []);
+
+  useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const websocket = new WebSocket(`${protocol}://${window.location.host}/api/ws/interviews/${socketSessionId}`);
     socketRef.current = websocket;
@@ -244,7 +254,13 @@ export function InterviewRoom() {
       setSocketMessage((message) => (message.includes("未完成") ? message : "实时面试通道已建立。"));
     };
     websocket.onmessage = (event) => {
-      const payload = JSON.parse(event.data) as { type?: string; received_type?: string; state?: string; message?: string };
+      let payload: { type?: string; received_type?: string; state?: string; message?: string };
+      try {
+        payload = JSON.parse(event.data) as { type?: string; received_type?: string; state?: string; message?: string };
+      } catch {
+        setSocketMessage("实时通道返回了无法识别的消息，已忽略本次事件。");
+        return;
+      }
       if (payload.type === "session_kicked") {
         setSocketState("已下线");
         setSocketMessage("账号已在其他设备登录，当前训练页已下线，请重新登录。");
@@ -447,6 +463,10 @@ export function InterviewRoom() {
   function stopRecorder() {
     const recorder = recorderRef.current;
     recorderRef.current = null;
+    if (recordingTimeoutRef.current !== null) {
+      window.clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
+    }
     if (!recorder) {
       return null;
     }
@@ -501,6 +521,12 @@ export function InterviewRoom() {
       source.connect(processor);
       processor.connect(context.destination);
       recorderRef.current = { context, source, processor, stream, chunks, sampleRate: context.sampleRate };
+      recordingTimeoutRef.current = window.setTimeout(() => {
+        if (recorderRef.current) {
+          setSocketMessage("已到 60 秒，本轮回答将自动提交识别。");
+          void finishAnswer();
+        }
+      }, MAX_RECORDING_MS);
     } catch {
       setIsRecording(false);
       setSocketMessage("无法打开麦克风，请检查浏览器权限后重新点击开始回答。");
@@ -509,7 +535,7 @@ export function InterviewRoom() {
 
     setIsRecording(true);
     setStateIndex(2);
-    setSocketMessage("正在录制你的回答。说完后点击“回答完毕”，系统会用腾讯云语音识别转写。");
+    setSocketMessage("正在录制你的回答，请控制在 60 秒以内。说完后点击“回答完毕”，系统会用腾讯云语音识别转写。");
     sendSocketEvent("answer_started");
   }
 

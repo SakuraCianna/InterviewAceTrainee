@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 
@@ -8,6 +9,7 @@ from app.services.auth_sessions import AuthSessionStore, get_auth_session_store
 from app.services.user_credentials import UserCredentialStore, get_user_credential_store
 
 router = APIRouter(prefix="/ws", tags=["websocket"])
+MAX_WEBSOCKET_MESSAGE_CHARS = 4096
 
 
 @router.websocket("/interviews/{session_id}")
@@ -64,9 +66,20 @@ async def interview_socket(
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
                 return
             try:
-                payload = await asyncio.wait_for(websocket.receive_json(), timeout=5)
+                raw_payload = await asyncio.wait_for(websocket.receive_text(), timeout=5)
             except asyncio.TimeoutError:
                 continue
+            if len(raw_payload) > MAX_WEBSOCKET_MESSAGE_CHARS:
+                await websocket.close(code=status.WS_1009_MESSAGE_TOO_BIG)
+                return
+            try:
+                payload = json.loads(raw_payload)
+            except json.JSONDecodeError:
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
+            if not isinstance(payload, dict):
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
             await websocket.send_json(
                 {
                     "type": "event_ack",
@@ -79,7 +92,7 @@ async def interview_socket(
 
 
 def _is_allowed_origin(origin: str | None, settings: Settings) -> bool:
-    if not origin:
-        return True
     allowed_origins = {item.strip().rstrip("/") for item in settings.cors_origins.split(",") if item.strip()}
+    if not origin:
+        return not allowed_origins
     return origin.rstrip("/") in allowed_origins

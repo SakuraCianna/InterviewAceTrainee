@@ -63,7 +63,7 @@ def build_interview_steps(
     material_keywords = "、".join(material_context.keywords[:4]) if material_context else ""
     plans: dict[InterviewType, list[InterviewStep]] = {
         InterviewType.JOB: [
-            InterviewStep("专业一面", "请用 90 秒按 STAR 结构介绍一个最能体现岗位匹配度的项目，并说明你的职责边界。"),
+            InterviewStep("专业一面", "请用 60 秒按 STAR 结构介绍一个最能体现岗位匹配度的项目，并说明你的职责边界。"),
             InterviewStep("专业一面", "请展开这个项目里的一个关键技术决策，说明你比较过哪些方案、为什么这样取舍。"),
             InterviewStep("专业一面追问", "如果面试官要求你用量化结果证明贡献，你会拿出哪些指标、日志或用户反馈？"),
             InterviewStep("专业二面", "请解释你遇到过的一个复杂线上或工程问题，以及你如何定位根因。"),
@@ -73,7 +73,7 @@ def build_interview_steps(
             InterviewStep("HR 面追问", "如果入职后发现业务节奏和预期不同，你会如何保持产出、沟通预期并持续学习？"),
         ],
         InterviewType.POSTGRADUATE: [
-            InterviewStep("复试开场", "请做一段 90 秒以内的中文自我介绍，突出专业背景、复试动机和你能带来的研究基础。"),
+            InterviewStep("复试开场", "请做一段 60 秒以内的中文自我介绍，突出专业背景、复试动机和你能带来的研究基础。"),
             InterviewStep("专业基础", "请说明你本科阶段最熟悉的一门专业课，并举例说明它如何支撑你的研究兴趣。"),
             InterviewStep("科研潜力", "请介绍一个课程设计、毕业设计或竞赛项目，并说明其中值得继续研究的问题。"),
             InterviewStep("文献与英文", "如果导师要求你快速阅读一篇英文论文，你会如何拆解摘要、方法、实验和结论并做汇报？"),
@@ -106,7 +106,7 @@ def build_interview_steps(
         steps = [
             InterviewStep(
                 "专业一面",
-                f"你正在面试「{job_title}」，我会按「{role_label}」的真实要求看证据。请用 90 秒介绍一个最能证明你能胜任这个岗位的项目、作品或经历，优先覆盖：{angle_hint}。",
+                f"你正在面试「{job_title}」，我会按「{role_label}」的真实要求看证据。请用 60 秒介绍一个最能证明你能胜任这个岗位的项目、作品或经历，优先覆盖：{angle_hint}。",
             ),
             InterviewStep(
                 "专业一面",
@@ -124,7 +124,7 @@ def build_interview_steps(
         steps = [
             InterviewStep(
                 "复试开场",
-                f"请做一段 90 秒以内的中文自我介绍，围绕「{target_school}」「{major_label}」和「{direction}」突出专业背景、复试动机和你能带来的研究基础。",
+                f"请做一段 60 秒以内的中文自我介绍，围绕「{target_school}」「{major_label}」和「{direction}」突出专业背景、复试动机和你能带来的研究基础。",
             ),
             InterviewStep(
                 "专业基础",
@@ -377,7 +377,7 @@ def _risk_flags(interview_type: InterviewType, answer_lengths: list[int], answer
 def _priority_actions(interview_type: InterviewType, weakest_dimension: str, risk_flags: list[str]) -> list[str]:
     actions = {
         InterviewType.JOB: [
-            f"先改「{weakest_dimension}」：把核心项目压成 90 秒 STAR 版本。",
+            f"先改「{weakest_dimension}」：把核心项目压成 60 秒 STAR 版本。",
             "为每个项目准备 1 个量化结果、1 个失败复盘、1 个技术取舍。",
             "把目标岗位 JD 拆成 3 个能力点，并逐一绑定经历证据。",
         ],
@@ -398,7 +398,7 @@ def _priority_actions(interview_type: InterviewType, weakest_dimension: str, ris
         ],
     }[interview_type]
     if risk_flags and "偏短" in risk_flags[0]:
-        actions.insert(0, "先把每轮回答拉到 45-90 秒，别太快收尾。")
+        actions.insert(0, "先把每轮回答控制在 45-60 秒，别太快收尾。")
     return actions[:4]
 
 
@@ -409,13 +409,13 @@ def _recommended_drills(
 ) -> list[str]:
     drills = {
         InterviewType.JOB: [
-            "90 秒 STAR 项目复述",
+            "60 秒 STAR 项目复述",
             "30 秒岗位匹配说明",
             "技术方案取舍追问",
             f"{weakest_dimension} 专项复盘",
         ],
         InterviewType.POSTGRADUATE: [
-            "90 秒中文自我介绍",
+            "60 秒中文自我介绍",
             "英文论文 60 秒汇报",
             "导师研究方向匹配说明",
             f"{weakest_dimension} 专项复盘",
@@ -427,7 +427,7 @@ def _recommended_drills(
             f"{weakest_dimension} 专项复盘",
         ],
         InterviewType.IELTS: [
-            "Part 2 90-second long turn",
+            "Part 2 60-second long turn",
             "Part 3 cause-effect-contrast answer",
             "Connector and paraphrase drill",
             f"{weakest_dimension} drill",
@@ -525,12 +525,12 @@ def _scenario_improvements(interview_type: InterviewType, weakest_dimension: str
 def _scenario_next_plan(interview_type: InterviewType, weakest_dimension: str) -> list[str]:
     return {
         InterviewType.JOB: [
-            "把一个核心项目整理成 STAR + 指标 + 失败复盘版本，限定 90 秒讲完。",
+            "把一个核心项目整理成 STAR + 指标 + 失败复盘版本，限定 60 秒讲完。",
             "对照目标岗位 JD，准备 3 个匹配证据和 2 个可能被追问的风险点。",
             f"重练「{weakest_dimension}」相关问题，回答时必须说出一个取舍和一个备选方案。",
         ],
         InterviewType.POSTGRADUATE: [
-            "准备一份 90 秒研究兴趣陈述，包含专业基础、问题来源和初步方法。",
+            "准备一份 60 秒研究兴趣陈述，包含专业基础、问题来源和初步方法。",
             "找一篇英文论文做摘要、方法、实验、结论四段式口头汇报。",
             f"重练「{weakest_dimension}」维度，把导师可能追问的问题提前写成提纲。",
         ],
@@ -540,7 +540,7 @@ def _scenario_next_plan(interview_type: InterviewType, weakest_dimension: str) -
             f"重练「{weakest_dimension}」维度，回答必须体现群众立场、政策依据和落实闭环。",
         ],
         InterviewType.IELTS: [
-            "Record one Part 2 long turn every day and check whether it lasts 90-120 seconds.",
+            "Record one Part 2 long turn every day and keep it close to 60 seconds.",
             "Build a band-focused notebook for linking words, paraphrases and self-correction patterns.",
             f"Practise {weakest_dimension} with one Part 1 answer, one Part 2 cue card and one Part 3 abstract discussion.",
         ],

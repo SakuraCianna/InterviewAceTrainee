@@ -443,17 +443,7 @@ def search_users(
     if user_records:
         return [summarize_user_record(record, credit_store, interview_store) for record in user_records]
 
-    if "@" not in normalized_query:
-        return []
-    return [
-        summarize_user(
-            user_email=normalized_query,
-            role="user",
-            is_active=user_store.is_active(normalized_query),
-            credit_store=credit_store,
-            interview_store=interview_store,
-        )
-    ]
+    return []
 
 
 @router.get("/users/{user_id}", response_model=AdminUserDetailResponse)
@@ -469,9 +459,12 @@ def read_user_detail(
     user = None
     if db_session is not None:
         user = db_session.execute(select(User).where(User.email == normalized_user_id)).scalar_one_or_none()
+    user_record = user_store.get_user_record(normalized_user_id)
+    if user is None and user_record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user_not_found")
 
-    role = user.role if user is not None else "user"
-    is_active = user.is_active if user is not None else user_store.is_active(normalized_user_id)
+    role = user.role if user is not None else user_record.role
+    is_active = user.is_active if user is not None else user_record.is_active
     summary = summarize_user(normalized_user_id, role, is_active, credit_store, interview_store)
     interviews = [history_record_to_schema(record) for record in interview_store.list_user_sessions(normalized_user_id, limit=80)]
     return AdminUserDetailResponse(**summary.model_dump(), interviews=interviews)
@@ -512,7 +505,12 @@ def update_user_status(
     auth_session_store: AuthSessionStore = Depends(get_auth_session_store),
 ) -> AdminUserStatusResponse:
     normalized_user_id = normalize_user_email(user_id)
-    before_active = user_store.is_active(normalized_user_id)
+    before_record = user_store.get_user_record(normalized_user_id)
+    if before_record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user_not_found")
+    if normalized_user_id == admin_claims["sub"] and not payload.is_active:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="cannot_disable_own_admin_account")
+    before_active = before_record.is_active
     try:
         after_active = user_store.set_active(normalized_user_id, payload.is_active)
     except UserNotFoundError as exc:
@@ -546,6 +544,8 @@ def update_user_role(
     before_record = user_store.get_user_record(normalized_user_id)
     if before_record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user_not_found")
+    if normalized_user_id == admin_claims["sub"] and payload.role != "admin":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="cannot_change_own_admin_role")
     try:
         updated_record = user_store.set_role(normalized_user_id, payload.role)
     except UserNotFoundError as exc:
@@ -574,10 +574,13 @@ def adjust_user_credits(
     fallback_credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
     fallback_credit_ledger_store: CreditLedgerStore = Depends(get_credit_ledger_store),
     fallback_audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
+    user_store: UserCredentialStore = Depends(get_user_credential_store),
     adjustment_db_session: Session | None = Depends(get_optional_credit_adjustment_db_session),
 ) -> AdminCreditAdjustmentResponse:
     ip_address = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent")
+    if user_store.get_user_record(normalize_user_email(user_id)) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user_not_found")
     if adjustment_db_session is not None:
         try:
             response = adjust_user_credits_with_stores(
@@ -706,10 +709,13 @@ def create_user_customer_service_note(
     user_id: str,
     payload: CustomerServiceNoteCreateRequest,
     admin_claims: TokenClaims = Depends(require_admin_user),
+    user_store: UserCredentialStore = Depends(get_user_credential_store),
     note_store: CustomerServiceNoteStore = Depends(get_customer_service_note_store),
     audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
 ) -> CustomerServiceNoteResponse:
     normalized_user_id = normalize_user_email(user_id)
+    if user_store.get_user_record(normalized_user_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user_not_found")
     note = note_store.create(
         user_email=normalized_user_id,
         admin_email=admin_claims["sub"],
@@ -752,10 +758,13 @@ def create_user_refund_case(
     user_id: str,
     payload: RefundCaseCreateRequest,
     admin_claims: TokenClaims = Depends(require_admin_user),
+    user_store: UserCredentialStore = Depends(get_user_credential_store),
     refund_case_store: RefundCaseStore = Depends(get_refund_case_store),
     audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore = Depends(get_audit_log_store),
 ) -> RefundCaseResponse:
     normalized_user_id = normalize_user_email(user_id)
+    if user_store.get_user_record(normalized_user_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user_not_found")
     case = refund_case_store.create(
         user_email=normalized_user_id,
         reason=payload.reason,

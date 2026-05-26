@@ -169,6 +169,16 @@ class TencentSpeechClient:
             return "mp3"
         if "mp4" in normalized_content_type or normalized_filename.endswith(".m4a"):
             return "m4a"
+        if "aac" in normalized_content_type or normalized_filename.endswith(".aac"):
+            return "aac"
+        if "pcm" in normalized_content_type or normalized_filename.endswith(".pcm"):
+            return "pcm"
+        if "amr" in normalized_content_type or normalized_filename.endswith(".amr"):
+            return "amr"
+        if "speex" in normalized_content_type or normalized_filename.endswith(".speex"):
+            return "speex"
+        if "silk" in normalized_content_type or normalized_filename.endswith(".silk"):
+            return "silk"
         if "ogg" in normalized_content_type or normalized_filename.endswith(".ogg"):
             return "ogg-opus"
         raise SpeechProviderError("unsupported_audio_format")
