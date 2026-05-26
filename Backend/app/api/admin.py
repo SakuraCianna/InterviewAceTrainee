@@ -513,7 +513,10 @@ def update_user_status(
 ) -> AdminUserStatusResponse:
     normalized_user_id = normalize_user_email(user_id)
     before_active = user_store.is_active(normalized_user_id)
-    after_active = user_store.set_active(normalized_user_id, payload.is_active)
+    try:
+        after_active = user_store.set_active(normalized_user_id, payload.is_active)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user_not_found") from exc
     audit_store.record(
         admin_email=admin_claims["sub"],
         action="user_status_update",

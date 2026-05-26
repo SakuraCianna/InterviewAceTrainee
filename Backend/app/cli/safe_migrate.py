@@ -9,7 +9,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -17,6 +17,8 @@ from app.core.config import get_settings
 
 BACKUP_DIR_NAME = "database_backups"
 BACKUP_KEEP_COUNT = 5
+BASELINE_REVISION = "20260523_0001"
+REMOVED_DEV_REVISIONS = {"20260525_0002", "20260525_0003"}
 
 
 def main() -> int:
@@ -44,6 +46,7 @@ def run_safe_migration(database_url: str, project_root: Path, backend_dir: Path)
     )
     create_database_backup(database_url=database_url, backup_path=backup_path)
     prune_old_backups(backup_root, keep_count=BACKUP_KEEP_COUNT)
+    normalize_removed_dev_revisions(database_url)
     run_alembic_upgrade(backend_dir)
     return backup_path
 
@@ -124,6 +127,28 @@ def prune_old_backups(backup_root: Path, keep_count: int = BACKUP_KEEP_COUNT) ->
     backup_files = sorted(backup_root.glob("*.dump"), key=lambda path: path.stat().st_mtime, reverse=True)
     for backup_file in backup_files[keep_count:]:
         backup_file.unlink()
+
+
+def normalize_removed_dev_revisions(database_url: str) -> None:
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        with engine.begin() as connection:
+            inspector = inspect(connection)
+            if "alembic_version" not in inspector.get_table_names():
+                return
+
+            version = connection.execute(text("SELECT version_num FROM alembic_version LIMIT 1")).scalar()
+            if version not in REMOVED_DEV_REVISIONS:
+                return
+
+            if inspector.has_table("interview_materials"):
+                columns = {column["name"] for column in inspector.get_columns("interview_materials")}
+                if "target_school" not in columns:
+                    connection.execute(text("ALTER TABLE interview_materials ADD COLUMN target_school VARCHAR(160)"))
+
+            connection.execute(text("UPDATE alembic_version SET version_num = :version"), {"version": BASELINE_REVISION})
+    finally:
+        engine.dispose()
 
 
 def run_alembic_upgrade(backend_dir: Path) -> None:

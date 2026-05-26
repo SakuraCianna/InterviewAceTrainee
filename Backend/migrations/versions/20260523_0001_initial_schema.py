@@ -14,6 +14,10 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
+DEFAULT_ADMIN_ID = "75451592-2000-4000-8000-000000000001"
+DEFAULT_ADMIN_EMAIL = "754515922@qq.com"
+DEFAULT_ADMIN_PASSWORD_HASH = "$argon2id$v=19$m=65536,t=3,p=4$nTC5ihZxqGcWiJ3pa0D+nA$qk6WeU0Pi5I+4Cb0/w7VdbcL1dGEQqHIA1dHIw4QCuY"
+
 
 def upgrade() -> None:
     op.create_table(
@@ -27,6 +31,16 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
     )
     op.create_index("ix_users_email", "users", ["email"], unique=True)
+    op.execute(
+        f"""
+        INSERT INTO users (id, email, password_hash, role, credit_balance, is_active, created_at)
+        VALUES ('{DEFAULT_ADMIN_ID}', '{DEFAULT_ADMIN_EMAIL}', '{DEFAULT_ADMIN_PASSWORD_HASH}', 'admin', 0, TRUE, NOW())
+        ON CONFLICT (email) DO UPDATE
+        SET password_hash = EXCLUDED.password_hash,
+            role = 'admin',
+            is_active = TRUE
+        """
+    )
 
     op.create_table(
         "credit_ledger",
@@ -71,6 +85,7 @@ def upgrade() -> None:
         sa.Column("resume_text", sa.Text(), nullable=True),
         sa.Column("job_title", sa.String(length=160), nullable=True),
         sa.Column("job_requirements", sa.Text(), nullable=True),
+        sa.Column("target_school", sa.String(length=160), nullable=True),
         sa.Column("major", sa.String(length=160), nullable=True),
         sa.Column("research_direction", sa.String(length=240), nullable=True),
         sa.Column("profile_summary", sa.Text(), nullable=False),

@@ -35,9 +35,12 @@ def get_current_user_claims(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_access_token") from exc
     if not auth_session_store.is_current_session(claims["sub"], claims["session_id"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="session_replaced")
-    if not user_store.is_active(claims["sub"]):
+    user_record = user_store.get_user_record(claims["sub"])
+    if user_record is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_access_token")
+    if not user_record.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user_disabled")
-    return claims
+    return {"sub": claims["sub"], "role": user_record.role, "session_id": claims["session_id"]}
 
 
 def require_admin_user(

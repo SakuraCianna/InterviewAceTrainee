@@ -1,6 +1,8 @@
 from collections.abc import Generator
+import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Path, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import TokenClaims, get_current_user_claims
@@ -39,6 +41,7 @@ from app.services.llm_gateway import OpenAICompatibleLLMClient
 from app.services.provider_configs import DatabaseProviderConfigStore, InMemoryProviderConfigStore
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
+logger = logging.getLogger("mianba.interviews")
 
 INTERVIEW_REQUIRED_TABLES = ("interview_sessions", "interview_turns", "interview_reports", "interview_materials")
 INTERVIEW_START_REQUIRED_TABLES = (
@@ -239,7 +242,7 @@ def read_interview_history(
 
 @router.get("/{session_id}", response_model=InterviewAnswerResponse)
 def read_interview(
-    session_id: str,
+    session_id: Annotated[str, Path(min_length=1, max_length=120)],
     claims: TokenClaims = Depends(get_current_user_claims),
     interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
 ) -> InterviewAnswerResponse:
@@ -251,7 +254,7 @@ def read_interview(
 
 @router.post("/{session_id}/answers", response_model=InterviewAnswerResponse)
 def answer_interview_question(
-    session_id: str,
+    session_id: Annotated[str, Path(min_length=1, max_length=120)],
     payload: InterviewAnswerRequest,
     claims: TokenClaims = Depends(get_current_user_claims),
     interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
@@ -262,13 +265,16 @@ def answer_interview_question(
     current_state = interview_store.get_session(claims["sub"], session_id)
     next_question_override = None
     if current_state is not None and current_state.current_question is not None:
-        next_question_override = build_next_question_override(
-            current_state=current_state,
-            answer_text=payload.answer_text,
-            provider_store=provider_store,
-            ai_call_log_store=ai_call_log_store,
-            settings=settings,
-        )
+        try:
+            next_question_override = build_next_question_override(
+                current_state=current_state,
+                answer_text=payload.answer_text,
+                provider_store=provider_store,
+                ai_call_log_store=ai_call_log_store,
+                settings=settings,
+            )
+        except Exception:
+            logger.warning("Failed to generate adaptive follow-up for session_id=%s", session_id, exc_info=True)
 
     try:
         state = interview_store.answer_current_question(
@@ -284,7 +290,7 @@ def answer_interview_question(
 
 @router.get("/{session_id}/report", response_model=InterviewReportResponse)
 def read_interview_report(
-    session_id: str,
+    session_id: Annotated[str, Path(min_length=1, max_length=120)],
     claims: TokenClaims = Depends(get_current_user_claims),
     interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
 ) -> InterviewReportResponse:

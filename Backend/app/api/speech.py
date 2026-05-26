@@ -1,3 +1,5 @@
+from pathlib import PurePath
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from app.api.dependencies import TokenClaims, get_current_user_claims
@@ -12,6 +14,22 @@ from app.services.tencent_speech import TencentSpeechClient
 
 router = APIRouter(prefix="/speech", tags=["speech"])
 
+ALLOWED_AUDIO_CONTENT_TYPES = {
+    "audio/aac",
+    "audio/flac",
+    "audio/m4a",
+    "audio/mp3",
+    "audio/mp4",
+    "audio/mpeg",
+    "audio/ogg",
+    "audio/wav",
+    "audio/webm",
+    "audio/x-m4a",
+    "audio/x-wav",
+    "video/webm",
+}
+ALLOWED_AUDIO_EXTENSIONS = {".aac", ".flac", ".m4a", ".mp3", ".ogg", ".wav", ".webm"}
+
 
 @router.post("/asr", response_model=SpeechRecognitionResponse)
 async def recognize_speech(
@@ -23,11 +41,10 @@ async def recognize_speech(
     call_log_store: AICallLogStore = Depends(get_ai_call_log_store),
     settings: Settings = Depends(get_settings),
 ) -> SpeechRecognitionResponse:
-    audio_bytes = await audio_file.read()
+    _validate_audio_upload(audio_file)
+    audio_bytes = await _read_audio_upload_limited(audio_file, settings.speech_audio_max_upload_bytes)
     if not audio_bytes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="audio_file_empty")
-    if len(audio_bytes) > settings.speech_audio_max_upload_bytes:
-        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="audio_file_too_large")
 
     router_service = AIServiceRouter(provider_store.list_configs())
     speech_client = TencentSpeechClient(settings)
@@ -106,3 +123,25 @@ def synthesize_speech(
         mime_type=result.value.mime_type,
         provider_id=result.provider.id,
     )
+
+
+def _validate_audio_upload(audio_file: UploadFile) -> None:
+    content_type = (audio_file.content_type or "").split(";")[0].strip().lower()
+    extension = PurePath(audio_file.filename or "").suffix.lower()
+    if content_type in ALLOWED_AUDIO_CONTENT_TYPES or extension in ALLOWED_AUDIO_EXTENSIONS:
+        return
+    raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="unsupported_audio_format")
+
+
+async def _read_audio_upload_limited(audio_file: UploadFile, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await audio_file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="audio_file_too_large")
+        chunks.append(chunk)
+    return b"".join(chunks)

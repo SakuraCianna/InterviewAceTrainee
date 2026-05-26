@@ -12,9 +12,9 @@ class InterviewType(StrEnum):
 
 
 class InterviewStartRequest(BaseModel):
-    session_id: str = Field(min_length=1)
+    session_id: str = Field(min_length=1, max_length=120)
     interview_type: InterviewType | None = None
-    material_id: str | None = None
+    material_id: str | None = Field(default=None, max_length=120)
 
 
 class InterviewQuestion(BaseModel):

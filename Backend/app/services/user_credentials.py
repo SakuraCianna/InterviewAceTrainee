@@ -112,8 +112,7 @@ class InMemoryUserCredentialStore(UserCredentialStore):
         normalized_email = self._normalize_email(email)
         user = _memory_users.get(normalized_email)
         if user is None:
-            user = UserAccountRecord(email=normalized_email)
-            _memory_users[normalized_email] = user
+            raise UserNotFoundError("user not found")
         user.is_active = is_active
         return user.is_active
 
@@ -222,14 +221,16 @@ class RedisUserCredentialStore(UserCredentialStore):
 
     def set_active(self, email: str, is_active: bool) -> bool:
         normalized_email = self._normalize_email(email)
+        existing_record = self.get_user_record(normalized_email)
+        if existing_record is None:
+            raise UserNotFoundError("user not found")
         if not hasattr(self._redis, "hset"):
             return is_active
-        existing_record = self.get_user_record(normalized_email)
         self._redis.hset(
             self._profile_key(normalized_email),
             mapping={
                 "email": normalized_email,
-                "role": existing_record.role if existing_record is not None else "user",
+                "role": existing_record.role,
                 "is_active": "1" if is_active else "0",
             },
         )
@@ -342,10 +343,8 @@ class DatabaseUserCredentialStore(UserCredentialStore):
         normalized_email = self._normalize_email(email)
         user = self._get_user(normalized_email)
         if user is None:
-            user = User(email=normalized_email, password_hash=None, role="user", credit_balance=0, is_active=is_active)
-            self._session.add(user)
-        else:
-            user.is_active = is_active
+            raise UserNotFoundError("user not found")
+        user.is_active = is_active
         self._session.commit()
         return user.is_active
 

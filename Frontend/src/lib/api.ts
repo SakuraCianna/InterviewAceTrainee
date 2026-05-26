@@ -57,6 +57,7 @@ const API_ERROR_MESSAGES: Record<string, string> = {
   tencent_cloud_credentials_missing: "腾讯云密钥未配置，请联系管理员处理。",
   tts_provider_failed: "语音合成服务调用失败，请稍后重试。",
   tts_provider_not_available: "语音合成服务暂时不可用，请联系管理员检查配置。",
+  unsupported_audio_format: "录音格式暂不支持，请使用 WAV、MP3、M4A 或 WebM 格式。",
   unsupported_email_provider: "当前邮件服务供应商不受支持，请联系管理员处理。",
   unsupported_resume_format: "当前支持 TXT、PDF、DOCX 和常见图片格式，请更换简历文件。",
   user_disabled: "该账号已被停用，请联系管理员处理。",

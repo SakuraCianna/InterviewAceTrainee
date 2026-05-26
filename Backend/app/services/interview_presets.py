@@ -68,12 +68,12 @@ def build_preset_prompt_context(
     matches = match_interview_presets(interview_type, material_context, round_name)
     if not matches:
         return ""
+    if len(matches) > 1 and matches[0].score == matches[1].score:
+        return ""
     sections: list[str] = []
-    for match in matches:
-        content = read_preset_markdown(match.preset)
-        if not content:
-            continue
-        sections.append(f"## {match.title}\n{content.strip()}")
+    content = read_preset_markdown(matches[0].preset)
+    if content:
+        sections.append(f"## {matches[0].title}\n{content.strip()}")
     text = "\n\n---\n\n".join(sections)
     return text[:max_chars]
 
@@ -83,8 +83,10 @@ def best_preset_hint(
     material_context: InterviewMaterialContext | None = None,
     round_name: str | None = None,
 ) -> tuple[str | None, list[str], list[str]]:
-    matches = match_interview_presets(interview_type, material_context, round_name, limit=1)
+    matches = match_interview_presets(interview_type, material_context, round_name, limit=3)
     if not matches:
+        return None, [], []
+    if len(matches) > 1 and matches[0].score == matches[1].score:
         return None, [], []
     preset = matches[0].preset
     return preset.title, list(preset.question_angles), list(preset.report_focus)
@@ -149,22 +151,27 @@ def _query_text(
 
 
 def _preset_score(preset: InterviewPreset, query: str, round_name: str | None) -> int:
-    score = _round_score(preset, round_name)
+    round_score = _round_score(preset, round_name)
+    alias_score = 0
+    angle_score = 0
+    query_tokens = set(query.split())
     for alias in preset.aliases:
         normalized_alias = normalize_match_text(alias)
         if not normalized_alias:
             continue
-        if normalized_alias in query:
-            score += 100 + min(len(normalized_alias), 24)
+        if _alias_matches_query(normalized_alias, query, query_tokens):
+            alias_score += 100 + min(len(normalized_alias), 24)
             continue
         alias_tokens = [token for token in normalized_alias.split() if len(token) >= 2]
-        if alias_tokens and all(token in query for token in alias_tokens):
-            score += 42 + len(alias_tokens) * 3
+        if alias_tokens and all(_token_matches_query(token, query, query_tokens) for token in alias_tokens):
+            alias_score += 42 + len(alias_tokens) * 3
     for angle in preset.question_angles:
         for token in _meaningful_tokens(angle):
             if token in query:
-                score += 4
-    return score
+                angle_score += 4
+    if alias_score <= 0:
+        return round_score
+    return round_score + alias_score + min(angle_score, 24)
 
 
 def _round_score(preset: InterviewPreset, round_name: str | None) -> int:
@@ -185,3 +192,19 @@ def normalize_match_text(value: str) -> str:
 def _meaningful_tokens(value: str) -> list[str]:
     normalized = normalize_match_text(value)
     return [token for token in normalized.split() if len(token) >= 2][:8]
+
+
+def _alias_matches_query(normalized_alias: str, query: str, query_tokens: set[str]) -> bool:
+    if _requires_token_boundary(normalized_alias):
+        return normalized_alias in query_tokens
+    return normalized_alias in query
+
+
+def _token_matches_query(token: str, query: str, query_tokens: set[str]) -> bool:
+    if _requires_token_boundary(token):
+        return token in query_tokens
+    return token in query
+
+
+def _requires_token_boundary(value: str) -> bool:
+    return value.isascii() and len(value) <= 4 and any(char.isalnum() for char in value)

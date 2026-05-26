@@ -2,6 +2,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 
+from app.core.config import Settings, get_settings
 from app.core.security import ACCESS_TOKEN_COOKIE_NAME, decode_access_token
 from app.services.auth_sessions import AuthSessionStore, get_auth_session_store
 from app.services.user_credentials import UserCredentialStore, get_user_credential_store
@@ -15,7 +16,15 @@ async def interview_socket(
     session_id: str,
     auth_session_store: AuthSessionStore = Depends(get_auth_session_store),
     user_store: UserCredentialStore = Depends(get_user_credential_store),
+    settings: Settings = Depends(get_settings),
 ) -> None:
+    if not _is_allowed_origin(websocket.headers.get("origin"), settings):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    if not 1 <= len(session_id) <= 120:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     token = websocket.cookies.get(ACCESS_TOKEN_COOKIE_NAME)
     if not token:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
@@ -67,3 +76,10 @@ async def interview_socket(
             )
     except WebSocketDisconnect:
         return
+
+
+def _is_allowed_origin(origin: str | None, settings: Settings) -> bool:
+    if not origin:
+        return True
+    allowed_origins = {item.strip().rstrip("/") for item in settings.cors_origins.split(",") if item.strip()}
+    return origin.rstrip("/") in allowed_origins
