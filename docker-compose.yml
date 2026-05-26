@@ -12,8 +12,6 @@ services:
       PGDATA: /var/lib/postgresql/data
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mianba -d mianba"]
       interval: 10s
@@ -27,8 +25,6 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -52,8 +48,8 @@ services:
         condition: service_healthy
     volumes:
       - ./database_backups:/app/database_backups
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
 
   frontend:
     build:
@@ -62,10 +58,8 @@ services:
         VITE_ADMIN_ENTRY_PATH: /console-mianba
     container_name: mianba-frontend
     restart: unless-stopped
-    depends_on:
-      - backend
-    ports:
-      - "4173:4173"
+    expose:
+      - "80"
 
   nginx:
     image: nginx:1.29-alpine
