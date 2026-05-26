@@ -1,14 +1,17 @@
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 WORKDIR /app
-ENV DATABASE_BACKUP_DIR=/app/database_backups
+ENV DATABASE_BACKUP_DIR=/app/database_backups \
+    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_HTTP_TIMEOUT=300 \
+    UV_HTTP_RETRIES=5
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client \
+RUN apt-get update -o Acquire::Retries=5 \
+    && apt-get install -y --no-install-recommends -o Acquire::Retries=5 postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock* ./
-RUN uv sync --no-dev
+RUN uv sync --frozen --no-dev
 
 COPY app ./app
 COPY alembic.ini ./alembic.ini
