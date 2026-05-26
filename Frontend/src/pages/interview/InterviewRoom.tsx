@@ -130,6 +130,13 @@ const PCM_SAMPLE_RATE = 16000;
 const PCM_CHUNK_MS = 200;
 const PCM_CHUNK_SAMPLES = Math.floor(PCM_SAMPLE_RATE * (PCM_CHUNK_MS / 1000));
 const FINAL_TRANSCRIPT_TIMEOUT_MS = 10_000;
+const ANSWER_LIMIT_MS = 300_000;
+const SILENCE_AUTO_FINISH_MS = 3_000;
+const SILENCE_CALIBRATION_MS = 900;
+const MIN_VOICE_RMS = 0.018;
+const VOICE_MARGIN_RMS = 0.012;
+const VOICE_NOISE_RATIO = 2.3;
+const RECORDING_PROGRESS_INTERVAL_MS = 200;
 
 function createSessionId() {
   const random = Math.random().toString(36).slice(2, 8);
@@ -177,25 +184,42 @@ function encodePcm16(samples: Float32Array) {
   return buffer;
 }
 
-function getAnswerLimitMs(interviewType: InterviewType, roundName?: string) {
-  if (interviewType === "ielts") {
-    if (roundName?.toLowerCase().includes("part 2")) {
-      return 130_000;
-    }
-    return 120_000;
-  }
-  return 180_000;
+function getAnswerLimitMs(_interviewType?: InterviewType, _roundName?: string) {
+  return ANSWER_LIMIT_MS;
 }
 
 function formatAnswerLimit(interviewType: InterviewType, roundName?: string) {
   const limitSeconds = Math.round(getAnswerLimitMs(interviewType, roundName) / 1000);
-  if (limitSeconds >= 180) {
-    return "最多 3 分钟";
+  if (limitSeconds >= 300) {
+    return "最多 5 分钟";
   }
-  if (limitSeconds >= 130) {
-    return "最多 2 分钟";
+  if (limitSeconds >= 60) {
+    return `最多 ${Math.round(limitSeconds / 60)} 分钟`;
   }
   return `最多 ${limitSeconds} 秒`;
+}
+
+function formatDuration(ms: number) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function calculateRms(samples: Float32Array) {
+  if (samples.length === 0) {
+    return 0;
+  }
+  let sum = 0;
+  samples.forEach((sample) => {
+    sum += sample * sample;
+  });
+  return Math.sqrt(sum / samples.length);
+}
+
+function isEffectiveVoice(rms: number, noiseFloor: number) {
+  const threshold = Math.max(MIN_VOICE_RMS, noiseFloor + VOICE_MARGIN_RMS, noiseFloor * VOICE_NOISE_RATIO);
+  return rms > threshold;
 }
 
 function microphoneLabel(device: MediaDeviceInfo, index: number) {
@@ -239,6 +263,9 @@ export function InterviewRoom() {
   const [isRecording, setIsRecording] = useState(false);
   const [isPreparingAnswer, setIsPreparingAnswer] = useState(false);
   const [isFinishingAnswer, setIsFinishingAnswer] = useState(false);
+  const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
+  const [answerLimitMs, setAnswerLimitMs] = useState(ANSWER_LIMIT_MS);
+  const [silenceRemainingMs, setSilenceRemainingMs] = useState(SILENCE_AUTO_FINISH_MS);
   const [microphoneReady, setMicrophoneReady] = useState(false);
   const [microphoneDevices, setMicrophoneDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedMicrophoneId, setSelectedMicrophoneId] = useState("");
@@ -253,6 +280,13 @@ export function InterviewRoom() {
   const asrSocketRef = useRef<WebSocket | null>(null);
   const recorderRef = useRef<AudioRecorderSession | null>(null);
   const recordingTimeoutRef = useRef<number | null>(null);
+  const recordingProgressIntervalRef = useRef<number | null>(null);
+  const recordingStartedAtRef = useRef(0);
+  const lastVoiceAtRef = useRef(0);
+  const hasDetectedAnswerVoiceRef = useRef(false);
+  const noiseFloorRef = useRef(0.006);
+  const voiceFrameCountRef = useRef(0);
+  const autoFinishingRef = useRef(false);
   const finalTranscriptWaiterRef = useRef<TranscriptWaiter | null>(null);
   const microphoneTestRef = useRef<MicrophoneTestSession | null>(null);
   const microphoneAnimationRef = useRef<number | null>(null);
@@ -264,6 +298,7 @@ export function InterviewRoom() {
   const progressText = interviewState
     ? `${Math.min(interviewState.current_step_index + 1, interviewState.total_steps)} / ${interviewState.total_steps}`
     : "未开始";
+  const recordingProgressPercent = Math.min(1, recordingElapsedMs / Math.max(answerLimitMs, 1));
 
   const socketSessionId = useMemo(() => interviewState?.session_id ?? activeSession?.session_id ?? sessionId, [activeSession, interviewState, sessionId]);
 
@@ -621,6 +656,81 @@ export function InterviewRoom() {
     socketRef.current.send(JSON.stringify({ type, session_id: socketSessionId, avatar_state: state }));
   }
 
+  function stopRecordingProgressTimer() {
+    if (recordingProgressIntervalRef.current !== null) {
+      window.clearInterval(recordingProgressIntervalRef.current);
+      recordingProgressIntervalRef.current = null;
+    }
+  }
+
+  function startRecordingProgressTimer(limitMs: number) {
+    stopRecordingProgressTimer();
+    const update = () => {
+      const now = Date.now();
+      const elapsedMs = Math.min(limitMs, Math.max(0, now - recordingStartedAtRef.current));
+      const idleBase = hasDetectedAnswerVoiceRef.current ? lastVoiceAtRef.current : recordingStartedAtRef.current;
+      const remainingSilenceMs = Math.max(0, SILENCE_AUTO_FINISH_MS - Math.max(0, now - idleBase));
+      setRecordingElapsedMs(elapsedMs);
+      setSilenceRemainingMs(remainingSilenceMs);
+    };
+    update();
+    recordingProgressIntervalRef.current = window.setInterval(update, RECORDING_PROGRESS_INTERVAL_MS);
+  }
+
+  function resetRecordingMeters(limitMs = ANSWER_LIMIT_MS) {
+    setRecordingElapsedMs(0);
+    setAnswerLimitMs(limitMs);
+    setSilenceRemainingMs(SILENCE_AUTO_FINISH_MS);
+    recordingStartedAtRef.current = Date.now();
+    lastVoiceAtRef.current = recordingStartedAtRef.current;
+    hasDetectedAnswerVoiceRef.current = false;
+    noiseFloorRef.current = 0.006;
+    voiceFrameCountRef.current = 0;
+    autoFinishingRef.current = false;
+  }
+
+  function handleAnswerAudioLevel(samples: Float32Array) {
+    const startedAt = recordingStartedAtRef.current;
+    if (!startedAt || autoFinishingRef.current) {
+      return;
+    }
+    const now = Date.now();
+    const rms = calculateRms(samples);
+    if (now - startedAt < SILENCE_CALIBRATION_MS) {
+      const cappedRms = Math.min(rms, 0.02);
+      noiseFloorRef.current = Math.min(0.016, Math.max(0.004, noiseFloorRef.current * 0.88 + cappedRms * 0.12));
+      if (rms > MIN_VOICE_RMS * 1.4) {
+        voiceFrameCountRef.current = Math.min(4, voiceFrameCountRef.current + 1);
+        if (voiceFrameCountRef.current >= 2) {
+          hasDetectedAnswerVoiceRef.current = true;
+          lastVoiceAtRef.current = now;
+        }
+      }
+      return;
+    }
+
+    const voiceDetected = isEffectiveVoice(rms, noiseFloorRef.current);
+    if (voiceDetected) {
+      voiceFrameCountRef.current = Math.min(4, voiceFrameCountRef.current + 1);
+    } else {
+      voiceFrameCountRef.current = Math.max(0, voiceFrameCountRef.current - 1);
+      noiseFloorRef.current = Math.min(0.05, noiseFloorRef.current * 0.96 + rms * 0.04);
+    }
+
+    if (voiceFrameCountRef.current >= 2) {
+      hasDetectedAnswerVoiceRef.current = true;
+      lastVoiceAtRef.current = now;
+      return;
+    }
+
+    const idleBase = hasDetectedAnswerVoiceRef.current ? lastVoiceAtRef.current : startedAt;
+    if (now - idleBase >= SILENCE_AUTO_FINISH_MS) {
+      autoFinishingRef.current = true;
+      setSocketMessage("连续 3 秒未检测到有效人声，系统已自动结束本轮回答。");
+      void finishAnswer();
+    }
+  }
+
   function flushRecorderAudio(recorder: AudioRecorderSession) {
     if (recorder.pendingSamples.length === 0 || recorder.socket.readyState !== WebSocket.OPEN) {
       recorder.pendingSamples = new Float32Array();
@@ -633,6 +743,7 @@ export function InterviewRoom() {
   function stopRecorder(options: { sendEnd?: boolean } = {}) {
     const recorder = recorderRef.current;
     recorderRef.current = null;
+    stopRecordingProgressTimer();
     if (recordingTimeoutRef.current !== null) {
       window.clearTimeout(recordingTimeoutRef.current);
       recordingTimeoutRef.current = null;
@@ -769,6 +880,11 @@ export function InterviewRoom() {
           return;
         }
         if (finalTranscriptWaiterRef.current && !finalTranscriptWaiterRef.current.settled) {
+          const fallbackTranscript = transcriptPreviewRef.current.trim();
+          if (fallbackTranscript) {
+            resolveTranscriptWaiter(fallbackTranscript);
+            return;
+          }
           rejectTranscriptWaiter(new Error("实时语音识别连接已断开。"));
         }
       };
@@ -800,10 +916,12 @@ export function InterviewRoom() {
 
     let stream: MediaStream | null = null;
     let context: AudioContext | null = null;
+    const currentAnswerLimitMs = getAnswerLimitMs(interviewState.interview_type, interviewState.current_question?.round_name);
     setIsPreparingAnswer(true);
     try {
       stopRecorder();
       setTranscript("");
+      resetRecordingMeters(currentAnswerLimitMs);
       createTranscriptWaiter();
       setSocketMessage("正在打开麦克风并建立实时语音识别通道。");
       stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints());
@@ -822,6 +940,7 @@ export function InterviewRoom() {
       };
       processor.onaudioprocess = (event) => {
         const inputSamples = new Float32Array(event.inputBuffer.getChannelData(0));
+        handleAnswerAudioLevel(inputSamples);
         const pcmSamples = resampleAudio(inputSamples, recorder.sampleRate, PCM_SAMPLE_RATE);
         recorder.pendingSamples = appendSamples(recorder.pendingSamples, pcmSamples);
         while (recorder.pendingSamples.length >= PCM_CHUNK_SAMPLES && recorder.socket.readyState === WebSocket.OPEN) {
@@ -839,7 +958,7 @@ export function InterviewRoom() {
           setSocketMessage("已到建议回答时长，本轮回答将自动收尾并提交转写。");
           void finishAnswer();
         }
-      }, getAnswerLimitMs(interviewState.interview_type, interviewState.current_question?.round_name));
+      }, currentAnswerLimitMs);
     } catch (error) {
       stream?.getTracks().forEach((track) => track.stop());
       void context?.close();
@@ -853,6 +972,7 @@ export function InterviewRoom() {
 
     setIsPreparingAnswer(false);
     setIsRecording(true);
+    startRecordingProgressTimer(currentAnswerLimitMs);
     setStateIndex(2);
     setSocketMessage(`正在实时转写回答，${formatAnswerLimit(interviewState.interview_type, interviewState.current_question?.round_name)}。说完后点击“回答完毕”。`);
     sendSocketEvent("answer_started");
@@ -947,6 +1067,7 @@ export function InterviewRoom() {
     setIsPreparingAnswer(false);
     setIsRecording(false);
     setIsFinishingAnswer(false);
+    resetRecordingMeters();
     setSocketState("已退出");
     setSocketMessage("已退出登录，可以重新登录其他账号。");
   }
@@ -958,6 +1079,7 @@ export function InterviewRoom() {
     setIsRecording(false);
     setIsPreparingAnswer(false);
     setIsFinishingAnswer(false);
+    resetRecordingMeters();
     setInterviewState(null);
     setActiveSession(null);
     setSessionId(createSessionId());
@@ -992,7 +1114,7 @@ export function InterviewRoom() {
             <span className="eyebrow">Microphone Check</span>
             <h1>先确认系统能听清，再进入正式面试。</h1>
             <p>
-              面试环节会采用腾讯云实时语音识别，回答时边说边转写，适合 2 到 3 分钟的完整表达。进入前先选择麦克风并说一句话，音量条有明显波动后再进入训练房间。
+              面试环节会采用腾讯云实时语音识别，回答时边说边转写，单轮回答最长 5 分钟。进入前先选择麦克风并说一句话，音量条有明显波动后再进入训练房间。
             </p>
             <div className="microphone-proof">
               <span>
@@ -1095,6 +1217,27 @@ export function InterviewRoom() {
                 <span>{isFinishingAnswer ? "正在整理本轮回答" : isRecording ? "实时转写预览" : "上一轮转写"}</span>
               </div>
               <p>{transcriptPreview || "已经开始监听，说话后这里会显示实时转写内容。"}</p>
+            </div>
+          )}
+
+          {(isRecording || isFinishingAnswer) && (
+            <div className="recording-progress-card">
+              <div className="recording-progress-heading">
+                <span>
+                  <AppIcon icon="lucide:activity" size={17} />
+                  回答计时
+                </span>
+                <strong>
+                  {formatDuration(recordingElapsedMs)} / {formatDuration(answerLimitMs)}
+                </strong>
+              </div>
+              <div className="recording-progress-track" aria-label="本轮回答进度">
+                <span style={{ transform: `scaleX(${recordingProgressPercent})` }} />
+              </div>
+              <div className="recording-progress-meta">
+                <span>最长 5 分钟, 可提前点击回答完毕</span>
+                <span>静音自动收尾 {formatDuration(silenceRemainingMs)}</span>
+              </div>
             </div>
           )}
 

@@ -28,7 +28,7 @@ DEFAULT_SYSTEM_CONFIGS: dict[str, SystemConfig] = {
     "password_login_enabled": SystemConfig("password_login_enabled", True, "是否允许普通用户密码登录"),
     "email_code_login_enabled": SystemConfig("email_code_login_enabled", True, "是否允许普通用户邮箱验证码登录"),
     "max_interview_steps": SystemConfig("max_interview_steps", 8, "单场训练最大轮数上限"),
-    "max_answer_seconds": SystemConfig("max_answer_seconds", 180, "单轮回答建议最长秒数"),
+    "max_answer_seconds": SystemConfig("max_answer_seconds", 300, "单轮回答建议最长秒数"),
     "default_llm_provider_id": SystemConfig("default_llm_provider_id", PRIMARY_LLM_PROVIDER_ID, "默认 LLM 配置 ID"),
     "default_asr_provider_id": SystemConfig("default_asr_provider_id", PRIMARY_ASR_PROVIDER_ID, "默认 ASR 配置 ID"),
     "default_tts_provider_id": SystemConfig("default_tts_provider_id", PRIMARY_TTS_PROVIDER_ID, "默认 TTS 配置 ID"),

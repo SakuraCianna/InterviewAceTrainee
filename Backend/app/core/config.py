@@ -31,8 +31,9 @@ class Settings(BaseSettings):
     tencent_asr_engine_model_type: str = "16k_zh"
     tencent_asr_ielts_engine_model_type: str = "16k_en"
     tencent_realtime_asr_need_vad: int = 1
-    tencent_realtime_asr_max_seconds: int = 240
-    tencent_tts_voice_type: int = 101001
+    tencent_realtime_asr_max_seconds: int = 300
+    tencent_tts_voice_type: int = 603006
+    tencent_tts_voice_types: str = "603006,502005,602005,603005,502006,603003"
     provider_secret_encryption_key: str = ""
     interview_material_max_upload_bytes: int = 5 * 1024 * 1024
     speech_audio_max_upload_bytes: int = 30 * 1024 * 1024

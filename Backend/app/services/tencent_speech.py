@@ -46,12 +46,14 @@ class SpeechSynthesisResult:
     mime_type: str
     provider_request_id: str | None = None
     characters: int | None = None
+    voice_type: int | None = None
 
     @property
     def call_metadata(self) -> dict:
         return {
             "provider_request_id": self.provider_request_id,
             "characters": self.characters,
+            "usage_json": {"voice_type": self.voice_type} if self.voice_type is not None else None,
         }
 
 
@@ -112,6 +114,7 @@ class TencentSpeechClient:
         self._ensure_tencent_provider(config)
         self._ensure_credentials()
         client = self._tts_client()
+        voice_type = self._resolve_tts_voice_type(text=text, session_id=session_id)
         request = tts_models.TextToVoiceRequest()
         request.from_json_string(
             json.dumps(
@@ -119,7 +122,7 @@ class TencentSpeechClient:
                     "Text": text,
                     "SessionId": session_id or str(uuid4()),
                     "ModelType": 1,
-                    "VoiceType": self._settings.tencent_tts_voice_type,
+                    "VoiceType": voice_type,
                     "Codec": "mp3",
                 }
             )
@@ -138,6 +141,7 @@ class TencentSpeechClient:
             mime_type="audio/mpeg",
             provider_request_id=str(payload.get("RequestId") or "") or None,
             characters=len(text),
+            voice_type=voice_type,
         )
 
     def build_realtime_asr_url(
@@ -234,6 +238,16 @@ class TencentSpeechClient:
             return self._settings.tencent_asr_ielts_engine_model_type
         return self._settings.tencent_asr_engine_model_type
 
+    def _resolve_tts_voice_type(self, *, text: str, session_id: str) -> int:
+        voice_types = _parse_voice_types(self._settings.tencent_tts_voice_types)
+        if not voice_types:
+            return self._settings.tencent_tts_voice_type
+        if len(voice_types) == 1:
+            return voice_types[0]
+        seed = f"{session_id}:{text[:120]}".encode("utf-8")
+        digest = hashlib.sha256(seed).hexdigest()
+        return voice_types[int(digest[:8], 16) % len(voice_types)]
+
 
 def _estimate_audio_duration_ms(audio_bytes: bytes, audio_format: str) -> int | None:
     if audio_format != "wav" or len(audio_bytes) < 44 or audio_bytes[:4] != b"RIFF":
@@ -249,3 +263,18 @@ def _estimate_audio_duration_ms(audio_bytes: bytes, audio_format: str) -> int | 
     if bytes_per_second <= 0:
         return None
     return int(data_size / bytes_per_second * 1000)
+
+
+def _parse_voice_types(raw_value: str) -> list[int]:
+    voice_types: list[int] = []
+    for item in raw_value.split(","):
+        value = item.strip()
+        if not value:
+            continue
+        try:
+            voice_type = int(value)
+        except ValueError:
+            continue
+        if voice_type not in voice_types:
+            voice_types.append(voice_type)
+    return voice_types
