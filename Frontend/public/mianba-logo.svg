@@ -1,59 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
   <title id="title">面霸练习生标志</title>
-  <desc id="desc">由语音波形、面试轮次轨道和四个训练场景节点组成的产品图标。</desc>
+  <desc id="desc">Google 风格四色节点与面试对话符号组成的产品图标。</desc>
   <defs>
-    <linearGradient id="panel" x1="18" y1="12" x2="112" y2="116" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFFFFF"/>
-      <stop offset=".58" stop-color="#F2F7FF"/>
-      <stop offset="1" stop-color="#EAF8F4"/>
-    </linearGradient>
-    <linearGradient id="brand" x1="34" y1="38" x2="96" y2="92" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#2F6DF6"/>
-      <stop offset=".5" stop-color="#18B7D6"/>
-      <stop offset="1" stop-color="#00A878"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="32" y1="30" x2="96" y2="100" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#D9FF74"/>
-      <stop offset="1" stop-color="#FFB84D"/>
-    </linearGradient>
-    <filter id="shadow" x="-10" y="-8" width="148" height="152" color-interpolation-filters="sRGB">
-      <feDropShadow dx="0" dy="14" stdDeviation="10" flood-color="#10141F" flood-opacity=".18"/>
+    <filter id="softShadow" x="-16" y="-12" width="160" height="164" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="14" stdDeviation="12" flood-color="#202124" flood-opacity=".16"/>
     </filter>
   </defs>
-
-  <rect x="12" y="12" width="104" height="104" rx="28" fill="url(#panel)" filter="url(#shadow)"/>
-  <rect x="20" y="20" width="88" height="88" rx="22" fill="none" stroke="#D9E5FF" stroke-width="2.5"/>
-
-  <circle cx="64" cy="64" r="34" fill="#10141F"/>
-  <path
-    d="M31 64C31 45.778 45.778 31 64 31C77.064 31 88.356 38.591 93.713 49.6"
-    fill="none"
-    stroke="url(#brand)"
-    stroke-width="5"
-    stroke-linecap="round"
-  />
-  <path
-    d="M97 64C97 82.222 82.222 97 64 97C50.936 97 39.644 89.409 34.287 78.4"
-    fill="none"
-    stroke="#CFE0FF"
-    stroke-width="5"
-    stroke-linecap="round"
-  />
-
-  <g stroke-linecap="round" stroke-width="7">
-    <path d="M48 66V62" stroke="#2F6DF6"/>
-    <path d="M56 73V55" stroke="#19A9E8"/>
-    <path d="M64 79V49" stroke="#18B7D6"/>
-    <path d="M72 73V55" stroke="#00A878"/>
-    <path d="M80 66V62" stroke="#D9FF74"/>
-  </g>
-
-  <circle cx="40" cy="40" r="6" fill="#D9FF74"/>
-  <circle cx="88" cy="40" r="6" fill="#2F6DF6"/>
-  <circle cx="40" cy="88" r="6" fill="#18B7D6"/>
-  <circle cx="88" cy="88" r="6" fill="#FFB84D"/>
-  <circle cx="40" cy="40" r="2.2" fill="#10141F" opacity=".14"/>
-  <circle cx="88" cy="40" r="2.2" fill="#10141F" opacity=".14"/>
-  <circle cx="40" cy="88" r="2.2" fill="#10141F" opacity=".14"/>
-  <circle cx="88" cy="88" r="2.2" fill="#10141F" opacity=".14"/>
+  <rect x="12" y="12" width="104" height="104" rx="30" fill="#fff" filter="url(#softShadow)"/>
+  <rect x="22" y="22" width="84" height="84" rx="24" fill="#F8FAFF" stroke="#DADCE0" stroke-width="2"/>
+  <path d="M38 82V54c0-8.284 6.716-15 15-15h22c8.284 0 15 6.716 15 15v16c0 8.284-6.716 15-15 15H56l-16 13c-1.314 1.067-3.254.132-3.254-1.561V82H38Z" fill="#202124"/>
+  <path d="M48 63h32" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="8"/>
+  <path d="M52 76h19" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="8" opacity=".9"/>
+  <circle cx="42" cy="41" r="8" fill="#4285F4"/>
+  <circle cx="64" cy="32" r="8" fill="#EA4335"/>
+  <circle cx="86" cy="41" r="8" fill="#FBBC04"/>
+  <circle cx="98" cy="65" r="8" fill="#34A853"/>
+  <path d="M42 41c5.2-5.5 12.4-9 22-9s16.8 3.5 22 9c7 7.4 10.6 15.4 12 24" fill="none" stroke="#E8F0FE" stroke-linecap="round" stroke-width="5"/>
 </svg>

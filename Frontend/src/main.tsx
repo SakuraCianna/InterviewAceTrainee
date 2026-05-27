@@ -2,6 +2,18 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import "antd-mobile/es/global/global.css";
+import "antd-mobile/es/components/auto-center/auto-center.css";
+import "antd-mobile/es/components/button/button.css";
+import "antd-mobile/es/components/dot-loading/dot-loading.css";
+import "antd-mobile/es/components/grid/grid.css";
+import "antd-mobile/es/components/mask/mask.css";
+import "antd-mobile/es/components/safe-area/safe-area.css";
+import "antd-mobile/es/components/selector/selector.css";
+import "antd-mobile/es/components/space/space.css";
+import "antd-mobile/es/components/spin-loading/spin-loading.css";
+import "antd-mobile/es/components/tabs/tabs.css";
+import "antd-mobile/es/components/toast/toast.css";
 import "./styles/index.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
@@ -11,4 +23,3 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     </BrowserRouter>
   </React.StrictMode>
 );
-

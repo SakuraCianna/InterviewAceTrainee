@@ -12,6 +12,22 @@ class PasswordLoginRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class PasswordChangeRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=6)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class PasswordMutationResponse(BaseModel):
+    email: EmailStr
+    message: str
+
+
 class PasswordLoginResponse(BaseModel):
     access_token: str
     token_type: str

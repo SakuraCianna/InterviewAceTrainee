@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { EChartsOption } from "echarts";
 import { AppIcon } from "../../components/AppIcon";
+import { BrandLogo } from "../../components/BrandLogo";
 import { csrfHeaders, getApiErrorMessage } from "../../lib/api";
 
 type EChartsModule = typeof import("echarts");
@@ -997,7 +998,7 @@ export function AdminShell() {
     <main className="workspace-page admin-page">
       <header className="workspace-header">
         <a href="/" className="brand-mark">
-          <AppIcon icon="solar:soundwave-circle-bold-duotone" size={24} />
+          <BrandLogo size={28} />
           面霸练习生
         </a>
         <div className="workspace-header-actions">

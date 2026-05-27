@@ -38,8 +38,8 @@ const modules = [
 
 const flow = [
   ["01", "选择目标", "工作、复试、考公、雅思四类场景分别进入不同流程。"],
-  ["02", "开场提问", "面试官播放问题，页面不放聊天框，避免用户依赖文字提示。"],
-  ["03", "用户语音回答", "用户组织语言并说完后，手动点击“回答完毕”。"],
+  ["02", "开场提问", "面试官播放问题，页面不放聊天框，避免依赖文字提示。"],
+  ["03", "语音作答", "组织语言并说完后，手动点击“回答完毕”。"],
   ["04", "继续追问", "面试官根据上一轮回答继续深挖，形成真实压力感。"],
   ["05", "生成报告", "按场景输出评分、追问记录、短板和下一轮训练建议。"],
 ];
@@ -69,7 +69,7 @@ const reportPreviews = [
       ["项目深挖", 81],
       ["岗位匹配", 84],
     ],
-    followUps: ["为什么这次架构取舍优先保证吞吐？", "如果线上故障复现不了，你会怎么推进？"],
+    followUps: ["这次架构取舍为什么优先保证吞吐？", "如果线上故障复现不了，下一步如何推进？"],
     advice: "下一轮重点练高并发项目里的取舍、指标和失败复盘。",
     evidence: "保留 3 轮问答、关键追问、评分维度和人工备注入口。",
     nextRound: "建议二面专项",
@@ -83,7 +83,7 @@ const reportPreviews = [
       ["科研潜力", 85],
       ["导师沟通", 83],
     ],
-    followUps: ["你为什么选择这个研究方向？", "毕业设计里最核心的技术难点是什么？"],
+    followUps: ["选择这个研究方向的主要原因是什么？", "毕业设计里最核心的技术难点是什么？"],
     advice: "建议把毕设、论文阅读和研究方向整理成 90 秒表达。",
     evidence: "记录自我介绍、专业基础、科研方向和导师沟通四类表现。",
     nextRound: "建议基础补强",
@@ -108,7 +108,7 @@ const adminFeatures = [
   ["lucide:coins", "微信联系开通", "添加官方微信 Teptysuki666 后，可人工确认并发放对应训练次数。"],
   ["lucide:route", "稳定模型路由", "面试提问、语音识别和报告生成保留备用供应商，减少单一模型异常带来的中断。"],
   ["lucide:file-clock", "记录可追溯", "登录、开通、扣次、训练过程和报告生成都会保留记录，便于售后和争议核对。"],
-  ["lucide:activity", "训练状态清晰", "账户剩余次数、训练完成情况和历史报告可持续留存，方便用户安排下一次练习。"],
+  ["lucide:activity", "训练状态清晰", "账户剩余次数、训练完成情况和历史报告可持续留存，方便安排下一次练习。"],
 ];
 
 export function HomePage() {
@@ -203,7 +203,7 @@ export function HomePage() {
           <p className="home-eyebrow">Voice-first Interview Rehearsal</p>
           <h1 id="home-title">四类面试，按真实流程开练。</h1>
           <p className="home-lead">
-            面霸练习生把工作面试、研究生复试、考公面试和雅思口语拆成独立训练产品。用户不打字、不看聊天框，只和数字面试官轮流语音问答，结束后拿到可复盘的完整报告。
+            面霸练习生把工作面试、研究生复试、考公面试和雅思口语拆成独立训练产品。训练过程不打字、不看聊天框，只和数字面试官轮流语音问答，结束后拿到可复盘的完整报告。
           </p>
           <div className="home-actions">
             <a className="home-primary" href="/register">
@@ -279,7 +279,7 @@ export function HomePage() {
         <div className="section-heading motion-item">
           <p className="home-eyebrow">Four training products</p>
           <h2>四类目标, 对应不同训练深度。</h2>
-          <p>首页直接呈现工作面试, 研究生复试, 考公面试和雅思口语四类训练, 用户能快速判断自己该进入哪个场景。</p>
+          <p>首页直接呈现工作面试, 研究生复试, 考公面试和雅思口语四类训练, 可以快速判断本次该进入哪个场景。</p>
         </div>
         <div className="module-grid-v2">
           {modules.map((module, index) => (
@@ -298,8 +298,8 @@ export function HomePage() {
       <section className="home-section coverage-section motion-section">
         <div className="section-heading motion-item">
           <p className="home-eyebrow">Practice coverage</p>
-          <h2>用户进来后，看到的是明确可练的题型。</h2>
-          <p>每个模块都围绕真实考试或面试场景组织问题，不把所有用户都丢进同一个泛面试入口。</p>
+          <h2>进入训练前，先看到明确可练的题型。</h2>
+          <p>每个模块都围绕真实考试或面试场景组织问题，不把四类目标都压进同一个泛面试入口。</p>
         </div>
         <div className="coverage-list">
           {practiceCoverage.map(([title, copy]) => (
@@ -331,7 +331,7 @@ export function HomePage() {
       <section className="home-section report-deck motion-section" id="report">
         <div className="section-heading motion-item">
           <p className="home-eyebrow">Interview report</p>
-          <h2>每一类训练，都给用户一份能继续行动的复盘报告。</h2>
+          <h2>每一类训练，都给出一份能继续行动的复盘报告。</h2>
         </div>
         <div className="report-screens">
           {reportPreviews.map((report) => (
@@ -375,7 +375,7 @@ export function HomePage() {
             <p className="home-eyebrow">Credit activation</p>
             <h2>训练次数人工开通，流程清晰可追溯。</h2>
             <p>
-              需要开通训练次数时，用户可添加官方微信 Teptysuki666。确认后，系统会发放对应模块次数，并保留开通、扣次、训练和报告记录。
+              需要开通训练次数时，可添加官方微信 Teptysuki666。确认后，系统会发放对应模块次数，并保留开通、扣次、训练和报告记录。
             </p>
           </div>
           <div className="admin-feature-grid">
@@ -393,7 +393,7 @@ export function HomePage() {
       <section className="home-section pricing-panel motion-section">
         <div className="pricing-copy motion-item">
           <p className="home-eyebrow">Scenario-based credits</p>
-          <h2>按一次完整体验计费，而不是按一次按钮计费。</h2>
+          <h2>目标不同，轮次和扣次也不同。</h2>
           <p>工作面试包含三轮，因此消耗 3 次；研究生复试和考公面试是单场训练，消耗 1 次；雅思口语覆盖 Part 1 到 Part 3，消耗 2 次。</p>
         </div>
         <div className="pricing-table motion-item">

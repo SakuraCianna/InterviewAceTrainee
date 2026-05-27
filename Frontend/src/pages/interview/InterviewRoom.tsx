@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Button, SafeArea, Selector, Toast } from "antd-mobile";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AppIcon } from "../../components/AppIcon";
 import { AvatarStage, AvatarState } from "../../components/AvatarStage";
+import { BrandLogo } from "../../components/BrandLogo";
 import { csrfHeaders, getApiErrorMessage } from "../../lib/api";
 
 type InterviewType = "job" | "postgraduate" | "civil_service" | "ielts";
@@ -127,6 +129,51 @@ const modules: { icon: string; title: string; meta: string; type: InterviewType;
   { icon: "lucide:landmark", title: "考公面试", meta: "综合分析、组织协调、应急应变", type: "civil_service", lang: "zh-CN" },
   { icon: "lucide:languages", title: "雅思口语", meta: "Part 1 / 2 / 3 全流程", type: "ielts", lang: "en-US" },
 ];
+
+const moduleDetails: Record<
+  InterviewType,
+  {
+    badge: string;
+    intro: string;
+    rounds: string;
+    material: string;
+    report: string;
+    checklist: string[];
+  }
+> = {
+  job: {
+    badge: "3 轮完整体验",
+    intro: "面向校招、社招和转岗求职，系统会结合简历、目标岗位和 JD 追问项目细节、岗位匹配、沟通动机与 HR 压力题。",
+    rounds: "专业一面、专业二面、HR 面",
+    material: "开始前需要上传简历，并填写应聘岗位和岗位要求。",
+    report: "输出岗位匹配度、项目深挖表现、风险点、示范回答和下一轮专项训练建议。",
+    checklist: ["简历 OCR 预分析", "JD 与能力关键词匹配", "二面追问链路", "HR 动机与稳定性"],
+  },
+  postgraduate: {
+    badge: "1 次单场模拟",
+    intro: "面向研究生复试，围绕院校、目标专业、研究方向、自我介绍、专业基础和导师沟通组织问题。",
+    rounds: "复试综合问答",
+    material: "开始前需要填写目标院校、报考专业，研究方向可选填。",
+    report: "输出专业基础、科研潜力、表达结构、导师沟通准备度和补强路线。",
+    checklist: ["院校专业背景", "自我介绍结构", "专业基础追问", "科研兴趣表达"],
+  },
+  civil_service: {
+    badge: "1 次结构化模拟",
+    intro: "面向考公结构化面试，按综合分析、组织协调、人际沟通、应急应变等常见题型训练稳定表达。",
+    rounds: "结构化题型组",
+    material: "无需上传材料，选择后直接进入设备检测。",
+    report: "输出审题准确性、公共视角、表达层次、落地措施和临场稳定性。",
+    checklist: ["审题拆解", "观点与层次", "公共治理视角", "应急处置逻辑"],
+  },
+  ielts: {
+    badge: "2 次口语全流程",
+    intro: "面向 IELTS Speaking，按 Part 1、Part 2、Part 3 节奏进行英文口语问答和延展追问。",
+    rounds: "Part 1 / Part 2 / Part 3",
+    material: "无需上传材料，选择后直接进入设备检测。",
+    report: "输出流利度、词汇、语法、发音、观点展开和可复用表达建议。",
+    checklist: ["日常问答", "话题卡展开", "抽象讨论", "表达替换建议"],
+  },
+};
 const PCM_SAMPLE_RATE = 16000;
 const PCM_CHUNK_MS = 200;
 const PCM_CHUNK_SAMPLES = Math.floor(PCM_SAMPLE_RATE * (PCM_CHUNK_MS / 1000));
@@ -138,6 +185,40 @@ const MIN_VOICE_RMS = 0.018;
 const VOICE_MARGIN_RMS = 0.012;
 const VOICE_NOISE_RATIO = 2.3;
 const RECORDING_PROGRESS_INTERVAL_MS = 200;
+const ACCOUNT_CODE_COOLDOWN_SECONDS = 90;
+const ACCOUNT_CODE_STORAGE_PREFIX = "mianba_account_code_next:";
+
+type ApiPayload = {
+  detail?: string;
+  message?: string;
+  dev_code?: string;
+};
+
+function normalizeAccountEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function accountCodeCooldownKey(email: string) {
+  return `${ACCOUNT_CODE_STORAGE_PREFIX}${normalizeAccountEmail(email)}`;
+}
+
+function secondsUntil(timestamp: number) {
+  return Math.max(0, Math.ceil((timestamp - Date.now()) / 1000));
+}
+
+function retryAfterSeconds(response: Response) {
+  const rawValue = response.headers.get("Retry-After");
+  const parsedValue = rawValue ? Number.parseInt(rawValue, 10) : ACCOUNT_CODE_COOLDOWN_SECONDS;
+  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : ACCOUNT_CODE_COOLDOWN_SECONDS;
+}
+
+async function parseApiPayload(response: Response): Promise<ApiPayload> {
+  try {
+    return (await response.json()) as ApiPayload;
+  } catch {
+    return {};
+  }
+}
 
 function createSessionId() {
   const random = Math.random().toString(36).slice(2, 8);
@@ -223,6 +304,14 @@ function isEffectiveVoice(rms: number, noiseFloor: number) {
   return rms > threshold;
 }
 
+function showInterviewToast(content: string, icon?: "success" | "fail" | "loading", duration = 2200) {
+  Toast.show({ content, icon, duration, position: "top" });
+}
+
+function showInterviewLoading(content: string) {
+  Toast.show({ content, icon: "loading", duration: 0, position: "top" });
+}
+
 function microphoneLabel(device: MediaDeviceInfo, index: number) {
   return device.label || `麦克风 ${index + 1}`;
 }
@@ -252,6 +341,13 @@ export function InterviewRoom() {
   const [selectedModuleIndex, setSelectedModuleIndex] = useState(0);
   const [sessionId, setSessionId] = useState(createSessionId);
   const [currentUser, setCurrentUser] = useState<CurrentUserResponse | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [accountCode, setAccountCode] = useState("");
+  const [accountNewPassword, setAccountNewPassword] = useState("");
+  const [accountMessage, setAccountMessage] = useState("使用邮箱验证码修改账户密码。");
+  const [isRequestingAccountCode, setIsRequestingAccountCode] = useState(false);
+  const [isChangingAccountPassword, setIsChangingAccountPassword] = useState(false);
+  const [accountCodeCooldownSeconds, setAccountCodeCooldownSeconds] = useState(0);
   const [historyItems, setHistoryItems] = useState<InterviewHistoryItem[]>([]);
   const [interviewState, setInterviewState] = useState<InterviewStateResponse | null>(null);
   const [activeSession, setActiveSession] = useState<InterviewStateResponse | null>(null);
@@ -297,6 +393,7 @@ export function InterviewRoom() {
   const microphoneAnimationRef = useRef<number | null>(null);
   const state = states[stateIndex];
   const selectedModule = modules[selectedModuleIndex];
+  const selectedModuleDetail = moduleDetails[selectedModule.type];
   const currentMaterial = materialsByType[selectedModule.type] ?? null;
   const selectedModuleNeedsMaterial = selectedModule.type === "job" || selectedModule.type === "postgraduate";
   const isSelectionStage = routeStage === "select";
@@ -314,6 +411,26 @@ export function InterviewRoom() {
     void loadHistory();
     void loadMicrophoneDevices();
   }, []);
+
+  useEffect(() => {
+    if (!currentUser?.email) {
+      setAccountCodeCooldownSeconds(0);
+      return;
+    }
+    const nextAllowedAt = Number.parseInt(window.localStorage.getItem(accountCodeCooldownKey(currentUser.email)) ?? "0", 10);
+    setAccountCodeCooldownSeconds(secondsUntil(nextAllowedAt));
+  }, [currentUser?.email]);
+
+  useEffect(() => {
+    if (accountCodeCooldownSeconds <= 0 || !currentUser?.email) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      const nextAllowedAt = Number.parseInt(window.localStorage.getItem(accountCodeCooldownKey(currentUser.email)) ?? "0", 10);
+      setAccountCodeCooldownSeconds(secondsUntil(nextAllowedAt));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [accountCodeCooldownSeconds, currentUser?.email]);
 
   useEffect(() => {
     return () => {
@@ -439,12 +556,14 @@ export function InterviewRoom() {
     if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) {
       setMicrophoneStatus("failed");
       setMicrophoneMessage("当前浏览器不支持录音，请使用新版 Chrome 或 Edge。");
+      showInterviewToast("当前浏览器不支持录音，请使用新版 Chrome 或 Edge", "fail");
       return;
     }
     stopMicrophoneTest();
     setMicrophoneStatus("testing");
     setMicrophoneReady(false);
     setMicrophoneMessage("正在打开麦克风，请试着说一句话。");
+    showInterviewLoading("正在检测麦克风，请试着说一句话");
     try {
       const stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints());
       await loadMicrophoneDevices();
@@ -470,6 +589,8 @@ export function InterviewRoom() {
           hasDetectedVoice = true;
           setMicrophoneStatus("ready");
           setMicrophoneMessage("麦克风可用，声音已经能被系统采集。");
+          Toast.clear();
+          showInterviewToast("麦克风检测通过", "success");
         }
         microphoneAnimationRef.current = window.requestAnimationFrame(updateLevel);
       };
@@ -477,26 +598,32 @@ export function InterviewRoom() {
       window.setTimeout(() => {
         if (!hasDetectedVoice && microphoneTestRef.current) {
           setMicrophoneMessage("麦克风已打开，但声音偏小。请靠近麦克风或换一个输入设备。");
+          Toast.clear();
+          showInterviewToast("声音偏小，请靠近麦克风再说一句");
         }
       }, 1800);
     } catch {
+      Toast.clear();
       setMicrophoneStatus("failed");
       setMicrophoneMessage("无法打开麦克风，请在浏览器地址栏允许麦克风权限后重新检测。");
       setMicrophoneLevel(0);
+      showInterviewToast("无法打开麦克风，请允许浏览器麦克风权限", "fail");
     }
   }
 
   function goToMicrophoneCheck(resume = false) {
     if (!resume && selectedModuleNeedsMaterial && !currentMaterial) {
-      setSocketMessage(
+      const message =
         selectedModule.type === "job"
           ? "请先上传简历并填写目标岗位和岗位要求, 再进入设备检测"
-          : "请先填写目标院校和报考专业, 再进入设备检测",
-      );
+          : "请先填写目标院校和报考专业, 再进入设备检测";
+      setSocketMessage(message);
+      showInterviewToast(message, "fail");
       return;
     }
     if (resume && !activeSession) {
       setSocketMessage("暂时没有可恢复的未完成训练");
+      showInterviewToast("暂时没有可恢复的未完成训练", "fail");
       return;
     }
     stopMicrophoneTest();
@@ -505,16 +632,19 @@ export function InterviewRoom() {
     setMicrophoneLevel(0);
     setMicrophoneStatus("idle");
     setMicrophoneMessage("正式进入面试前, 请先选择并检测麦克风");
+    showInterviewToast("进入前先完成麦克风检测");
     navigate("/interview/check");
   }
 
   function enterInterviewRoom() {
     if (microphoneStatus !== "ready") {
       setMicrophoneMessage("请先完成一次麦克风检测，确认系统能听到声音。");
+      showInterviewToast("请先完成麦克风检测", "fail");
       return;
     }
     stopMicrophoneTest();
     setMicrophoneReady(true);
+    showInterviewToast("设备检测完成，正在进入面试房间", "success");
     navigate("/interview/room");
     void startSession(pendingResume);
     setPendingResume(false);
@@ -527,6 +657,115 @@ export function InterviewRoom() {
       return;
     }
     setCurrentUser((await response.json()) as CurrentUserResponse);
+  }
+
+  function startAccountCodeCooldown(seconds = ACCOUNT_CODE_COOLDOWN_SECONDS) {
+    if (!currentUser?.email) {
+      return;
+    }
+    const safeSeconds = Math.max(1, seconds);
+    window.localStorage.setItem(accountCodeCooldownKey(currentUser.email), String(Date.now() + safeSeconds * 1000));
+    setAccountCodeCooldownSeconds(safeSeconds);
+  }
+
+  async function requestAccountCode() {
+    if (!currentUser?.email) {
+      setAccountMessage("请先登录账户。");
+      showInterviewToast("请先登录账户", "fail");
+      return;
+    }
+    if (accountCodeCooldownSeconds > 0) {
+      const message = `${accountCodeCooldownSeconds} 秒后可以重新获取验证码。`;
+      setAccountMessage(message);
+      showInterviewToast(message);
+      return;
+    }
+    setIsRequestingAccountCode(true);
+    setAccountMessage("正在发送验证码...");
+    showInterviewLoading("正在发送验证码...");
+    let response: Response;
+    try {
+      response = await fetch("/api/auth/email-code/request", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: currentUser.email }),
+      });
+    } catch {
+      Toast.clear();
+      setIsRequestingAccountCode(false);
+      setAccountMessage("网络连接异常, 请稍后再试。");
+      showInterviewToast("网络连接异常, 请稍后再试", "fail");
+      return;
+    }
+    const data = await parseApiPayload(response);
+    Toast.clear();
+    setIsRequestingAccountCode(false);
+    if (!response.ok) {
+      if (response.status === 429) {
+        const retryAfter = retryAfterSeconds(response);
+        startAccountCodeCooldown(retryAfter);
+        const message = `获取太频繁, 请 ${retryAfter} 秒后再试。`;
+        setAccountMessage(message);
+        showInterviewToast(message, "fail");
+        return;
+      }
+      const errorMessage = getApiErrorMessage(data, "请稍后再试。");
+      setAccountMessage(`验证码发送失败: ${errorMessage}`);
+      showInterviewToast(`验证码发送失败: ${errorMessage}`, "fail");
+      return;
+    }
+    if (data.dev_code) {
+      setAccountCode(data.dev_code);
+    }
+    startAccountCodeCooldown();
+    setAccountMessage("验证码已发送, 5 分钟内有效。");
+    showInterviewToast("验证码已发送, 5 分钟内有效", "success");
+  }
+
+  async function changeAccountPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!currentUser?.email) {
+      setAccountMessage("请先登录账户。");
+      showInterviewToast("请先登录账户", "fail");
+      return;
+    }
+    if (accountCode.trim().length !== 6 || accountNewPassword.trim().length < 8) {
+      setAccountMessage("请填写 6 位验证码和至少 8 位新密码。");
+      showInterviewToast("请填写验证码和新密码", "fail");
+      return;
+    }
+    setIsChangingAccountPassword(true);
+    setAccountMessage("正在修改密码...");
+    showInterviewLoading("正在修改密码...");
+    let response: Response;
+    try {
+      response = await fetch("/api/auth/password/change", {
+        method: "POST",
+        credentials: "include",
+        headers: csrfHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ code: accountCode, new_password: accountNewPassword }),
+      });
+    } catch {
+      Toast.clear();
+      setIsChangingAccountPassword(false);
+      setAccountMessage("网络连接异常, 请稍后再试。");
+      showInterviewToast("网络连接异常, 请稍后再试", "fail");
+      return;
+    }
+    const data = await parseApiPayload(response);
+    Toast.clear();
+    setIsChangingAccountPassword(false);
+    if (!response.ok) {
+      const errorMessage = getApiErrorMessage(data, "请检查验证码或账户状态。");
+      setAccountMessage(`密码修改失败: ${errorMessage}`);
+      showInterviewToast(`密码修改失败: ${errorMessage}`, "fail");
+      return;
+    }
+    setAccountCode("");
+    setAccountNewPassword("");
+    setAccountMessage("密码已修改, 下次登录请使用新密码。");
+    showInterviewToast("密码已修改", "success");
   }
 
   async function loadHistory() {
@@ -558,7 +797,9 @@ export function InterviewRoom() {
     const targetSessionId = resume && activeSession ? activeSession.session_id : createSessionId();
     const material = resume && activeSession ? materialsByType[activeSession.interview_type] : currentMaterial;
     if (!resume && selectedModuleNeedsMaterial && !material) {
-      setSocketMessage(selectedModule.type === "job" ? "请先上传简历并填写目标岗位/JD。" : "请先填写目标院校和报考专业，再开始复试模拟。");
+      const message = selectedModule.type === "job" ? "请先上传简历并填写目标岗位/JD。" : "请先填写目标院校和报考专业，再开始复试模拟。";
+      setSocketMessage(message);
+      showInterviewToast(message, "fail");
       return;
     }
     setIsStartingSession(true);
@@ -576,7 +817,9 @@ export function InterviewRoom() {
     setIsStartingSession(false);
 
     if (!response.ok) {
-      setSocketMessage(`面试创建失败：${getApiErrorMessage(data, "请重新登录后再试。")}`);
+      const errorMessage = getApiErrorMessage(data, "请重新登录后再试。");
+      setSocketMessage(`面试创建失败：${errorMessage}`);
+      showInterviewToast(`面试创建失败：${errorMessage}`, "fail");
       return;
     }
 
@@ -588,18 +831,22 @@ export function InterviewRoom() {
     setActiveSession(null);
     setStateIndex(1);
     setSocketMessage(data.status === "completed" ? "这场训练已完成，可查看复盘报告。" : `面试已就绪，剩余次数 ${data.balance_after ?? "已更新"}。`);
+    showInterviewToast(data.status === "completed" ? "这场训练已完成" : "面试已就绪", "success");
     await loadHistory();
     void speakQuestion(data.current_question?.text, data.interview_type, data.session_id);
   }
 
   async function prepareMaterial() {
     setIsPreparingMaterial(true);
+    showInterviewLoading("正在分析资料...");
     const formData = new FormData();
     formData.append("interview_type", selectedModule.type);
     if (selectedModule.type === "job") {
       if (!jobResumeFile || !jobTitle.trim() || !jobRequirements.trim()) {
         setSocketMessage("工作面试需要简历文件、目标岗位和岗位要求。");
         setIsPreparingMaterial(false);
+        Toast.clear();
+        showInterviewToast("请先补齐简历、岗位和 JD", "fail");
         return;
       }
       formData.append("resume_file", jobResumeFile);
@@ -610,6 +857,8 @@ export function InterviewRoom() {
       if (!postgraduateSchool.trim() || !postgraduateMajor.trim()) {
         setSocketMessage("研究生复试需要先填写目标院校和报考专业。");
         setIsPreparingMaterial(false);
+        Toast.clear();
+        showInterviewToast("请先填写目标院校和报考专业", "fail");
         return;
       }
       formData.append("target_school", postgraduateSchool.trim());
@@ -619,22 +868,36 @@ export function InterviewRoom() {
       }
     }
 
-    const response = await fetch("/api/interview-materials", {
-      method: "POST",
-      credentials: "include",
-      headers: csrfHeaders(),
-      body: formData,
-    });
-    const data = (await response.json()) as InterviewMaterialResponse & { detail?: string; message?: string };
+    let response: Response;
+    let data: InterviewMaterialResponse & { detail?: string; message?: string };
+    try {
+      response = await fetch("/api/interview-materials", {
+        method: "POST",
+        credentials: "include",
+        headers: csrfHeaders(),
+        body: formData,
+      });
+      data = (await response.json()) as InterviewMaterialResponse & { detail?: string; message?: string };
+    } catch {
+      setIsPreparingMaterial(false);
+      Toast.clear();
+      setSocketMessage("资料分析请求失败，请检查网络后重试。");
+      showInterviewToast("资料分析请求失败，请检查网络后重试", "fail");
+      return;
+    }
     setIsPreparingMaterial(false);
+    Toast.clear();
 
     if (!response.ok) {
-      setSocketMessage(`资料分析失败：${getApiErrorMessage(data, "请检查文件和填写内容。")}`);
+      const errorMessage = getApiErrorMessage(data, "请检查文件和填写内容。");
+      setSocketMessage(`资料分析失败：${errorMessage}`);
+      showInterviewToast(`资料分析失败：${errorMessage}`, "fail");
       return;
     }
 
     setMaterialsByType((previous) => ({ ...previous, [data.interview_type]: data }));
     setSocketMessage(data.interview_type === "job" ? "简历和岗位要求已分析，可以开始工作面试。" : "复试院校和专业信息已保存，可以开始模拟。");
+    showInterviewToast("资料已分析，可以进入设备检测", "success");
   }
 
   function speakQuestionWithBrowser(questionText: string, interviewType?: InterviewType) {
@@ -758,6 +1021,7 @@ export function InterviewRoom() {
     if (now - idleBase >= SILENCE_AUTO_FINISH_MS) {
       autoFinishingRef.current = true;
       setSocketMessage("连续 3 秒未检测到有效人声，系统已自动结束本轮回答。");
+      showInterviewToast("连续 3 秒未检测到有效人声，系统自动结束本轮回答");
       void finishAnswer();
     }
   }
@@ -925,14 +1189,17 @@ export function InterviewRoom() {
   async function startAnswer() {
     if (!interviewState || interviewState.status === "completed") {
       setSocketMessage("请先开始或恢复一场训练。");
+      showInterviewToast("请先开始或恢复一场训练", "fail");
       return;
     }
     if (isRecording) {
       setSocketMessage("当前正在回答，请说完后点击“回答完毕”。");
+      showInterviewToast("当前正在回答，说完后点击回答完毕");
       return;
     }
     if (isPreparingAnswer) {
       setSocketMessage("正在准备麦克风和实时识别通道，请稍等。");
+      showInterviewToast("正在准备麦克风和实时识别通道");
       return;
     }
     if (isFinishingAnswer) {
@@ -942,6 +1209,7 @@ export function InterviewRoom() {
     const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
     if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) {
       setSocketMessage("当前浏览器不支持录音，请使用新版 Chrome 或 Edge。");
+      showInterviewToast("当前浏览器不支持录音，请使用新版 Chrome 或 Edge", "fail");
       return;
     }
 
@@ -955,6 +1223,7 @@ export function InterviewRoom() {
       resetRecordingMeters(currentAnswerLimitMs);
       createTranscriptWaiter();
       setSocketMessage("正在打开麦克风并建立实时语音识别通道。");
+      showInterviewLoading("正在建立实时语音识别通道...");
       stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints());
       context = new AudioContextCtor();
       const asrSocket = await openRealtimeAsrSocket(interviewState.session_id, interviewState.interview_type);
@@ -998,20 +1267,25 @@ export function InterviewRoom() {
       setIsPreparingAnswer(false);
       setIsRecording(false);
       setSocketMessage(error instanceof Error ? error.message : "无法打开麦克风或实时识别通道，请检查权限后重试。");
+      Toast.clear();
+      showInterviewToast(error instanceof Error ? error.message : "无法打开麦克风或实时识别通道", "fail");
       return;
     }
 
+    Toast.clear();
     setIsPreparingAnswer(false);
     setIsRecording(true);
     startRecordingProgressTimer(currentAnswerLimitMs);
     setStateIndex(2);
     setSocketMessage(`正在实时转写回答，${formatAnswerLimit(interviewState.interview_type, interviewState.current_question?.round_name)}。说完后点击“回答完毕”。`);
+    showInterviewToast("开始回答，系统正在实时转写", "success", 1600);
     sendSocketEvent("answer_started");
   }
 
   async function finishAnswer() {
     if (!interviewState) {
       setSocketMessage("请先开始或恢复一场训练。");
+      showInterviewToast("请先开始或恢复一场训练", "fail");
       return;
     }
     if (isFinishingAnswer) {
@@ -1019,6 +1293,7 @@ export function InterviewRoom() {
     }
     if (!recorderRef.current) {
       setSocketMessage("当前还没有开始录音，请先点击“开始回答”。");
+      showInterviewToast("请先点击开始回答", "fail");
       return;
     }
     setIsFinishingAnswer(true);
@@ -1030,17 +1305,22 @@ export function InterviewRoom() {
     let answerText = "";
     try {
       setSocketMessage("正在收尾实时转写结果。");
+      showInterviewLoading("正在整理本轮回答...");
       answerText = await waitForFinalTranscript();
     } catch (error) {
       setStateIndex(0);
       setIsFinishingAnswer(false);
       setSocketMessage(error instanceof Error ? error.message : "腾讯云实时语音识别暂时不可用，本轮回答没有提交。");
+      Toast.clear();
+      showInterviewToast(error instanceof Error ? error.message : "实时语音识别暂时不可用", "fail");
       return;
     }
     if (!answerText) {
       setStateIndex(0);
       setIsFinishingAnswer(false);
       setSocketMessage("没有识别到有效回答，请重新点击“开始回答”后再试。");
+      Toast.clear();
+      showInterviewToast("没有识别到有效回答，请重新回答", "fail");
       return;
     }
     const response = await fetch(`/api/interviews/${encodeURIComponent(interviewState.session_id)}/answers`, {
@@ -1052,18 +1332,24 @@ export function InterviewRoom() {
     const data = (await response.json()) as InterviewStateResponse;
     if (!response.ok) {
       setIsFinishingAnswer(false);
-      setSocketMessage(`回答提交失败：${getApiErrorMessage(data, "请稍后重试。")}`);
+      const errorMessage = getApiErrorMessage(data, "请稍后重试。");
+      setSocketMessage(`回答提交失败：${errorMessage}`);
+      Toast.clear();
+      showInterviewToast(`回答提交失败：${errorMessage}`, "fail");
       return;
     }
+    Toast.clear();
     setInterviewState(data);
     setIsFinishingAnswer(false);
     await loadHistory();
     if (data.status === "completed") {
       setStateIndex(0);
       setSocketMessage("训练完成，复盘报告已生成。");
+      showInterviewToast("训练完成，复盘报告已生成", "success");
       return;
     }
     setSocketMessage("已进入下一问，问题正在播放。");
+    showInterviewToast("已进入下一问", "success", 1200);
     void speakQuestion(data.current_question?.text, data.interview_type, data.session_id);
   }
 
@@ -1071,6 +1357,7 @@ export function InterviewRoom() {
     const response = await fetch(`/api/interviews/${encodeURIComponent(item.session_id)}`, { credentials: "include" });
     if (!response.ok) {
       setSocketMessage("这条训练记录暂时无法打开，请刷新后重试。");
+      showInterviewToast("这条训练记录暂时无法打开", "fail");
       return;
     }
     const data = (await response.json()) as InterviewStateResponse;
@@ -1082,6 +1369,7 @@ export function InterviewRoom() {
     setInterviewState(data);
     setActiveSession(null);
     setSocketMessage(data.status === "completed" ? "已打开历史复盘报告。" : "已恢复这场未完成训练。");
+    showInterviewToast(data.status === "completed" ? "已打开历史复盘报告" : "已恢复未完成训练", "success");
     navigate("/interview/room");
   }
 
@@ -1102,6 +1390,7 @@ export function InterviewRoom() {
     resetRecordingMeters();
     setSocketState("已退出");
     setSocketMessage("已退出登录，可以重新登录其他账号。");
+    showInterviewToast("已退出登录", "success");
     navigate("/", { replace: true });
   }
 
@@ -1121,15 +1410,73 @@ export function InterviewRoom() {
     setMicrophoneLevel(0);
     setSessionId(createSessionId());
     setSocketMessage("已切换到新训练，选择模块后开始。");
+    showInterviewToast("已切换到新训练");
     navigate("/interview");
   }
+
+  const accountSettingsPanel = currentUser && isSettingsOpen ? (
+    <section className="account-settings-panel" aria-label="账户设置">
+      <div className="account-settings-copy">
+        <span className="eyebrow">Account Settings</span>
+        <h2>账户与密码</h2>
+        <p>{currentUser.email}</p>
+      </div>
+      <form className="account-password-form" onSubmit={changeAccountPassword}>
+        <label>
+          <span>邮箱验证码</span>
+          <div className="code-row">
+            <div className="input-shell">
+              <AppIcon icon="lucide:key-round" size={17} />
+              <input
+                value={accountCode}
+                onChange={(event) => setAccountCode(event.currentTarget.value)}
+                placeholder="6 位验证码"
+                minLength={6}
+                maxLength={6}
+                required
+              />
+            </div>
+            <Button
+              type="button"
+              className="code-button"
+              fill="outline"
+              shape="rounded"
+              loading={isRequestingAccountCode}
+              disabled={isRequestingAccountCode || accountCodeCooldownSeconds > 0}
+              onClick={() => void requestAccountCode()}
+            >
+              {isRequestingAccountCode ? "发送中" : accountCodeCooldownSeconds > 0 ? `${accountCodeCooldownSeconds}s` : "获取"}
+            </Button>
+          </div>
+        </label>
+        <label>
+          <span>新密码</span>
+          <div className="input-shell">
+            <AppIcon icon="lucide:key-round" size={17} />
+            <input
+              type="password"
+              value={accountNewPassword}
+              onChange={(event) => setAccountNewPassword(event.currentTarget.value)}
+              placeholder="至少 8 位"
+              minLength={8}
+              required
+            />
+          </div>
+        </label>
+        <Button className="auth-submit account-password-submit" color="primary" loading={isChangingAccountPassword} shape="rounded" type="submit">
+          {isChangingAccountPassword ? "修改中" : "修改密码"}
+        </Button>
+        <p className="account-settings-message" role="status" aria-live="polite">{accountMessage}</p>
+      </form>
+    </section>
+  ) : null;
 
   if (routeStage === "check") {
     return (
       <main className="workspace-page interview-page">
         <header className="workspace-header">
           <a href="/" className="brand-mark">
-            <AppIcon icon="solar:soundwave-circle-bold-duotone" size={24} />
+            <BrandLogo size={28} />
             面霸练习生
           </a>
           <div className="workspace-header-actions">
@@ -1139,13 +1486,20 @@ export function InterviewRoom() {
               {currentUser ? `${currentUser.credit_balance} 次` : "未登录"}
             </span>
             {currentUser && (
-              <button type="button" className="logout-button" onClick={() => void logout()}>
-                <AppIcon icon="lucide:log-out" size={16} />
-                退出
-              </button>
+              <>
+                <button type="button" className={`logout-button account-button${isSettingsOpen ? " is-active" : ""}`} onClick={() => setIsSettingsOpen((value) => !value)}>
+                  <AppIcon icon="lucide:settings-2" size={16} />
+                  设置
+                </button>
+                <button type="button" className="logout-button" onClick={() => void logout()}>
+                  <AppIcon icon="lucide:log-out" size={16} />
+                  退出
+                </button>
+              </>
             )}
           </div>
         </header>
+        {accountSettingsPanel}
 
         <section className="microphone-gate">
           <div className="microphone-copy">
@@ -1200,17 +1554,33 @@ export function InterviewRoom() {
             <p>{microphoneMessage}</p>
 
             <div className="microphone-actions">
-              <button type="button" onClick={() => void runMicrophoneCheck()} disabled={microphoneStatus === "testing"}>
+              <Button
+                type="button"
+                className="mobile-action-button"
+                color="primary"
+                shape="rounded"
+                loading={microphoneStatus === "testing"}
+                onClick={() => void runMicrophoneCheck()}
+                disabled={microphoneStatus === "testing"}
+              >
                 <AppIcon icon="lucide:waveform" size={18} />
                 {microphoneStatus === "testing" ? "检测中" : "检测麦克风"}
-              </button>
-              <button type="button" onClick={enterInterviewRoom} disabled={microphoneStatus !== "ready"}>
+              </Button>
+              <Button
+                type="button"
+                className="mobile-action-button"
+                color="success"
+                shape="rounded"
+                onClick={enterInterviewRoom}
+                disabled={microphoneStatus !== "ready"}
+              >
                 <AppIcon icon="lucide:arrow-right" size={18} />
                 进入面试房间
-              </button>
+              </Button>
             </div>
           </div>
         </section>
+        <SafeArea position="bottom" />
       </main>
     );
   }
@@ -1219,7 +1589,7 @@ export function InterviewRoom() {
     <main className="workspace-page interview-page">
       <header className="workspace-header">
         <a href="/" className="brand-mark">
-          <AppIcon icon="solar:soundwave-circle-bold-duotone" size={24} />
+          <BrandLogo size={28} />
           面霸练习生
         </a>
         <div className="workspace-header-actions">
@@ -1229,43 +1599,78 @@ export function InterviewRoom() {
             {currentUser ? `${currentUser.credit_balance} 次` : "未登录"}
           </span>
           {currentUser && (
-            <button type="button" className="logout-button" onClick={() => void logout()}>
-              <AppIcon icon="lucide:log-out" size={16} />
-              退出
-            </button>
+            <>
+              <button type="button" className={`logout-button account-button${isSettingsOpen ? " is-active" : ""}`} onClick={() => setIsSettingsOpen((value) => !value)}>
+                <AppIcon icon="lucide:settings-2" size={16} />
+                设置
+              </button>
+              <button type="button" className="logout-button" onClick={() => void logout()}>
+                <AppIcon icon="lucide:log-out" size={16} />
+                退出
+              </button>
+            </>
           )}
         </div>
       </header>
+      {accountSettingsPanel}
 
       <section className={isSelectionStage ? "interview-entry-layout" : "interview-layout"}>
         {isSelectionStage ? (
-          <div className="interview-entry-copy">
-            <span className="eyebrow">Voice-first Interview</span>
-            <h1>先选训练场景, 再进入设备检测。</h1>
-            <p>工作面试和研究生复试会先收集必要资料, 考公面试与雅思口语可以直接进入设备检测。确认麦克风可用后, 系统会打开正式面试房间。</p>
-            <div className="entry-proof-list">
-              <span><AppIcon icon="lucide:list-checks" size={17} />场景流程不同</span>
-              <span><AppIcon icon="lucide:mic-2" size={17} />进入前检测设备</span>
+          <div className="scenario-hero-panel">
+            <span className="eyebrow">Training Console</span>
+            <h1>先选场景，再进入设备检测。</h1>
+            <p>
+              四类训练会分别匹配不同轮次、资料要求和评分维度。资料准备完成后，系统会先检测麦克风，再进入正式语音面试房间。
+            </p>
+
+            <div className="scenario-highlight-card">
+              <div className="scenario-highlight-head">
+                <span>
+                  <AppIcon icon={selectedModule.icon} size={22} />
+                  当前选择
+                </span>
+                <strong>{selectedModuleDetail.badge}</strong>
+              </div>
+              <h2>{selectedModule.title}</h2>
+              <p>{selectedModuleDetail.intro}</p>
+              <div className="scenario-facts">
+                <span><AppIcon icon="lucide:route" size={16} />{selectedModuleDetail.rounds}</span>
+                <span><AppIcon icon="lucide:check-circle-2" size={16} />{selectedModuleDetail.material}</span>
+                <span><AppIcon icon="lucide:gauge" size={16} />{selectedModuleDetail.report}</span>
+              </div>
+            </div>
+
+            <div className="scenario-proof-grid">
+              <span><AppIcon icon="lucide:mic-2" size={17} />进入前检测麦克风</span>
               <span><AppIcon icon="lucide:history" size={17} />中断后可恢复</span>
+              <span><AppIcon icon="lucide:shield-check" size={17} />训练记录可追溯</span>
             </div>
           </div>
         ) : (
           <AvatarStage state={state} />
         )}
-        <aside className="interview-panel">
+        <aside className={isSelectionStage ? "interview-panel scenario-control-panel" : "interview-panel"}>
           <span className="eyebrow">{activeQuestion ? activeQuestion.round_name : "Voice-first Interview"}</span>
           <h1>
             {interviewState?.status === "completed"
               ? "本次训练已完成。"
               : isSelectionStage
-                ? "选择本次训练目标。"
+                ? "选择本次训练场景"
                 : "面试房间已就绪。"}
           </h1>
           <p>
             {isSelectionStage
-              ? "选择场景并补齐必要资料后, 先完成麦克风检测, 再进入正式语音面试。"
+              ? "工作面试和研究生复试会先收集必要资料；考公面试与雅思口语可以直接进入设备检测。"
               : "系统会播放问题, 只需要开口回答并点击“回答完毕”。刷新或离开页面后, 再回来会自动提示恢复未完成训练。"}
           </p>
+          {isSelectionStage && (
+            <div className="scenario-step-strip" aria-label="训练流程">
+              <span className="is-current">1 选场景</span>
+              <span>2 补资料</span>
+              <span>3 测麦克风</span>
+              <span>4 语音面试</span>
+            </div>
+          )}
           <div className="socket-status">
             <AppIcon icon="lucide:radio" size={18} />
             <span>{socketMessage}</span>
@@ -1314,19 +1719,75 @@ export function InterviewRoom() {
           )}
 
           {isSelectionStage && !interviewState && (
-            <div className="interview-module-list">
-              {modules.map((module, index) => (
-                <button
-                  type="button"
-                  key={module.title}
-                  className={selectedModuleIndex === index ? "is-active" : ""}
-                  onClick={() => setSelectedModuleIndex(index)}
-                >
-                  <AppIcon icon={module.icon} size={18} />
-                  <span>{module.title}</span>
-                  <em>{module.meta}</em>
-                </button>
-              ))}
+            <>
+              <Selector
+                className="mobile-module-selector"
+                columns={1}
+                showCheckMark={false}
+                value={[selectedModuleIndex]}
+                onChange={(values) => {
+                  const nextIndex = values[0];
+                  if (typeof nextIndex === "number") {
+                    setSelectedModuleIndex(nextIndex);
+                  }
+                }}
+                options={modules.map((module, index) => {
+                  const detail = moduleDetails[module.type];
+                  return {
+                    value: index,
+                    label: (
+                      <span className="mobile-module-option">
+                        <span className="module-card-icon">
+                          <AppIcon icon={module.icon} size={20} />
+                        </span>
+                        <span>
+                          <strong>{module.title}</strong>
+                          <em>{module.meta}</em>
+                          <small>{detail.badge}</small>
+                        </span>
+                      </span>
+                    ),
+                    description: detail.material,
+                  };
+                })}
+              />
+              <div className="interview-module-list">
+                {modules.map((module, index) => {
+                  const detail = moduleDetails[module.type];
+                  return (
+                  <button
+                    type="button"
+                    key={module.title}
+                    aria-pressed={selectedModuleIndex === index}
+                    className={selectedModuleIndex === index ? "is-active" : ""}
+                    data-module={module.type}
+                    onClick={() => setSelectedModuleIndex(index)}
+                  >
+                    <span className="module-card-icon">
+                      <AppIcon icon={module.icon} size={20} />
+                    </span>
+                    <span className="module-card-title">{module.title}</span>
+                    <em>{module.meta}</em>
+                    <strong>{detail.badge}</strong>
+                    <small>{detail.material}</small>
+                  </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {isSelectionStage && !interviewState && (
+            <div className="scenario-checklist">
+              <span>
+                <AppIcon icon="lucide:list-checks" size={17} />
+                本模块会重点覆盖
+              </span>
+              <div>
+                {selectedModuleDetail.checklist.map((item) => (
+                  <em key={item}>{item}</em>
+                ))}
+              </div>
             </div>
           )}
 
@@ -1341,13 +1802,17 @@ export function InterviewRoom() {
               </div>
               {selectedModule.type === "job" ? (
                 <div className="material-form">
-                  <label>
+                  <label className="file-picker-field">
                     <span>简历文件</span>
                     <input
                       type="file"
                       accept=".txt,.md,.pdf,.docx,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                       onChange={(event) => setJobResumeFile(event.currentTarget.files?.[0] ?? null)}
                     />
+                    <span className="file-picker-control">
+                      <strong>选择文件</strong>
+                      <em>{jobResumeFile?.name ?? "未选择文件"}</em>
+                    </span>
                   </label>
                   <label>
                     <span>应聘岗位</span>
@@ -1392,10 +1857,18 @@ export function InterviewRoom() {
                 </div>
               )}
               <div className="material-actions">
-                <button type="button" disabled={isPreparingMaterial} onClick={() => void prepareMaterial()}>
+                <Button
+                  type="button"
+                  className="mobile-action-button"
+                  color="primary"
+                  shape="rounded"
+                  loading={isPreparingMaterial}
+                  disabled={isPreparingMaterial}
+                  onClick={() => void prepareMaterial()}
+                >
                   <AppIcon icon="lucide:sparkles" size={17} />
                   {isPreparingMaterial ? "分析中" : currentMaterial ? "重新分析" : "分析资料"}
-                </button>
+                </Button>
                 {currentMaterial && (
                   <span>
                     {currentMaterial.extracted_text_chars > 0 ? `${currentMaterial.extracted_text_chars} 字文本` : "背景已保存"}
@@ -1410,10 +1883,18 @@ export function InterviewRoom() {
           {interviewState?.status !== "completed" && (
             <div className="voice-controls">
               {!interviewState ? (
-                <button
+                <Button
                   type="button"
-                  disabled={isStartingSession || (isSelectionStage && selectedModuleNeedsMaterial && !currentMaterial)}
+                  className="mobile-action-button"
+                  color="primary"
+                  shape="rounded"
+                  loading={isStartingSession}
+                  disabled={isStartingSession || Boolean(currentUser && isSelectionStage && selectedModuleNeedsMaterial && !currentMaterial)}
                   onClick={() => {
+                    if (!currentUser) {
+                      navigate("/login");
+                      return;
+                    }
                     if (isSelectionStage) {
                       goToMicrophoneCheck(false);
                       return;
@@ -1422,32 +1903,51 @@ export function InterviewRoom() {
                   }}
                 >
                   <AppIcon icon={isSelectionStage ? "lucide:scan-line" : "lucide:play"} size={18} />
-                  {isStartingSession ? "启动中" : isSelectionStage ? "进入设备检测" : "重新启动面试"}
-                </button>
+                  {isStartingSession ? "启动中" : !currentUser ? "先登录账户" : isSelectionStage ? "进入设备检测" : "重新启动面试"}
+                </Button>
               ) : (
                 <>
-                  <button type="button" disabled={isRecording || isPreparingAnswer || isFinishingAnswer} onClick={() => void startAnswer()}>
+                  <Button
+                    type="button"
+                    className="mobile-action-button"
+                    color="primary"
+                    shape="rounded"
+                    loading={isPreparingAnswer}
+                    disabled={isRecording || isPreparingAnswer || isFinishingAnswer}
+                    onClick={() => void startAnswer()}
+                  >
                     <AppIcon icon="lucide:mic" size={18} />
                     {isPreparingAnswer ? "准备中" : isRecording ? "回答中" : "开始回答"}
-                  </button>
-                  <button type="button" disabled={!isRecording || isPreparingAnswer || isFinishingAnswer} onClick={() => void finishAnswer()}>
+                  </Button>
+                  <Button
+                    type="button"
+                    className="mobile-action-button"
+                    color="primary"
+                    shape="rounded"
+                    loading={isFinishingAnswer}
+                    disabled={!isRecording || isPreparingAnswer || isFinishingAnswer}
+                    onClick={() => void finishAnswer()}
+                  >
                     <AppIcon icon="lucide:square" size={18} />
                     {isFinishingAnswer ? "提交中" : "回答完毕"}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    className="mobile-action-button"
+                    fill="outline"
+                    shape="rounded"
                     disabled={isRecording || isPreparingAnswer || isFinishingAnswer}
                     onClick={() => void speakQuestion(interviewState.current_question?.text, interviewState.interview_type, interviewState.session_id)}
                   >
                     <AppIcon icon="lucide:volume-2" size={18} />
                     重播问题
-                  </button>
+                  </Button>
                 </>
               )}
-              <button type="button" onClick={startFresh}>
+              <Button type="button" className="mobile-action-button" fill="outline" shape="rounded" onClick={startFresh}>
                 <AppIcon icon="lucide:rotate-ccw" size={18} />
                 新训练
-              </button>
+              </Button>
             </div>
           )}
 
@@ -1592,6 +2092,7 @@ export function InterviewRoom() {
           )}
         </aside>
       </section>
+      <SafeArea position="bottom" />
     </main>
   );
 }

@@ -17,9 +17,12 @@ from app.schemas.auth import (
     EmailCodeLoginRequest,
     EmailCodeRequest,
     EmailCodeRequestResponse,
+    PasswordChangeRequest,
     PasswordLoginRequest,
     PasswordLoginResponse,
+    PasswordMutationResponse,
     PasswordRegisterRequest,
+    PasswordResetRequest,
 )
 from app.services.auth_login_logs import AuthLoginLogStore, get_auth_login_log_store
 from app.services.auth_sessions import AuthSessionStore, get_auth_session_store
@@ -254,6 +257,77 @@ def login_with_password(
     reset_auth_failures(attempt_key)
     record_login_event(login_log_store, request, email=email, auth_method="password", role="user", success=True)
     return issue_login_response(response, email, "user", settings, auth_session_store)
+
+
+@router.post("/password/reset", response_model=PasswordMutationResponse)
+def reset_password_with_email_code(
+    request: Request,
+    payload: PasswordResetRequest,
+    settings=Depends(get_settings),
+    code_store: EmailCodeStore | RedisEmailCodeStore = Depends(get_email_code_store),
+    user_store: UserCredentialStore = Depends(get_user_credential_store),
+    login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
+) -> PasswordMutationResponse:
+    email = normalize_auth_email(payload.email)
+    attempt_key = auth_attempt_key("password_reset", email)
+    check_auth_attempts(attempt_key, settings)
+    user_record = user_store.get_user_record(email)
+    if user_record is None:
+        record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=email, auth_method="password_reset", role="user", success=False, failure_reason="user_not_found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user_not_found")
+    if not user_record.is_active:
+        record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=email, auth_method="password_reset", role=user_record.role, success=False, failure_reason="user_disabled")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user_disabled")
+    try:
+        code_store.consume_code(email, payload.code)
+    except InvalidEmailCodeError as exc:
+        record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=email, auth_method="password_reset", role=user_record.role, success=False, failure_reason="invalid_email_code")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_email_code") from exc
+
+    user_store.set_password(email, hash_password(payload.new_password))
+
+    reset_auth_failures(attempt_key)
+    record_login_event(login_log_store, request, email=email, auth_method="password_reset", role=user_record.role, success=True)
+    return PasswordMutationResponse(email=email, message="password_reset_success")
+
+
+@router.post("/password/change", response_model=PasswordMutationResponse)
+def change_current_user_password(
+    request: Request,
+    payload: PasswordChangeRequest,
+    claims: TokenClaims = Depends(get_current_user_claims),
+    settings=Depends(get_settings),
+    code_store: EmailCodeStore | RedisEmailCodeStore = Depends(get_email_code_store),
+    user_store: UserCredentialStore = Depends(get_user_credential_store),
+    login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
+) -> PasswordMutationResponse:
+    email = normalize_auth_email(claims["sub"])
+    attempt_key = auth_attempt_key("password_change", email)
+    check_auth_attempts(attempt_key, settings)
+    try:
+        code_store.consume_code(email, payload.code)
+    except InvalidEmailCodeError as exc:
+        record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=email, auth_method="password_change", role=claims["role"], success=False, failure_reason="invalid_email_code")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_email_code") from exc
+
+    try:
+        user_store.set_password(email, hash_password(payload.new_password))
+    except UserNotFoundError as exc:
+        record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=email, auth_method="password_change", role=claims["role"], success=False, failure_reason="user_not_found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user_not_found") from exc
+    except UserDisabledError as exc:
+        record_auth_failure(attempt_key, settings)
+        record_login_event(login_log_store, request, email=email, auth_method="password_change", role=claims["role"], success=False, failure_reason="user_disabled")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user_disabled") from exc
+
+    reset_auth_failures(attempt_key)
+    record_login_event(login_log_store, request, email=email, auth_method="password_change", role=claims["role"], success=True)
+    return PasswordMutationResponse(email=email, message="password_change_success")
 
 
 @router.post("/email-code/request", response_model=EmailCodeRequestResponse, status_code=status.HTTP_202_ACCEPTED)
