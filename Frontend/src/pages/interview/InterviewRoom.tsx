@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { AppIcon } from "../../components/AppIcon";
 import { AvatarStage, AvatarState } from "../../components/AvatarStage";
 import { csrfHeaders, getApiErrorMessage } from "../../lib/api";
@@ -244,6 +245,9 @@ function formatHistoryDate(value: string) {
 }
 
 export function InterviewRoom() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const routeStage = location.pathname.endsWith("/check") ? "check" : location.pathname.endsWith("/room") ? "room" : "select";
   const [stateIndex, setStateIndex] = useState(1);
   const [selectedModuleIndex, setSelectedModuleIndex] = useState(0);
   const [sessionId, setSessionId] = useState(createSessionId);
@@ -272,6 +276,7 @@ export function InterviewRoom() {
   const [microphoneLevel, setMicrophoneLevel] = useState(0);
   const [microphoneStatus, setMicrophoneStatus] = useState<"idle" | "testing" | "ready" | "failed">("idle");
   const [microphoneMessage, setMicrophoneMessage] = useState("正式进入面试前，请先选择并检测麦克风。");
+  const [pendingResume, setPendingResume] = useState(false);
   const [transcriptPreview, setTranscriptPreview] = useState("");
   const transcriptPreviewRef = useRef("");
   const [socketState, setSocketState] = useState("连接中");
@@ -294,6 +299,7 @@ export function InterviewRoom() {
   const selectedModule = modules[selectedModuleIndex];
   const currentMaterial = materialsByType[selectedModule.type] ?? null;
   const selectedModuleNeedsMaterial = selectedModule.type === "job" || selectedModule.type === "postgraduate";
+  const isSelectionStage = routeStage === "select";
   const activeQuestion = interviewState?.current_question ?? activeSession?.current_question ?? null;
   const progressText = interviewState
     ? `${Math.min(interviewState.current_step_index + 1, interviewState.total_steps)} / ${interviewState.total_steps}`
@@ -480,6 +486,28 @@ export function InterviewRoom() {
     }
   }
 
+  function goToMicrophoneCheck(resume = false) {
+    if (!resume && selectedModuleNeedsMaterial && !currentMaterial) {
+      setSocketMessage(
+        selectedModule.type === "job"
+          ? "请先上传简历并填写目标岗位和岗位要求, 再进入设备检测"
+          : "请先填写目标院校和报考专业, 再进入设备检测",
+      );
+      return;
+    }
+    if (resume && !activeSession) {
+      setSocketMessage("暂时没有可恢复的未完成训练");
+      return;
+    }
+    stopMicrophoneTest();
+    setPendingResume(resume);
+    setMicrophoneReady(false);
+    setMicrophoneLevel(0);
+    setMicrophoneStatus("idle");
+    setMicrophoneMessage("正式进入面试前, 请先选择并检测麦克风");
+    navigate("/interview/check");
+  }
+
   function enterInterviewRoom() {
     if (microphoneStatus !== "ready") {
       setMicrophoneMessage("请先完成一次麦克风检测，确认系统能听到声音。");
@@ -487,6 +515,9 @@ export function InterviewRoom() {
     }
     stopMicrophoneTest();
     setMicrophoneReady(true);
+    navigate("/interview/room");
+    void startSession(pendingResume);
+    setPendingResume(false);
   }
 
   async function loadAccount() {
@@ -1051,6 +1082,7 @@ export function InterviewRoom() {
     setInterviewState(data);
     setActiveSession(null);
     setSocketMessage(data.status === "completed" ? "已打开历史复盘报告。" : "已恢复这场未完成训练。");
+    navigate("/interview/room");
   }
 
   async function logout() {
@@ -1070,6 +1102,7 @@ export function InterviewRoom() {
     resetRecordingMeters();
     setSocketState("已退出");
     setSocketMessage("已退出登录，可以重新登录其他账号。");
+    navigate("/", { replace: true });
   }
 
   function startFresh() {
@@ -1082,11 +1115,16 @@ export function InterviewRoom() {
     resetRecordingMeters();
     setInterviewState(null);
     setActiveSession(null);
+    setPendingResume(false);
+    setMicrophoneReady(false);
+    setMicrophoneStatus("idle");
+    setMicrophoneLevel(0);
     setSessionId(createSessionId());
     setSocketMessage("已切换到新训练，选择模块后开始。");
+    navigate("/interview");
   }
 
-  if (!microphoneReady) {
+  if (routeStage === "check") {
     return (
       <main className="workspace-page interview-page">
         <header className="workspace-header">
@@ -1185,7 +1223,7 @@ export function InterviewRoom() {
           面霸练习生
         </a>
         <div className="workspace-header-actions">
-          <span className="session-pill">{socketState} · {progressText}</span>
+          <span className="session-pill">{socketState} · {isSelectionStage ? "选择场景" : progressText}</span>
           <span className="credit-pill">
             <AppIcon icon="lucide:coins" size={16} />
             {currentUser ? `${currentUser.credit_balance} 次` : "未登录"}
@@ -1199,12 +1237,35 @@ export function InterviewRoom() {
         </div>
       </header>
 
-      <section className="interview-layout">
-        <AvatarStage state={state} />
+      <section className={isSelectionStage ? "interview-entry-layout" : "interview-layout"}>
+        {isSelectionStage ? (
+          <div className="interview-entry-copy">
+            <span className="eyebrow">Voice-first Interview</span>
+            <h1>先选训练场景, 再进入设备检测。</h1>
+            <p>工作面试和研究生复试会先收集必要资料, 考公面试与雅思口语可以直接进入设备检测。确认麦克风可用后, 系统会打开正式面试房间。</p>
+            <div className="entry-proof-list">
+              <span><AppIcon icon="lucide:list-checks" size={17} />场景流程不同</span>
+              <span><AppIcon icon="lucide:mic-2" size={17} />进入前检测设备</span>
+              <span><AppIcon icon="lucide:history" size={17} />中断后可恢复</span>
+            </div>
+          </div>
+        ) : (
+          <AvatarStage state={state} />
+        )}
         <aside className="interview-panel">
           <span className="eyebrow">{activeQuestion ? activeQuestion.round_name : "Voice-first Interview"}</span>
-          <h1>{interviewState?.status === "completed" ? "本次训练已完成。" : "选择场景，用语音完成整场模拟。"}</h1>
-          <p>系统会播放问题，你只需要开口回答并点击“回答完毕”。刷新或离开页面后，再回来会自动提示恢复未完成训练。</p>
+          <h1>
+            {interviewState?.status === "completed"
+              ? "本次训练已完成。"
+              : isSelectionStage
+                ? "选择本次训练目标。"
+                : "面试房间已就绪。"}
+          </h1>
+          <p>
+            {isSelectionStage
+              ? "选择场景并补齐必要资料后, 先完成麦克风检测, 再进入正式语音面试。"
+              : "系统会播放问题, 只需要开口回答并点击“回答完毕”。刷新或离开页面后, 再回来会自动提示恢复未完成训练。"}
+          </p>
           <div className="socket-status">
             <AppIcon icon="lucide:radio" size={18} />
             <span>{socketMessage}</span>
@@ -1241,18 +1302,18 @@ export function InterviewRoom() {
             </div>
           )}
 
-          {!interviewState && activeSession && (
+          {isSelectionStage && !interviewState && activeSession && (
             <div className="resume-card">
               <AppIcon icon="lucide:history" size={20} />
               <div>
                 <strong>可恢复上次训练</strong>
                 <span>{activeSession.current_question?.round_name} · {activeSession.current_step_index + 1}/{activeSession.total_steps}</span>
               </div>
-              <button type="button" onClick={() => void startSession(true)}>恢复</button>
+              <button type="button" onClick={() => goToMicrophoneCheck(true)}>设备检测后恢复</button>
             </div>
           )}
 
-          {!interviewState && (
+          {isSelectionStage && !interviewState && (
             <div className="interview-module-list">
               {modules.map((module, index) => (
                 <button
@@ -1269,7 +1330,7 @@ export function InterviewRoom() {
             </div>
           )}
 
-          {!interviewState && selectedModuleNeedsMaterial && (
+          {isSelectionStage && !interviewState && selectedModuleNeedsMaterial && (
             <section className="material-card">
               <div className="material-card-heading">
                 <span>
@@ -1349,9 +1410,19 @@ export function InterviewRoom() {
           {interviewState?.status !== "completed" && (
             <div className="voice-controls">
               {!interviewState ? (
-                <button type="button" disabled={isStartingSession || (selectedModuleNeedsMaterial && !currentMaterial)} onClick={() => void startSession(false)}>
-                  <AppIcon icon="lucide:play" size={18} />
-                  {isStartingSession ? "启动中" : "开始训练"}
+                <button
+                  type="button"
+                  disabled={isStartingSession || (isSelectionStage && selectedModuleNeedsMaterial && !currentMaterial)}
+                  onClick={() => {
+                    if (isSelectionStage) {
+                      goToMicrophoneCheck(false);
+                      return;
+                    }
+                    void startSession(pendingResume);
+                  }}
+                >
+                  <AppIcon icon={isSelectionStage ? "lucide:scan-line" : "lucide:play"} size={18} />
+                  {isStartingSession ? "启动中" : isSelectionStage ? "进入设备检测" : "重新启动面试"}
                 </button>
               ) : (
                 <>

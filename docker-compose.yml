@@ -55,7 +55,7 @@ services:
     build:
       context: ./Frontend
       args:
-        VITE_ADMIN_ENTRY_PATH: /console-mianba
+        VITE_ADMIN_ENTRY_PATH: /sakuracianna
     container_name: mianba-frontend
     restart: unless-stopped
     expose:

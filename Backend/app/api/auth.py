@@ -29,6 +29,7 @@ from app.services.email_codes import (
     EmailCodeRateLimitError,
     EmailCodeStore,
     InMemoryAuthAttemptLimiter,
+    InMemoryEmailRateLimiter,
     InvalidEmailCodeError,
     RedisAuthAttemptLimiter,
     RedisEmailCodeStore,
@@ -49,6 +50,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _demo_codes = EmailCodeStore()
 _auth_attempt_limiter = InMemoryAuthAttemptLimiter()
+_email_code_limiter = InMemoryEmailRateLimiter()
 
 
 def issue_login_response(
@@ -92,6 +94,11 @@ def get_email_code_store(settings=Depends(get_settings)) -> EmailCodeStore | Red
 def check_email_code_rate_limit(email: str, settings=Depends(get_settings)) -> None:
     redis_client = get_redis_client()
     if redis_client is None:
+        _email_code_limiter.check(
+            email,
+            limit=settings.email_code_rate_limit,
+            window_seconds=settings.email_code_rate_window_seconds,
+        )
         return
 
     limiter = RedisEmailRateLimiter(
@@ -259,7 +266,12 @@ def request_email_code(
     try:
         check_email_code_rate_limit(email, settings=settings)
     except EmailCodeRateLimitError as exc:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="email_code_rate_limited") from exc
+        retry_after = max(1, exc.retry_after_seconds or settings.email_code_rate_window_seconds)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="email_code_rate_limited",
+            headers={"Retry-After": str(retry_after)},
+        ) from exc
 
     record = code_store.issue_code(email, expires_in_seconds=settings.email_code_expire_seconds)
     try:

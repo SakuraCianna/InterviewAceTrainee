@@ -43,11 +43,14 @@ docker-compose.yml    容器编排
 DATABASE_URL=postgresql+psycopg://用户名:密码@127.0.0.1:5432/mianba
 REDIS_URL=redis://127.0.0.1:6379/0
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://sakuracianna.icu,https://www.sakuracianna.icu
-ADMIN_ENTRY_PATH=/console-mianba
+ADMIN_ENTRY_PATH=/sakuracianna
 ACCESS_TOKEN_SECRET=随机长字符串
 AUTH_COOKIE_SECURE=false
 EMAIL_PROVIDER=dev
 EMAIL_FROM_ADDRESS=no-reply@mail.sakuracianna.icu
+EMAIL_CODE_EXPIRE_SECONDS=300
+EMAIL_CODE_RATE_LIMIT=1
+EMAIL_CODE_RATE_WINDOW_SECONDS=90
 RESEND_API_KEY=
 DEEPSEEK_API_KEY=
 TENCENT_CLOUD_APP_ID=
@@ -66,7 +69,7 @@ TENCENT_TTS_VOICE_TYPES=603006,502005,602005,603005,502006,603003
 前端配置：
 
 ```txt
-VITE_ADMIN_ENTRY_PATH=/console-mianba
+VITE_ADMIN_ENTRY_PATH=/sakuracianna
 ```
 
 ## 数据库
@@ -153,7 +156,7 @@ npm run dev
 ```txt
 官网：http://localhost:5173/
 面试房间：http://localhost:5173/interview
-管理后台：http://localhost:5173/console-mianba
+管理后台：http://localhost:5173/sakuracianna
 后端健康检查：http://localhost:8000/api/health
 后端就绪检查：http://localhost:8000/api/health/readiness
 ```

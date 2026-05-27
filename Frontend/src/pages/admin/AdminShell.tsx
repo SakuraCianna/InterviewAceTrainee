@@ -13,6 +13,27 @@ function loadECharts() {
   return echartsLoader;
 }
 
+const ADMIN_CODE_COOLDOWN_SECONDS = 90;
+const ADMIN_CODE_STORAGE_PREFIX = "mianba_admin_code_next:";
+
+function normalizeAdminEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function adminCodeCooldownKey(email: string) {
+  return `${ADMIN_CODE_STORAGE_PREFIX}${normalizeAdminEmail(email)}`;
+}
+
+function secondsUntil(timestamp: number) {
+  return Math.max(0, Math.ceil((timestamp - Date.now()) / 1000));
+}
+
+function retryAfterSeconds(response: Response) {
+  const rawValue = response.headers.get("Retry-After");
+  const parsedValue = rawValue ? Number.parseInt(rawValue, 10) : ADMIN_CODE_COOLDOWN_SECONDS;
+  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : ADMIN_CODE_COOLDOWN_SECONDS;
+}
+
 type CurrentUser = {
   email: string;
   role: string;
@@ -323,6 +344,8 @@ export function AdminShell() {
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginCode, setLoginCode] = useState("");
+  const [isRequestingAdminCode, setIsRequestingAdminCode] = useState(false);
+  const [adminCodeCooldownSeconds, setAdminCodeCooldownSeconds] = useState(0);
   const [creditUser, setCreditUser] = useState("");
   const [creditAmount, setCreditAmount] = useState("1");
   const [creditReason, setCreditReason] = useState("manual_grant");
@@ -358,6 +381,37 @@ export function AdminShell() {
   useEffect(() => {
     void loadCurrentUser();
   }, []);
+
+  useEffect(() => {
+    const normalizedEmail = normalizeAdminEmail(loginEmail);
+    if (!normalizedEmail) {
+      setAdminCodeCooldownSeconds(0);
+      return;
+    }
+    const nextAllowedAt = Number.parseInt(window.localStorage.getItem(adminCodeCooldownKey(normalizedEmail)) ?? "0", 10);
+    setAdminCodeCooldownSeconds(secondsUntil(nextAllowedAt));
+  }, [loginEmail]);
+
+  useEffect(() => {
+    if (adminCodeCooldownSeconds <= 0) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      const nextAllowedAt = Number.parseInt(window.localStorage.getItem(adminCodeCooldownKey(loginEmail)) ?? "0", 10);
+      setAdminCodeCooldownSeconds(secondsUntil(nextAllowedAt));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [adminCodeCooldownSeconds, loginEmail]);
+
+  function startAdminCodeCooldown(seconds = ADMIN_CODE_COOLDOWN_SECONDS) {
+    const normalizedEmail = normalizeAdminEmail(loginEmail);
+    if (!normalizedEmail) {
+      return;
+    }
+    const safeSeconds = Math.max(1, seconds);
+    window.localStorage.setItem(adminCodeCooldownKey(normalizedEmail), String(Date.now() + safeSeconds * 1000));
+    setAdminCodeCooldownSeconds(safeSeconds);
+  }
 
   function formatDateTime(value: string) {
     return new Date(value).toLocaleString("zh-CN");
@@ -587,21 +641,42 @@ export function AdminShell() {
       setMessage("请先填写管理员邮箱。");
       return;
     }
-
-    const response = await fetch("/api/auth/email-code/request", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: loginEmail }),
-    });
-    const data = (await response.json()) as AdminLoginResponse;
-    if (!response.ok) {
-      setMessage(`验证码发送失败：${getApiErrorMessage(data, "请稍后再试。")}`);
+    if (adminCodeCooldownSeconds > 0) {
+      setMessage(`验证码已发送, ${adminCodeCooldownSeconds} 秒后可以重新获取`);
       return;
     }
 
+    setIsRequestingAdminCode(true);
+    setMessage("正在发送管理员验证码...");
+    let response: Response;
+    try {
+      response = await fetch("/api/auth/email-code/request", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: normalizeAdminEmail(loginEmail) }),
+      });
+    } catch {
+      setIsRequestingAdminCode(false);
+      setMessage("网络连接异常, 请稍后再试");
+      return;
+    }
+    const data = (await response.json().catch(() => ({}))) as AdminLoginResponse;
+    setIsRequestingAdminCode(false);
+    if (!response.ok) {
+      if (response.status === 429) {
+        const retryAfter = retryAfterSeconds(response);
+        startAdminCodeCooldown(retryAfter);
+        setMessage(`获取太频繁, 请 ${retryAfter} 秒后再试`);
+        return;
+      }
+      setMessage(`验证码发送失败: ${getApiErrorMessage(data, "请稍后再试")}`);
+      return;
+    }
+
+    startAdminCodeCooldown(ADMIN_CODE_COOLDOWN_SECONDS);
     setLoginCode(data.dev_code ?? "");
-    setMessage(data.dev_code ? `开发验证码：${data.dev_code}` : "验证码已发送，请查看邮箱。");
+    setMessage(data.dev_code ? `开发验证码: ${data.dev_code}` : "验证码已发送, 5 分钟内有效, 请查看邮箱");
   }
 
   async function submitAdminLogin(event: FormEvent<HTMLFormElement>) {
@@ -915,6 +990,7 @@ export function AdminShell() {
     setRefundCreditAdjustment("");
     setRefundSessionId("");
     setMessage("已退出后台，请重新完成管理员双重认证。");
+    window.location.assign("/");
   }
 
   return (
@@ -966,7 +1042,9 @@ export function AdminShell() {
             邮箱验证码
             <div className="admin-code-row">
               <input value={loginCode} onChange={(event) => setLoginCode(event.target.value)} minLength={6} maxLength={6} required />
-              <button type="button" onClick={requestAdminCode}>获取验证码</button>
+              <button type="button" onClick={requestAdminCode} disabled={isRequestingAdminCode || adminCodeCooldownSeconds > 0}>
+                {isRequestingAdminCode ? "发送中" : adminCodeCooldownSeconds > 0 ? `${adminCodeCooldownSeconds}s` : "获取验证码"}
+              </button>
             </div>
           </label>
           <button type="submit" className="admin-primary-button">进入后台</button>

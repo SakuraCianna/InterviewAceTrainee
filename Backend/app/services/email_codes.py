@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from math import ceil
 from secrets import compare_digest, randbelow
 from typing import Any
 
@@ -11,6 +12,10 @@ class InvalidEmailCodeError(ValueError):
 
 class EmailCodeRateLimitError(ValueError):
     """Raised when an email has requested too many verification codes."""
+
+    def __init__(self, message: str, retry_after_seconds: int = 0) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
 
 
 class AuthAttemptRateLimitError(ValueError):
@@ -89,14 +94,34 @@ class RedisEmailRateLimiter:
         self._key_prefix = key_prefix
 
     def check(self, email: str) -> None:
-        count = self._redis.incr(self._key(email))
+        key = self._key(email)
+        count = self._redis.incr(key)
         if count == 1:
-            self._redis.expire(self._key(email), self._window_seconds)
+            self._redis.expire(key, self._window_seconds)
         if count > self._limit:
-            raise EmailCodeRateLimitError("too many email verification code requests")
+            ttl = self._redis.ttl(key)
+            retry_after_seconds = self._window_seconds if ttl is None or ttl < 0 else int(ttl)
+            raise EmailCodeRateLimitError("too many email verification code requests", retry_after_seconds=retry_after_seconds)
 
     def _key(self, email: str) -> str:
         return f"{self._key_prefix}:{normalize_email_key(email)}"
+
+
+class InMemoryEmailRateLimiter:
+    def __init__(self) -> None:
+        self._requests: dict[str, tuple[int, datetime]] = {}
+
+    def check(self, email: str, limit: int, window_seconds: int, now: datetime | None = None) -> None:
+        checked_at = now or datetime.now(UTC)
+        normalized_email = normalize_email_key(email)
+        count, expires_at = self._requests.get(normalized_email, (0, checked_at + timedelta(seconds=window_seconds)))
+        if expires_at <= checked_at:
+            count = 0
+            expires_at = checked_at + timedelta(seconds=window_seconds)
+        if count >= limit:
+            retry_after_seconds = max(1, ceil((expires_at - checked_at).total_seconds()))
+            raise EmailCodeRateLimitError("too many email verification code requests", retry_after_seconds=retry_after_seconds)
+        self._requests[normalized_email] = (count + 1, expires_at)
 
 
 class InMemoryAuthAttemptLimiter:

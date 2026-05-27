@@ -5,7 +5,7 @@ RUN npm ci
 
 FROM node:24-alpine AS build
 WORKDIR /app
-ARG VITE_ADMIN_ENTRY_PATH=/console-mianba
+ARG VITE_ADMIN_ENTRY_PATH=/sakuracianna
 ENV VITE_ADMIN_ENTRY_PATH=$VITE_ADMIN_ENTRY_PATH
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .

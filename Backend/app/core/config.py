@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     email_provider: str = "dev"
     email_from_name: str = "面霸练习生"
     email_from_address: str = "no-reply@mianba.local"
-    email_code_expire_seconds: int = 600
-    email_code_rate_limit: int = 5
-    email_code_rate_window_seconds: int = 600
+    email_code_expire_seconds: int = 300
+    email_code_rate_limit: int = 1
+    email_code_rate_window_seconds: int = 90
     resend_api_key: str = ""
     deepseek_api_key: str = ""
     tencent_cloud_app_id: str = ""

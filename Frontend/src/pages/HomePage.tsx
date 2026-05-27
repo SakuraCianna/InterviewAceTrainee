@@ -278,8 +278,8 @@ export function HomePage() {
       <section className="home-section module-section motion-section" id="modules">
         <div className="section-heading motion-item">
           <p className="home-eyebrow">Four training products</p>
-          <h2>不同目标，不同轮次，不同扣次。</h2>
-          <p>主页不再强调单一“项目面试”，而是把用户最容易理解的四类场景摆在第一层，让收费标准和训练深度自然对应。</p>
+          <h2>四类目标, 对应不同训练深度。</h2>
+          <p>首页直接呈现工作面试, 研究生复试, 考公面试和雅思口语四类训练, 用户能快速判断自己该进入哪个场景。</p>
         </div>
         <div className="module-grid-v2">
           {modules.map((module, index) => (
@@ -315,7 +315,7 @@ export function HomePage() {
       <section className="flow-band motion-section" id="flow">
         <div className="flow-heading motion-item">
           <p className="home-eyebrow">Voice-first workflow</p>
-          <h2>像真的面试一样，一轮一轮推进。</h2>
+          <h2>按真实面试节奏逐轮推进。</h2>
         </div>
         <div className="flow-lane">
           {flow.map(([number, title, copy]) => (
@@ -408,7 +408,7 @@ export function HomePage() {
 
       <section className="home-final">
         <img src="/mianba-logo.svg" alt="" />
-        <h2>先完成一次真实模拟，下一次上场就不再是第一次。</h2>
+        <h2>完成一次真实模拟, 下次上场就更稳。</h2>
         <a className="home-primary" href="/register">
           创建账户
           <AppIcon icon="lucide:arrow-right" size={18} />
