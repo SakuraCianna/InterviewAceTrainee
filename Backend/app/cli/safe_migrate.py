@@ -9,6 +9,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
@@ -34,19 +35,26 @@ def main() -> int:
     return 0
 
 
-def run_safe_migration(database_url: str, project_root: Path, backend_dir: Path) -> Path:
+def run_safe_migration(database_url: str, project_root: Path, backend_dir: Path) -> Path | None:
     ensure_database_reachable(database_url)
 
     backup_root = resolve_backup_root(project_root)
     backup_root.mkdir(parents=True, exist_ok=True)
-    backup_path = timestamped_backup_path(
-        database_url=database_url,
-        backup_root=backup_root,
-        timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
-    )
-    create_database_backup(database_url=database_url, backup_path=backup_path)
-    prune_old_backups(backup_root, keep_count=BACKUP_KEEP_COUNT)
-    normalize_removed_dev_revisions(database_url)
+    should_backup = has_pending_database_operations(database_url=database_url, backend_dir=backend_dir)
+    backup_path: Path | None = None
+    if should_backup:
+        backup_path = timestamped_backup_path(
+            database_url=database_url,
+            backup_root=backup_root,
+            timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
+        )
+        create_database_backup(database_url=database_url, backup_path=backup_path)
+        prune_old_backups(backup_root, keep_count=BACKUP_KEEP_COUNT)
+        normalize_removed_dev_revisions(database_url)
+        print(f"database backup created before migration: {backup_path}")
+    else:
+        print("database backup skipped: alembic version is already up to date")
+
     run_alembic_upgrade(backend_dir)
     return backup_path
 
@@ -127,6 +135,40 @@ def prune_old_backups(backup_root: Path, keep_count: int = BACKUP_KEEP_COUNT) ->
     backup_files = sorted(backup_root.glob("*.dump"), key=lambda path: path.stat().st_mtime, reverse=True)
     for backup_file in backup_files[keep_count:]:
         backup_file.unlink()
+
+
+def has_pending_database_operations(database_url: str, backend_dir: Path) -> bool:
+    current_versions, has_existing_schema = inspect_database_migration_state(database_url)
+    if current_versions & REMOVED_DEV_REVISIONS:
+        return True
+
+    head_versions = get_script_head_versions(backend_dir)
+    if current_versions:
+        return current_versions != head_versions
+
+    return has_existing_schema
+
+
+def inspect_database_migration_state(database_url: str) -> tuple[set[str], bool]:
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        with engine.connect() as connection:
+            inspector = inspect(connection)
+            table_names = set(inspector.get_table_names())
+            business_tables = table_names - {"alembic_version"}
+            if "alembic_version" not in table_names:
+                return set(), bool(business_tables)
+
+            rows = connection.execute(text("SELECT version_num FROM alembic_version")).scalars().all()
+            return {str(row) for row in rows if row}, bool(business_tables)
+    finally:
+        engine.dispose()
+
+
+def get_script_head_versions(backend_dir: Path) -> set[str]:
+    config = Config(str(backend_dir / "alembic.ini"))
+    script = ScriptDirectory.from_config(config)
+    return set(script.get_heads())
 
 
 def normalize_removed_dev_revisions(database_url: str) -> None:
