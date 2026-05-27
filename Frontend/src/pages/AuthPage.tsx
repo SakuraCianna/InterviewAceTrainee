@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Button, SafeArea, Tabs, Toast } from "antd-mobile";
+import { Button, SafeArea, Toast } from "antd-mobile";
 import { AppIcon } from "../components/AppIcon";
 import { getApiErrorMessage } from "../lib/api";
 
@@ -298,16 +298,26 @@ export function AuthPage({ mode }: AuthPageProps) {
           </div>
 
           {mode === "login" && !isResetMode && (
-            <Tabs
-              activeKey={loginMethod}
-              activeLineMode="fixed"
-              className="auth-tabs auth-tabs-mobile"
-              onChange={(key) => setLoginMethod(key === "password" ? "password" : "code")}
-              stretch
-            >
-              <Tabs.Tab title="密码" key="password" />
-              <Tabs.Tab title="验证码" key="code" />
-            </Tabs>
+            <div className="auth-segmented-control" role="tablist" aria-label="登录方式">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={loginMethod === "password"}
+                className={loginMethod === "password" ? "is-active" : ""}
+                onClick={() => setLoginMethod("password")}
+              >
+                密码登录
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={loginMethod === "code"}
+                className={loginMethod === "code" ? "is-active" : ""}
+                onClick={() => setLoginMethod("code")}
+              >
+                验证码登录
+              </button>
+            </div>
           )}
 
           <label>

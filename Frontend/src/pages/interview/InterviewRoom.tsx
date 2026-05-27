@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Button, SafeArea, Selector, Toast } from "antd-mobile";
+import { Button, SafeArea, Toast } from "antd-mobile";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AppIcon } from "../../components/AppIcon";
 import { AvatarStage, AvatarState } from "../../components/AvatarStage";
@@ -1414,6 +1414,32 @@ export function InterviewRoom() {
     navigate("/interview");
   }
 
+  const scenarioModuleGrid = isSelectionStage && !interviewState ? (
+    <div className="interview-module-list launchpad-scenario-list">
+      {modules.map((module, index) => {
+        const detail = moduleDetails[module.type];
+        return (
+          <button
+            type="button"
+            key={module.title}
+            aria-pressed={selectedModuleIndex === index}
+            className={selectedModuleIndex === index ? "is-active" : ""}
+            data-module={module.type}
+            onClick={() => setSelectedModuleIndex(index)}
+          >
+            <span className="module-card-icon">
+              <AppIcon icon={module.icon} size={20} />
+            </span>
+            <span className="module-card-title">{module.title}</span>
+            <em>{module.meta}</em>
+            <strong>{detail.badge}</strong>
+            <small>{detail.material}</small>
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
   const accountSettingsPanel = currentUser && isSettingsOpen ? (
     <section className="account-settings-panel" aria-label="账户设置">
       <div className="account-settings-copy">
@@ -1592,6 +1618,14 @@ export function InterviewRoom() {
           <BrandLogo size={28} />
           面霸练习生
         </a>
+        {isSelectionStage && (
+          <div className="workspace-flow-steps" aria-label="训练流程">
+            <span className="is-active">1 选场景</span>
+            <span>2 补资料</span>
+            <span>3 设备检测</span>
+            <span>4 语音面试</span>
+          </div>
+        )}
         <div className="workspace-header-actions">
           <span className="session-pill">{socketState} · {isSelectionStage ? "选择场景" : progressText}</span>
           <span className="credit-pill">
@@ -1617,11 +1651,12 @@ export function InterviewRoom() {
       <section className={isSelectionStage ? "interview-entry-layout" : "interview-layout"}>
         {isSelectionStage ? (
           <div className="scenario-hero-panel">
-            <span className="eyebrow">Training Console</span>
-            <h1>先选场景，再进入设备检测。</h1>
+            <span className="eyebrow">Training Launchpad</span>
+            <h1>选择训练场景，开始一次真实面试演练。</h1>
             <p>
-              四类训练会分别匹配不同轮次、资料要求和评分维度。资料准备完成后，系统会先检测麦克风，再进入正式语音面试房间。
+              系统会根据场景自动切换题型结构、追问策略、评分维度与报告模板。选定后补齐必要资料，再进入设备检测。
             </p>
+            {scenarioModuleGrid}
 
             <div className="scenario-highlight-card">
               <div className="scenario-highlight-head">
@@ -1650,12 +1685,12 @@ export function InterviewRoom() {
           <AvatarStage state={state} />
         )}
         <aside className={isSelectionStage ? "interview-panel scenario-control-panel" : "interview-panel"}>
-          <span className="eyebrow">{activeQuestion ? activeQuestion.round_name : "Voice-first Interview"}</span>
+          <span className="eyebrow">{activeQuestion ? activeQuestion.round_name : isSelectionStage ? `${selectedModule.title} Setup` : "Voice-first Interview"}</span>
           <h1>
             {interviewState?.status === "completed"
               ? "本次训练已完成。"
               : isSelectionStage
-                ? "选择本次训练场景"
+                ? "本次训练配置"
                 : "面试房间已就绪。"}
           </h1>
           <p>
@@ -1663,14 +1698,6 @@ export function InterviewRoom() {
               ? "工作面试和研究生复试会先收集必要资料；考公面试与雅思口语可以直接进入设备检测。"
               : "系统会播放问题, 只需要开口回答并点击“回答完毕”。刷新或离开页面后, 再回来会自动提示恢复未完成训练。"}
           </p>
-          {isSelectionStage && (
-            <div className="scenario-step-strip" aria-label="训练流程">
-              <span className="is-current">1 选场景</span>
-              <span>2 补资料</span>
-              <span>3 测麦克风</span>
-              <span>4 语音面试</span>
-            </div>
-          )}
           <div className="socket-status">
             <AppIcon icon="lucide:radio" size={18} />
             <span>{socketMessage}</span>
@@ -1716,65 +1743,6 @@ export function InterviewRoom() {
               </div>
               <button type="button" onClick={() => goToMicrophoneCheck(true)}>设备检测后恢复</button>
             </div>
-          )}
-
-          {isSelectionStage && !interviewState && (
-            <>
-              <Selector
-                className="mobile-module-selector"
-                columns={1}
-                showCheckMark={false}
-                value={[selectedModuleIndex]}
-                onChange={(values) => {
-                  const nextIndex = values[0];
-                  if (typeof nextIndex === "number") {
-                    setSelectedModuleIndex(nextIndex);
-                  }
-                }}
-                options={modules.map((module, index) => {
-                  const detail = moduleDetails[module.type];
-                  return {
-                    value: index,
-                    label: (
-                      <span className="mobile-module-option">
-                        <span className="module-card-icon">
-                          <AppIcon icon={module.icon} size={20} />
-                        </span>
-                        <span>
-                          <strong>{module.title}</strong>
-                          <em>{module.meta}</em>
-                          <small>{detail.badge}</small>
-                        </span>
-                      </span>
-                    ),
-                    description: detail.material,
-                  };
-                })}
-              />
-              <div className="interview-module-list">
-                {modules.map((module, index) => {
-                  const detail = moduleDetails[module.type];
-                  return (
-                  <button
-                    type="button"
-                    key={module.title}
-                    aria-pressed={selectedModuleIndex === index}
-                    className={selectedModuleIndex === index ? "is-active" : ""}
-                    data-module={module.type}
-                    onClick={() => setSelectedModuleIndex(index)}
-                  >
-                    <span className="module-card-icon">
-                      <AppIcon icon={module.icon} size={20} />
-                    </span>
-                    <span className="module-card-title">{module.title}</span>
-                    <em>{module.meta}</em>
-                    <strong>{detail.badge}</strong>
-                    <small>{detail.material}</small>
-                  </button>
-                  );
-                })}
-              </div>
-            </>
           )}
 
           {isSelectionStage && !interviewState && (
