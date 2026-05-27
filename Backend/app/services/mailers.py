@@ -1,11 +1,15 @@
 from email.headerregistry import Address
 from html import escape
+import logging
 from math import ceil
 from typing import Any
 
 import resend
 
 from app.core.config import Settings
+
+
+logger = logging.getLogger("mianba.mailers")
 
 
 class EmailDeliveryError(RuntimeError):
@@ -40,7 +44,21 @@ class ResendEmailSender:
         try:
             return resend.Emails.send(message)
         except Exception as exc:  # Resend raises provider-specific HTTP/client exceptions.
+            logger.exception(
+                "Resend delivery failed from_address=%s recipient_domain=%s error_type=%s provider_error=%s",
+                self.from_address,
+                extract_email_domain(to_email),
+                type(exc).__name__,
+                getattr(exc, "message", str(exc)),
+            )
             raise EmailDeliveryError("resend_delivery_failed") from exc
+
+
+def extract_email_domain(email: str) -> str:
+    parts = email.rsplit("@", 1)
+    if len(parts) != 2 or not parts[1]:
+        return "invalid"
+    return parts[1].lower()
 
 
 def format_sender(from_address: str, from_name: str) -> str:
