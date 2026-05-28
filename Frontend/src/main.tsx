@@ -1,6 +1,7 @@
 import React from "react";
-import ReactDOM from "react-dom/client";
+import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
+import { unstableSetRender } from "antd-mobile";
 import App from "./App";
 import "antd-mobile/es/global/global.css";
 import "antd-mobile/es/components/auto-center/auto-center.css";
@@ -16,7 +17,15 @@ import "antd-mobile/es/components/tabs/tabs.css";
 import "antd-mobile/es/components/toast/toast.css";
 import "./styles/index.css";
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+unstableSetRender((node, container) => {
+  const root = createRoot(container);
+  root.render(node);
+  return async () => {
+    root.unmount();
+  };
+});
+
+createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <BrowserRouter>
       <App />

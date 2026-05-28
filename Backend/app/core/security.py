@@ -3,6 +3,7 @@ from secrets import token_urlsafe
 
 from jose import JWTError, jwt
 from pwdlib import PasswordHash
+from pwdlib.exceptions import PwdlibError
 
 from app.core.config import get_settings
 
@@ -17,7 +18,10 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, password_digest: str) -> bool:
-    return password_hash.verify(password, password_digest)
+    try:
+        return password_hash.verify(password, password_digest)
+    except PwdlibError:
+        return False
 
 
 def create_csrf_token() -> str:
