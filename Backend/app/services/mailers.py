@@ -2,8 +2,9 @@ from email.headerregistry import Address
 from html import escape
 import logging
 from math import ceil
-from typing import Any
+from typing import Any, Callable, Protocol
 
+import httpx
 import resend
 
 from app.core.config import Settings
@@ -14,6 +15,11 @@ logger = logging.getLogger("mianba.mailers")
 
 class EmailDeliveryError(RuntimeError):
     """Raised when a configured email provider cannot deliver a message."""
+
+
+class EmailSender(Protocol):
+    def send_verification_code(self, to_email: str, code: str, expires_in_seconds: int) -> dict[str, Any]:
+        ...
 
 
 class DevEmailSender:
@@ -52,6 +58,101 @@ class ResendEmailSender:
                 getattr(exc, "message", str(exc)),
             )
             raise EmailDeliveryError("resend_delivery_failed") from exc
+
+
+class SendCloudEmailSender:
+    def __init__(
+        self,
+        api_user: str,
+        api_key: str,
+        from_address: str,
+        from_name: str,
+        api_url: str = "https://api.sendcloud.net/apiv2/mail/send",
+        post_form: Callable[[str, dict[str, str]], Any] | None = None,
+    ) -> None:
+        self.api_user = api_user
+        self.api_key = api_key
+        self.from_address = from_address
+        self.from_name = from_name
+        self.api_url = api_url
+        self.post_form = post_form or self._post_form
+
+    def send_verification_code(self, to_email: str, code: str, expires_in_seconds: int) -> dict[str, Any]:
+        if not self.api_user:
+            raise EmailDeliveryError("sendcloud_api_user_missing")
+        if not self.api_key:
+            raise EmailDeliveryError("sendcloud_api_key_missing")
+        if not self.from_address:
+            raise EmailDeliveryError("sendcloud_from_address_missing")
+
+        message = build_verification_email(
+            from_address=self.from_address,
+            to_email=to_email,
+            code=code,
+            expires_in_seconds=expires_in_seconds,
+        )
+        payload = {
+            "apiUser": self.api_user,
+            "apiKey": self.api_key,
+            "from": self.from_address,
+            "fromName": self.from_name,
+            "to": to_email,
+            "subject": message["subject"],
+            "html": message["html"],
+            "plain": message["text"],
+        }
+
+        try:
+            response = self.post_form(self.api_url, payload)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            logger.exception(
+                "SendCloud delivery request failed from_address=%s recipient_domain=%s error_type=%s provider_error=%s",
+                self.from_address,
+                extract_email_domain(to_email),
+                type(exc).__name__,
+                str(exc),
+            )
+            raise EmailDeliveryError("sendcloud_delivery_failed") from exc
+
+        if not data.get("result"):
+            logger.error(
+                "SendCloud delivery rejected from_address=%s recipient_domain=%s status_code=%s provider_message=%s",
+                self.from_address,
+                extract_email_domain(to_email),
+                data.get("statusCode"),
+                data.get("message"),
+            )
+            raise EmailDeliveryError("sendcloud_delivery_failed")
+
+        return {
+            "provider": "sendcloud",
+            "to": to_email,
+            "statusCode": str(data.get("statusCode", "")),
+            "message": str(data.get("message", "")),
+        }
+
+    @staticmethod
+    def _post_form(url: str, data: dict[str, str]) -> httpx.Response:
+        return httpx.post(url, data=data, timeout=10)
+
+
+class RoutedEmailSender:
+    def __init__(
+        self,
+        primary_sender: EmailSender,
+        domestic_sender: EmailSender,
+        domestic_domains: set[str],
+    ) -> None:
+        self.primary_sender = primary_sender
+        self.domestic_sender = domestic_sender
+        self.domestic_domains = domestic_domains
+
+    def send_verification_code(self, to_email: str, code: str, expires_in_seconds: int) -> dict[str, Any]:
+        if extract_email_domain(to_email) in self.domestic_domains:
+            return self.domestic_sender.send_verification_code(to_email, code, expires_in_seconds)
+        return self.primary_sender.send_verification_code(to_email, code, expires_in_seconds)
 
 
 def extract_email_domain(email: str) -> str:
@@ -124,17 +225,41 @@ def build_verification_email(from_address: str, to_email: str, code: str, expire
     }
 
 
-def build_email_sender(settings: Settings) -> DevEmailSender | ResendEmailSender:
+def parse_email_domains(raw_domains: str) -> set[str]:
+    return {domain.strip().lower() for domain in raw_domains.split(",") if domain.strip()}
+
+
+def build_email_sender(settings: Settings) -> EmailSender:
     provider = settings.email_provider.strip().lower()
     if provider == "dev":
-        return DevEmailSender()
-    if provider == "resend":
-        return ResendEmailSender(
+        primary_sender: EmailSender = DevEmailSender()
+    elif provider == "resend":
+        primary_sender = ResendEmailSender(
             api_key=settings.resend_api_key,
             from_address=settings.email_from_address,
             from_name=settings.email_from_name,
         )
-    raise EmailDeliveryError("unsupported_email_provider")
+    else:
+        raise EmailDeliveryError("unsupported_email_provider")
+
+    domestic_provider = settings.domestic_email_provider.strip().lower()
+    if not domestic_provider:
+        return primary_sender
+    if domestic_provider != "sendcloud":
+        raise EmailDeliveryError("unsupported_domestic_email_provider")
+
+    domestic_sender = SendCloudEmailSender(
+        api_user=settings.sendcloud_api_user,
+        api_key=settings.sendcloud_api_key,
+        from_address=settings.sendcloud_from_address or settings.email_from_address,
+        from_name=settings.sendcloud_from_name or settings.email_from_name,
+        api_url=settings.sendcloud_api_url,
+    )
+    return RoutedEmailSender(
+        primary_sender=primary_sender,
+        domestic_sender=domestic_sender,
+        domestic_domains=parse_email_domains(settings.domestic_email_domains),
+    )
 
 
 def send_verification_code_email(settings: Settings, to_email: str, code: str, expires_in_seconds: int) -> dict[str, Any]:

@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     email_code_rate_limit: int = 1
     email_code_rate_window_seconds: int = 90
     resend_api_key: str = ""
+    domestic_email_provider: str = ""
+    domestic_email_domains: str = "qq.com,foxmail.com,163.com,126.com,yeah.net,sina.com,sohu.com,139.com,189.cn,aliyun.com"
+    sendcloud_api_user: str = ""
+    sendcloud_api_key: str = ""
+    sendcloud_api_url: str = "https://api.sendcloud.net/apiv2/mail/send"
+    sendcloud_from_name: str = ""
+    sendcloud_from_address: str = ""
     deepseek_api_key: str = ""
     tencent_cloud_app_id: str = ""
     tencent_cloud_secret_id: str = ""

@@ -62,15 +62,30 @@ def check_redis() -> dict[str, object]:
 
 def check_email(settings) -> dict[str, object]:
     provider = settings.email_provider.strip().lower()
+    domestic_provider = settings.domestic_email_provider.strip().lower()
+    domestic_ready = True
+    domestic_detail: dict[str, object] | None = None
+    if domestic_provider == "sendcloud":
+        domestic_ready = bool(settings.sendcloud_api_user and settings.sendcloud_api_key and (settings.sendcloud_from_address or settings.email_from_address))
+        domestic_detail = {
+            "provider": domestic_provider,
+            "ready": domestic_ready,
+            "from_address": settings.sendcloud_from_address or settings.email_from_address,
+        }
+    elif domestic_provider:
+        domestic_ready = False
+        domestic_detail = {"provider": domestic_provider, "ready": False, "detail": "unsupported_domestic_email_provider"}
+
     if provider == "dev":
-        return {"ready": True, "provider": provider, "detail": "dev_code_response_enabled"}
+        return {"ready": domestic_ready, "provider": provider, "detail": "dev_code_response_enabled", "domestic": domestic_detail}
     if provider == "resend":
         return {
-            "ready": bool(settings.resend_api_key and settings.email_from_address),
+            "ready": bool(settings.resend_api_key and settings.email_from_address) and domestic_ready,
             "provider": provider,
             "from_address": settings.email_from_address,
+            "domestic": domestic_detail,
         }
-    return {"ready": False, "provider": provider, "detail": "unsupported_email_provider"}
+    return {"ready": False, "provider": provider, "detail": "unsupported_email_provider", "domestic": domestic_detail}
 
 
 def check_auth(settings) -> dict[str, object]:
