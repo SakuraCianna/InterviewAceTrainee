@@ -13,6 +13,8 @@ from app.services.document_intake import (
     normalize_extracted_text,
     validate_resume_filename,
 )
+from app.services.content_safety import BLOCKED_MESSAGE_CODE, check_user_answer
+from app.services.content_safety_logs import ContentSafetyLogStore, get_content_safety_log_store
 from app.services.interview_material_context import InterviewMaterialContext
 from app.services.interview_materials import (
     InterviewMaterialDraft,
@@ -34,6 +36,7 @@ async def create_interview_material(
     research_direction: Annotated[str | None, Form(max_length=240)] = None,
     claims: TokenClaims = Depends(get_current_user_claims),
     store: InterviewMaterialStore = Depends(get_interview_material_store),
+    content_safety_log_store: ContentSafetyLogStore = Depends(get_content_safety_log_store),
     settings: Settings = Depends(get_settings),
 ) -> InterviewMaterialResponse:
     normalized_job_title = _clean_optional(job_title)
@@ -66,6 +69,32 @@ async def create_interview_material(
         major=normalized_major,
         research_direction=normalized_research_direction,
     )
+    material_safety_text = "\n".join(
+        item
+        for item in (
+            resume_text,
+            normalized_job_title,
+            normalized_job_requirements,
+            normalized_target_school,
+            normalized_major,
+            normalized_research_direction,
+        )
+        if item
+    )
+    safety_decision = check_user_answer(material_safety_text, interview_type)
+    if safety_decision.categories:
+        content_safety_log_store.record_decision(
+            user_email=claims["sub"],
+            session_id=None,
+            source="material_input",
+            decision=safety_decision,
+            content=material_safety_text,
+        )
+    if not safety_decision.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=safety_decision.message_code or BLOCKED_MESSAGE_CODE,
+        )
     record = store.create(
         InterviewMaterialDraft(
             user_email=claims["sub"],

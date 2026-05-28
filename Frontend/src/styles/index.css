@@ -3751,6 +3751,21 @@ button {
   line-height: 1.5;
 }
 
+.provider-row em.is-failed {
+  color: #b91c1c;
+  font-weight: 900;
+}
+
+.provider-row em.is-success {
+  color: #15803d;
+  font-weight: 900;
+}
+
+.provider-row em.is-warning {
+  color: #b45309;
+  font-weight: 900;
+}
+
 @media (max-width: 1260px) {
   .home-hero {
     grid-template-columns: 1fr;

@@ -152,6 +152,22 @@ class AICallLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
+class ContentSafetyLog(Base):
+    __tablename__ = "content_safety_logs"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_pk)
+    user_email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    session_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(32), index=True)
+    action: Mapped[str] = mapped_column(String(40), index=True)
+    risk_level: Mapped[str] = mapped_column(String(20), index=True)
+    categories_json: Mapped[list[str]] = mapped_column(json_type, default=list)
+    matched_terms_json: Mapped[list[str]] = mapped_column(json_type, default=list)
+    content_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    message_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
 class AuthLoginLog(Base):
     __tablename__ = "auth_login_logs"
 

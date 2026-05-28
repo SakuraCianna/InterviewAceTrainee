@@ -84,7 +84,7 @@ CREATE DATABASE mianba
 
 PostgreSQL 的 `UTF8` 编码支持 4 字节 Unicode 字符和 emoji，不使用 MySQL 的 `utf8mb4` 命名。
 
-当前迁移基线包含 13 张业务表：
+当前迁移包含 14 张业务表：
 
 - `users`：用户账号、角色、启停状态与密码哈希。
 - `credit_ledger`：用户次数发放、扣减、补偿流水。
@@ -94,6 +94,7 @@ PostgreSQL 的 `UTF8` 编码支持 4 字节 Unicode 字符和 emoji，不使用 
 - `interview_reports`：完整复盘报告、评分维度和下一步计划。
 - `ai_provider_configs`：固定 DeepSeek LLM 与腾讯云 ASR/TTS 供应商配置。
 - `ai_call_logs`：AI 调用日志，包含成功状态、延迟、请求 ID、token、音频时长、字符数和用量信息。
+- `content_safety_logs`：内容安全日志，记录用户输入和模型输出命中的红线类别、处置动作和可追溯片段。
 - `auth_login_logs`：普通用户与管理员登录审计，记录登录方式、成功状态、失败原因、IP 和 User-Agent。
 - `customer_service_notes`：客服备注，记录用户沟通、补偿口径、关联训练 ID 和管理员操作人。
 - `refund_cases`：退款与纠纷记录，记录诉求、金额、次数补偿、处理状态和处理结论。

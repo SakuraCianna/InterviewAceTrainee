@@ -24,6 +24,8 @@ from app.services.credit_ledger import CreditLedgerStore, get_credit_ledger_stor
 from app.services.credit_ledger import DatabaseCreditLedgerStore
 from app.services.credits import CreditLedger, InsufficientCreditsError
 from app.services.ai_call_logs import AICallLogStore, get_ai_call_log_store
+from app.services.content_safety import BLOCKED_MESSAGE_CODE, check_user_answer
+from app.services.content_safety_logs import ContentSafetyLogStore, get_content_safety_log_store
 from app.services.interview_runtime import (
     DatabaseInterviewRuntimeStore,
     InMemoryInterviewRuntimeStore,
@@ -260,9 +262,25 @@ def answer_interview_question(
     interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
     provider_store: DatabaseProviderConfigStore | InMemoryProviderConfigStore = Depends(get_provider_config_store),
     ai_call_log_store: AICallLogStore = Depends(get_ai_call_log_store),
+    content_safety_log_store: ContentSafetyLogStore = Depends(get_content_safety_log_store),
     settings: Settings = Depends(get_settings),
 ) -> InterviewAnswerResponse:
     current_state = interview_store.get_session(claims["sub"], session_id)
+    if current_state is not None and current_state.status != "completed":
+        safety_decision = check_user_answer(payload.answer_text, current_state.interview_type)
+        if safety_decision.categories:
+            content_safety_log_store.record_decision(
+                user_email=claims["sub"],
+                session_id=session_id,
+                source="user_answer",
+                decision=safety_decision,
+                content=payload.answer_text,
+            )
+        if not safety_decision.allowed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=safety_decision.message_code or BLOCKED_MESSAGE_CODE,
+            )
     next_question_override = None
     if current_state is not None and current_state.current_question is not None:
         try:
@@ -271,7 +289,9 @@ def answer_interview_question(
                 answer_text=payload.answer_text,
                 provider_store=provider_store,
                 ai_call_log_store=ai_call_log_store,
+                content_safety_log_store=content_safety_log_store,
                 settings=settings,
+                user_email=claims["sub"],
             )
         except Exception:
             logger.warning("Failed to generate adaptive follow-up for session_id=%s", session_id, exc_info=True)
@@ -305,7 +325,9 @@ def build_next_question_override(
     answer_text: str,
     provider_store: DatabaseProviderConfigStore | InMemoryProviderConfigStore,
     ai_call_log_store: AICallLogStore,
+    content_safety_log_store: ContentSafetyLogStore,
     settings: Settings,
+    user_email: str,
 ) -> str | None:
     if current_state.current_step_index + 1 >= current_state.total_steps:
         return None
@@ -326,7 +348,9 @@ def build_next_question_override(
         next_static_question=next_step.question_text,
         preset_context=preset_context,
         call_log_store=ai_call_log_store,
+        content_safety_log_store=content_safety_log_store,
         session_id=current_state.session_id,
+        user_email=user_email,
     )
 
 

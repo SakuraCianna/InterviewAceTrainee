@@ -65,6 +65,20 @@ class AdminAICallLogResponse(BaseModel):
     created_at: str
 
 
+class AdminContentSafetyLogResponse(BaseModel):
+    id: str
+    user_email: str | None = None
+    session_id: str | None = None
+    source: str
+    action: str
+    risk_level: str
+    categories: list[str]
+    matched_terms: list[str]
+    content_excerpt: str | None = None
+    message_code: str | None = None
+    created_at: str
+
+
 class AdminStatsPoint(BaseModel):
     label: str
     value: int | float

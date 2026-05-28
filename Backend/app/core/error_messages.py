@@ -15,6 +15,7 @@ ERROR_MESSAGES_ZH: dict[str, str] = {
     "audio_duration_too_long": "当前音频超过短音频识别限制，请使用实时语音通道完成长回答。",
     "cannot_change_own_admin_role": "不能撤销当前登录管理员自己的管理员权限，请使用另一个管理员账号操作。",
     "cannot_disable_own_admin_account": "不能停用当前登录管理员自己的账号，请使用另一个管理员账号操作。",
+    "content_safety_policy_violation": "当前回答包含不适合进入训练的内容，请回到面试问题本身，避免违法违规、作弊、隐私或恶意诱导内容。",
     "credit_balance_cannot_be_negative": "次数调整后不能小于 0，请重新填写。",
     "csrf_token_required": "页面登录状态已刷新，请重新打开页面后再操作。",
     "email_already_registered": "该邮箱已经注册，请直接登录。",

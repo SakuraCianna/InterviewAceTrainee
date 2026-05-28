@@ -20,6 +20,7 @@ from app.schemas.admin import (
     AdminAICallLogResponse,
     AdminAuthLoginLogResponse,
     AdminAuditLogResponse,
+    AdminContentSafetyLogResponse,
     AdminCreditAdjustmentRequest,
     AdminCreditAdjustmentResponse,
     AdminCreditLedgerResponse,
@@ -47,6 +48,7 @@ from app.services.audit_logs import DatabaseAuditLogStore, InMemoryAuditLogStore
 from app.services.ai_call_logs import AICallLogStore, get_ai_call_log_store
 from app.services.auth_sessions import AuthSessionStore, get_auth_session_store
 from app.services.auth_login_logs import AuthLoginLogStore, get_auth_login_log_store
+from app.services.content_safety_logs import ContentSafetyLogStore, get_content_safety_log_store
 from app.services.credit_balances import CreditBalanceStore, DatabaseCreditBalanceStore, get_credit_balance_store
 from app.services.credit_ledger import CreditLedgerStore, DatabaseCreditLedgerStore, get_credit_ledger_store
 from app.services.customer_service_notes import CustomerServiceNoteStore, get_customer_service_note_store
@@ -825,6 +827,14 @@ def read_ai_call_logs(
     ai_call_log_store: AICallLogStore = Depends(get_ai_call_log_store),
 ) -> list[AdminAICallLogResponse]:
     return ai_call_log_store.list_recent(limit=80)
+
+
+@router.get("/content-safety-logs", response_model=list[AdminContentSafetyLogResponse])
+def read_content_safety_logs(
+    _admin_claims: TokenClaims = Depends(require_admin_user),
+    content_safety_log_store: ContentSafetyLogStore = Depends(get_content_safety_log_store),
+) -> list[AdminContentSafetyLogResponse]:
+    return content_safety_log_store.list_recent(limit=80)
 
 
 @router.get("/system-configs", response_model=list[SystemConfigResponse])

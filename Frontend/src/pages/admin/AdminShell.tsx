@@ -102,6 +102,20 @@ type AICallLogEntry = {
   created_at: string;
 };
 
+type ContentSafetyLogEntry = {
+  id: string;
+  user_email?: string | null;
+  session_id?: string | null;
+  source: string;
+  action: string;
+  risk_level: string;
+  categories: string[];
+  matched_terms: string[];
+  content_excerpt?: string | null;
+  message_code?: string | null;
+  created_at: string;
+};
+
 type AuthLoginLogEntry = {
   id: string;
   email: string;
@@ -332,6 +346,7 @@ export function AdminShell() {
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [creditLedger, setCreditLedger] = useState<CreditLedgerEntry[]>([]);
   const [aiCallLogs, setAiCallLogs] = useState<AICallLogEntry[]>([]);
+  const [contentSafetyLogs, setContentSafetyLogs] = useState<ContentSafetyLogEntry[]>([]);
   const [authLoginLogs, setAuthLoginLogs] = useState<AuthLoginLogEntry[]>([]);
   const [customerServiceNotes, setCustomerServiceNotes] = useState<CustomerServiceNoteEntry[]>([]);
   const [refundCases, setRefundCases] = useState<RefundCaseEntry[]>([]);
@@ -475,6 +490,7 @@ export function AdminShell() {
       loadSystemConfigs(),
       loadAuditLogs(),
       loadAiCallLogs(),
+      loadContentSafetyLogs(),
       loadAuthLoginLogs(),
       loadRefundCases(),
     ]);
@@ -503,6 +519,14 @@ export function AdminShell() {
       return;
     }
     setAiCallLogs((await response.json()) as AICallLogEntry[]);
+  }
+
+  async function loadContentSafetyLogs() {
+    const response = await fetch("/api/admin/content-safety-logs", { credentials: "include" });
+    if (!response.ok) {
+      return;
+    }
+    setContentSafetyLogs((await response.json()) as ContentSafetyLogEntry[]);
   }
 
   async function loadAuthLoginLogs(userEmail?: string) {
@@ -957,6 +981,7 @@ export function AdminShell() {
       loadSystemConfigs(),
       loadAuditLogs(),
       loadAiCallLogs(),
+      loadContentSafetyLogs(),
       loadCreditLedger(),
       loadAuthLoginLogs(selectedUserEmail || undefined),
       loadRefundCases(selectedUserEmail || undefined),
@@ -971,6 +996,7 @@ export function AdminShell() {
     setAuditLogs([]);
     setCreditLedger([]);
     setAiCallLogs([]);
+    setContentSafetyLogs([]);
     setAuthLoginLogs([]);
     setCustomerServiceNotes([]);
     setRefundCases([]);
@@ -1242,9 +1268,13 @@ export function AdminShell() {
                   <b>{aiCallLogs.filter((entry) => !entry.success).length}</b>
                   AI 调用失败
                 </span>
+                <span>
+                  <b>{contentSafetyLogs.filter((entry) => entry.action !== "allowed").length}</b>
+                  安全拦截
+                </span>
               </div>
               <p>
-                售后纠纷优先从训练报告、次数流水、登录日志和 AI 调用日志四条线交叉核对，避免只凭聊天截图判断。
+                售后纠纷优先从训练报告、次数流水、登录日志、内容安全日志和 AI 调用日志交叉核对，避免只凭聊天截图判断。
               </p>
             </article>
           </section>
@@ -1633,6 +1663,32 @@ export function AdminShell() {
 
           <section className="admin-provider-table admin-audit-table">
             <div className="admin-section-heading">
+              <span className="eyebrow">Content Safety</span>
+              <h2>内容安全拦截记录</h2>
+            </div>
+            <div className="admin-provider-list">
+              {contentSafetyLogs.length === 0 && <p className="admin-empty-text">暂无内容安全拦截记录。</p>}
+              {contentSafetyLogs.slice(0, 12).map((entry) => (
+                <article className="provider-row" key={entry.id}>
+                  <div>
+                    <strong>{entry.user_email ?? "unknown-user"} / {entry.source}</strong>
+                    <span>
+                      {entry.session_id ?? "no-session"} · {entry.categories.join(" / ")}
+                      {entry.matched_terms.length > 0 ? ` · 命中 ${entry.matched_terms.slice(0, 3).join(" / ")}` : ""}
+                    </span>
+                    {entry.content_excerpt && <span>{entry.content_excerpt}</span>}
+                  </div>
+                  <em className={entry.risk_level === "high" ? "is-failed" : "is-warning"}>
+                    {entry.action} / {entry.risk_level}
+                  </em>
+                  <span>{formatDateTime(entry.created_at)}</span>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="admin-provider-table admin-audit-table">
+            <div className="admin-section-heading">
               <span className="eyebrow">AI Call Logs</span>
               <h2>模型调用记录</h2>
             </div>
@@ -1647,7 +1703,9 @@ export function AdminShell() {
                       {entry.provider_request_id ? ` · ${entry.provider_request_id}` : ""}
                     </span>
                   </div>
-                  <em>{entry.success ? "成功" : getApiErrorMessage({ detail: entry.error_message ?? undefined }, "调用失败")}</em>
+                  <em className={entry.success ? "is-success" : "is-failed"}>
+                    {entry.success ? "成功" : getApiErrorMessage({ detail: entry.error_message ?? undefined }, "调用失败")}
+                  </em>
                   <span>
                     {entry.latency_ms != null ? `${entry.latency_ms}ms` : "no-latency"}
                     {entry.input_tokens != null || entry.output_tokens != null

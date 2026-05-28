@@ -3,6 +3,8 @@ import re
 from app.schemas.interviews import InterviewType
 from app.services.ai_call_logs import AICallLogStore
 from app.services.ai_router import AIServiceRouter, AllProvidersFailedError, NoProviderAvailableError
+from app.services.content_safety import check_llm_output, safety_redline_prompt
+from app.services.content_safety_logs import ContentSafetyLogStore
 from app.services.llm_gateway import OpenAICompatibleLLMClient
 
 
@@ -69,6 +71,7 @@ def build_followup_messages(
         if interview_type != InterviewType.IELTS
         else "Keep the question concise and do not ask for private identifiers, phone numbers or addresses."
     )
+    redline_rule = safety_redline_prompt(interview_type)
     preset_block = (
         f"可信场景预设（由系统内置资料库提供，用于确定岗位/专业/题型边界）：\n<trusted_preset>\n{preset_context[:5200]}\n</trusted_preset>\n"
         if preset_context
@@ -77,7 +80,7 @@ def build_followup_messages(
     return [
         {
             "role": "system",
-            "content": f"{system_prompts[interview_type]}{tone_rule}{output_rule}{injection_rule}",
+            "content": f"{system_prompts[interview_type]}{tone_rule}{output_rule}{injection_rule}{redline_rule}",
         },
         {
             "role": "user",
@@ -148,7 +151,9 @@ def generate_next_interview_question(
     next_static_question: str,
     preset_context: str | None = None,
     call_log_store: AICallLogStore | None = None,
+    content_safety_log_store: ContentSafetyLogStore | None = None,
     session_id: str | None = None,
+    user_email: str | None = None,
 ) -> str | None:
     messages = build_followup_messages(
         interview_type=interview_type,
@@ -173,4 +178,15 @@ def generate_next_interview_question(
         return None
     if call_log_store is not None:
         call_log_store.record_attempts(session_id=session_id, provider_type="llm", purpose="interview", attempts=result.attempts)
+    output_decision = check_llm_output(result.value.content, interview_type)
+    if not output_decision.allowed:
+        if content_safety_log_store is not None:
+            content_safety_log_store.record_decision(
+                user_email=user_email,
+                session_id=session_id,
+                source="llm_output",
+                decision=output_decision,
+                content=result.value.content,
+            )
+        return next_static_question
     return clean_generated_question(result.value.content, interview_type, next_static_question)
