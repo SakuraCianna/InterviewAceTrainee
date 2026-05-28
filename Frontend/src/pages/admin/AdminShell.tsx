@@ -1095,14 +1095,14 @@ export function AdminShell() {
                 管理员邮箱
                 <div className="input-shell">
                   <AppIcon icon="lucide:mail" size={18} />
-                  <input type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="admin@example.com" required />
+                  <input type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="admin@example.com" autoComplete="username" required />
                 </div>
               </label>
               <label>
                 密码
                 <div className="input-shell">
                   <AppIcon icon="lucide:key-round" size={18} />
-                  <input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} placeholder="至少 8 位" minLength={8} required />
+                  <input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} placeholder="至少 8 位" minLength={8} autoComplete="current-password" required />
                 </div>
               </label>
               <label>
@@ -1110,7 +1110,7 @@ export function AdminShell() {
                 <div className="code-row">
                   <div className="input-shell">
                     <AppIcon icon="lucide:key-round" size={18} />
-                    <input value={loginCode} onChange={(event) => setLoginCode(event.target.value)} placeholder="6 位验证码" minLength={6} maxLength={6} required />
+                    <input value={loginCode} onChange={(event) => setLoginCode(event.target.value)} placeholder="6 位验证码" minLength={6} maxLength={6} autoComplete="one-time-code" required />
                   </div>
                   <button type="button" className="code-button admin-auth-code-button" onClick={requestAdminCode} disabled={isRequestingAdminCode || adminCodeCooldownSeconds > 0}>
                     {isRequestingAdminCode ? "发送中" : adminCodeCooldownSeconds > 0 ? `${adminCodeCooldownSeconds}s` : "获取"}
@@ -1187,16 +1187,16 @@ export function AdminShell() {
               </div>
               <label>
                 管理员邮箱
-                <input type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} required />
+                <input type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} autoComplete="username" required />
               </label>
               <label>
                 密码
-                <input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} minLength={8} required />
+                <input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} minLength={8} autoComplete="current-password" required />
               </label>
               <label>
                 邮箱验证码
                 <div className="admin-code-row">
-                  <input value={loginCode} onChange={(event) => setLoginCode(event.target.value)} minLength={6} maxLength={6} required />
+                  <input value={loginCode} onChange={(event) => setLoginCode(event.target.value)} minLength={6} maxLength={6} autoComplete="one-time-code" required />
                   <button type="button" onClick={requestAdminCode} disabled={isRequestingAdminCode || adminCodeCooldownSeconds > 0}>
                     {isRequestingAdminCode ? "发送中" : adminCodeCooldownSeconds > 0 ? `${adminCodeCooldownSeconds}s` : "获取验证码"}
                   </button>
