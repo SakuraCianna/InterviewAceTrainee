@@ -258,21 +258,35 @@ const adminSectionNavItems: { key: AdminSectionKey; label: string; icon: string 
   { key: "audit", label: "审计", icon: "lucide:shield-check" },
 ];
 
+const creditReasonOptions = [
+  { value: "manual_grant", label: "人工开通", help: "用户购买或人工确认后增加次数。" },
+  { value: "trial_bonus", label: "试用赠送", help: "新用户、活动或人工试用赠送。" },
+  { value: "service_compensation", label: "服务补偿", help: "验证码、模型、语音等系统问题导致体验受损后补偿。" },
+  { value: "refund_adjustment", label: "退款退回", help: "售后退款、纠纷处理或次数退回。" },
+  { value: "manual_correction", label: "余额修正", help: "管理员核对账本后修正异常余额。" },
+  { value: "manual_deduction", label: "人工扣减", help: "误发、滥用或人工确认后扣减次数。" },
+];
+
+function adminSectionFromHash(hash: string): AdminSectionKey | null {
+  const key = hash.replace(/^#admin-/, "") as AdminSectionKey;
+  return adminSectionNavItems.some((item) => item.key === key) ? key : null;
+}
+
 const chartTextColor = "#334155";
 
 function lineDashboardOption(stats: AdminDashboardStats): EChartsOption {
   const labels = stats.daily_interviews.map((item) => item.label);
   return {
-    color: ["#2f7dff", "#19c6c4", "#d8ff4f"],
+    color: ["#174ea6", "#b3261e", "#0b8043"],
     grid: { top: 36, right: 18, bottom: 28, left: 38 },
     legend: { top: 0, textStyle: { color: chartTextColor, fontWeight: 700 } },
     tooltip: { trigger: "axis" },
     xAxis: { type: "category", boundaryGap: false, data: labels, axisLabel: { color: chartTextColor } },
     yAxis: { type: "value", minInterval: 1, axisLabel: { color: chartTextColor }, splitLine: { lineStyle: { color: "rgba(15,23,42,0.08)" } } },
     series: [
-      { name: "训练场次", type: "line", smooth: true, areaStyle: { opacity: 0.12 }, data: stats.daily_interviews.map((item) => item.value) },
-      { name: "生成报告", type: "line", smooth: true, areaStyle: { opacity: 0.1 }, data: stats.daily_reports.map((item) => item.value) },
-      { name: "新增用户", type: "line", smooth: true, areaStyle: { opacity: 0.08 }, data: stats.user_growth.map((item) => item.value) },
+      { name: "训练场次", type: "line", smooth: true, symbolSize: 8, lineStyle: { width: 3 }, areaStyle: { opacity: 0.1 }, data: stats.daily_interviews.map((item) => item.value) },
+      { name: "生成报告", type: "line", smooth: true, symbolSize: 8, lineStyle: { width: 3 }, areaStyle: { opacity: 0.08 }, data: stats.daily_reports.map((item) => item.value) },
+      { name: "新增用户", type: "line", smooth: true, symbolSize: 8, lineStyle: { width: 3 }, areaStyle: { opacity: 0.08 }, data: stats.user_growth.map((item) => item.value) },
     ],
   };
 }
@@ -400,11 +414,11 @@ export function AdminShell() {
     }
     return {
       trend: lineDashboardOption(dashboardStats),
-      moduleMix: donutDashboardOption(dashboardStats.interview_type_distribution, ["#2f7dff", "#19c6c4", "#d8ff4f", "#ff8a3d"]),
-      sessionStatus: donutDashboardOption(dashboardStats.session_status_distribution, ["#2f7dff", "#16a34a", "#f59e0b", "#ef4444"]),
-      aiQuality: barDashboardOption(dashboardStats.ai_call_success_distribution, "AI 调用", "#2f7dff"),
-      loginOutcome: barDashboardOption(dashboardStats.login_outcome_distribution, "登录", "#19c6c4"),
-      refunds: donutDashboardOption(dashboardStats.refund_status_distribution, ["#f59e0b", "#2f7dff", "#16a34a", "#ef4444"]),
+      moduleMix: donutDashboardOption(dashboardStats.interview_type_distribution, ["#174ea6", "#b3261e", "#0b8043", "#f29900"]),
+      sessionStatus: donutDashboardOption(dashboardStats.session_status_distribution, ["#174ea6", "#0b8043", "#f29900", "#b3261e"]),
+      aiQuality: barDashboardOption(dashboardStats.ai_call_success_distribution, "AI 调用", "#174ea6"),
+      loginOutcome: barDashboardOption(dashboardStats.login_outcome_distribution, "登录", "#b3261e"),
+      refunds: donutDashboardOption(dashboardStats.refund_status_distribution, ["#f29900", "#174ea6", "#0b8043", "#b3261e"]),
     };
   }, [dashboardStats]);
 
@@ -413,6 +427,13 @@ export function AdminShell() {
       return;
     }
     void loadCurrentUser();
+  }, []);
+
+  useEffect(() => {
+    const section = adminSectionFromHash(window.location.hash);
+    if (section) {
+      setActiveAdminSection(section);
+    }
   }, []);
 
   useEffect(() => {
@@ -476,10 +497,13 @@ export function AdminShell() {
     return value == null ? "暂无" : `${value}%`;
   }
 
+  const selectedCreditReason = creditReasonOptions.find((option) => option.value === creditReason) ?? creditReasonOptions[0];
+
   const consoleLayoutRef = useRef<HTMLDivElement | null>(null);
 
   function selectAdminSection(section: AdminSectionKey) {
     setActiveAdminSection(section);
+    window.history.replaceState(null, "", `#admin-${section}`);
     window.requestAnimationFrame(() => {
       consoleLayoutRef.current?.scrollTo({ top: 0 });
     });
@@ -1335,7 +1359,12 @@ export function AdminShell() {
               </label>
               <label>
                 调整原因
-                <input value={creditReason} onChange={(event) => setCreditReason(event.target.value)} placeholder="manual_grant / refund_adjustment" required />
+                <select value={creditReason} onChange={(event) => setCreditReason(event.target.value)} required>
+                  {creditReasonOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <small className="admin-field-help">{selectedCreditReason.help}</small>
               </label>
               <label>
                 处理备注

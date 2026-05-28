@@ -6422,6 +6422,7 @@ body:has(.admin-page--authed) {
 }
 
 .admin-page.admin-page--authed .admin-panel input,
+.admin-page.admin-page--authed .admin-panel select,
 .admin-page.admin-page--authed .admin-ops-card input,
 .admin-page.admin-page--authed .admin-ops-card textarea,
 .admin-page.admin-page--authed .admin-search-form input,
@@ -6432,6 +6433,18 @@ body:has(.admin-page--authed) {
   color: var(--admin-ink);
   background: #ffffff;
   box-shadow: none;
+}
+
+.admin-page.admin-page--authed .admin-panel select {
+  min-height: 46px;
+  padding: 0 14px;
+}
+
+.admin-page.admin-page--authed .admin-field-help {
+  color: var(--admin-muted);
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1.5;
 }
 
 .admin-page.admin-page--authed .admin-action-row button,

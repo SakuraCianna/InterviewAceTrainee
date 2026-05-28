@@ -29,7 +29,21 @@ CONFIG_VALIDATED_PROVIDER_TYPES = {"asr", "tts"}
 CONFIG_VALIDATED_PROVIDERS = {"tencent"}
 
 
-def to_response(config: AIProviderConfig) -> ProviderSelectionResponse:
+def effective_provider_secret(config: AIProviderConfig, settings: Settings) -> tuple[bool, str | None]:
+    if config.api_key:
+        return True, config.api_key_preview
+
+    provider_name = config.provider_name.strip().lower()
+    if config.provider_type == "llm" and provider_name == "deepseek" and settings.deepseek_api_key:
+        return True, "环境变量已配置"
+    if provider_name == "tencent" and settings.tencent_cloud_app_id and settings.tencent_cloud_secret_id and settings.tencent_cloud_secret_key:
+        return True, "环境变量已配置"
+    return False, None
+
+
+def to_response(config: AIProviderConfig, settings: Settings | None = None) -> ProviderSelectionResponse:
+    resolved_settings = settings or get_settings()
+    has_api_key, api_key_preview = effective_provider_secret(config, resolved_settings)
     return ProviderSelectionResponse(
         id=config.id,
         provider_type=config.provider_type,
@@ -39,8 +53,8 @@ def to_response(config: AIProviderConfig) -> ProviderSelectionResponse:
         priority=config.priority,
         region=config.region,
         enabled=config.enabled,
-        has_api_key=bool(config.api_key),
-        api_key_preview=config.api_key_preview,
+        has_api_key=has_api_key,
+        api_key_preview=api_key_preview,
     )
 
 
@@ -65,8 +79,9 @@ def get_provider_config_store(
 def list_provider_configs(
     _admin_claims: TokenClaims = Depends(require_admin_user),
     store: DatabaseProviderConfigStore | InMemoryProviderConfigStore = Depends(get_provider_config_store),
+    settings: Settings = Depends(get_settings),
 ) -> list[ProviderSelectionResponse]:
-    return [to_response(config) for config in store.list_configs()]
+    return [to_response(config, settings) for config in store.list_configs()]
 
 
 @router.put("/{provider_id}", response_model=ProviderSelectionResponse)
