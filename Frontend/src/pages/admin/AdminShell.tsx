@@ -247,12 +247,12 @@ type AdminDashboardStats = {
   top_users: AdminTopUserUsage[];
 };
 
-const chartTextColor = "#475569";
+const chartTextColor = "#334155";
 
 function lineDashboardOption(stats: AdminDashboardStats): EChartsOption {
   const labels = stats.daily_interviews.map((item) => item.label);
   return {
-    color: ["#2563eb", "#0ea5a5", "#d6ff5f"],
+    color: ["#2f7dff", "#19c6c4", "#d8ff4f"],
     grid: { top: 36, right: 18, bottom: 28, left: 38 },
     legend: { top: 0, textStyle: { color: chartTextColor, fontWeight: 700 } },
     tooltip: { trigger: "axis" },
@@ -296,7 +296,7 @@ function barDashboardOption(points: AdminStatsPoint[], name: string, color: stri
         name,
         type: "bar",
         barMaxWidth: 42,
-        itemStyle: { borderRadius: [8, 8, 0, 0] },
+        itemStyle: { borderRadius: [4, 4, 0, 0] },
         data: points.map((item) => item.value),
       },
     ],
@@ -386,11 +386,11 @@ export function AdminShell() {
     }
     return {
       trend: lineDashboardOption(dashboardStats),
-      moduleMix: donutDashboardOption(dashboardStats.interview_type_distribution, ["#2563eb", "#0ea5a5", "#d6ff5f", "#ff8a3d"]),
-      sessionStatus: donutDashboardOption(dashboardStats.session_status_distribution, ["#2563eb", "#22c55e", "#f59e0b", "#ef4444"]),
-      aiQuality: barDashboardOption(dashboardStats.ai_call_success_distribution, "AI 调用", "#2563eb"),
-      loginOutcome: barDashboardOption(dashboardStats.login_outcome_distribution, "登录", "#0ea5a5"),
-      refunds: donutDashboardOption(dashboardStats.refund_status_distribution, ["#f59e0b", "#2563eb", "#22c55e", "#ef4444"]),
+      moduleMix: donutDashboardOption(dashboardStats.interview_type_distribution, ["#2f7dff", "#19c6c4", "#d8ff4f", "#ff8a3d"]),
+      sessionStatus: donutDashboardOption(dashboardStats.session_status_distribution, ["#2f7dff", "#16a34a", "#f59e0b", "#ef4444"]),
+      aiQuality: barDashboardOption(dashboardStats.ai_call_success_distribution, "AI 调用", "#2f7dff"),
+      loginOutcome: barDashboardOption(dashboardStats.login_outcome_distribution, "登录", "#19c6c4"),
+      refunds: donutDashboardOption(dashboardStats.refund_status_distribution, ["#f59e0b", "#2f7dff", "#16a34a", "#ef4444"]),
     };
   }, [dashboardStats]);
 
@@ -1021,8 +1021,8 @@ export function AdminShell() {
   }
 
   return (
-    <main className="workspace-page admin-page">
-      <header className="workspace-header">
+    <main className={`workspace-page admin-page ${currentUser ? "admin-page--authed" : "admin-page--guest"}`}>
+      <header className="workspace-header admin-console-header">
         <a href="/" className="brand-mark">
           <BrandLogo size={28} />
           面霸练习生
@@ -1039,13 +1039,23 @@ export function AdminShell() {
       </header>
 
       <section className="admin-hero">
-        <span className="eyebrow">Operator Console</span>
-        <h1>运营后台</h1>
-              <p>后台用于手动发放面试次数、查看 AI 服务状态和检查系统日志。管理员必须拥有管理员权限，并通过密码与邮箱验证码双重认证。</p>
+        <div className="admin-hero-copy">
+          <span className="eyebrow">Operator Console</span>
+          <h1>运营后台</h1>
+          <p>集中处理用户次数、AI 服务状态、售后追踪和安全审计。这里是内部操作台，不再沿用用户端的展示型视觉。</p>
+        </div>
+        <div className="admin-hero-panel" aria-label="后台安全状态">
+          <span>{currentUser ? "SESSION LIVE" : "SECURE ENTRY"}</span>
+          <strong>{currentUser ? "已认证" : "双重认证"}</strong>
+          <p>权限校验 / 邮箱验证码 / 操作留痕</p>
+        </div>
       </section>
 
       <div className="admin-status-row">
-        <span>{message}</span>
+        <span>
+          <AppIcon icon={currentUser ? "lucide:radio-tower" : "lucide:lock-keyhole"} size={18} />
+          {message}
+        </span>
         {currentUser && (
           <button type="button" onClick={refreshAdminData}>
             <AppIcon icon="lucide:activity" size={18} />
@@ -1056,7 +1066,15 @@ export function AdminShell() {
 
       {!currentUser && !isLoading && (
         <form className="admin-login-panel" onSubmit={submitAdminLogin}>
-          <h2>管理员登录</h2>
+          <div className="admin-login-title">
+            <span className="admin-login-icon">
+              <AppIcon icon="lucide:key-round" size={22} />
+            </span>
+            <div>
+              <span className="eyebrow">Secure Access</span>
+              <h2>管理员认证</h2>
+            </div>
+          </div>
           <label>
             管理员邮箱
             <input type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} required />
@@ -1084,17 +1102,17 @@ export function AdminShell() {
             <article className="admin-card">
               <AppIcon icon="lucide:bot" size={24} />
               <h2>{enabledProviderCount} / {providers.length}</h2>
-              <p>启用中的 AI 服务</p>
+              <p>在线 AI 路由</p>
             </article>
             <article className="admin-card">
               <AppIcon icon="lucide:coins" size={24} />
-              <h2>手动开通</h2>
-              <p>根据用户沟通结果，手动发放、扣减或补偿面试训练次数。</p>
+              <h2>次数作业台</h2>
+              <p>按用户沟通结果发放、扣减或补偿面试训练次数。</p>
             </article>
             <article className="admin-card">
               <AppIcon icon="lucide:shield-check" size={24} />
-              <h2>管理员后台</h2>
-              <p>后台入口仍可隐藏，但真正的权限由服务端校验。</p>
+              <h2>审计边界</h2>
+              <p>入口可以隐藏，关键权限始终由服务端校验并记录。</p>
             </article>
           </section>
 

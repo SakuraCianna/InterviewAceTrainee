@@ -21,6 +21,7 @@ import keyRound from "@iconify-icons/lucide/key-round";
 import landmark from "@iconify-icons/lucide/landmark";
 import languages from "@iconify-icons/lucide/languages";
 import listChecks from "@iconify-icons/lucide/list-checks";
+import lockKeyhole from "@iconify-icons/lucide/lock-keyhole";
 import logOut from "@iconify-icons/lucide/log-out";
 import mail from "@iconify-icons/lucide/mail";
 import mailCheck from "@iconify-icons/lucide/mail-check";
@@ -29,6 +30,7 @@ import mic2 from "@iconify-icons/lucide/mic-2";
 import penLine from "@iconify-icons/lucide/pen-line";
 import play from "@iconify-icons/lucide/play";
 import radio from "@iconify-icons/lucide/radio";
+import radioTower from "@iconify-icons/lucide/radio-tower";
 import receipt from "@iconify-icons/lucide/receipt";
 import route from "@iconify-icons/lucide/route";
 import rotateCcw from "@iconify-icons/lucide/rotate-ccw";
@@ -65,6 +67,7 @@ const icons: Record<string, IconifyIcon> = {
   "lucide:landmark": landmark,
   "lucide:languages": languages,
   "lucide:list-checks": listChecks,
+  "lucide:lock-keyhole": lockKeyhole,
   "lucide:log-out": logOut,
   "lucide:mail": mail,
   "lucide:mail-check": mailCheck,
@@ -74,6 +77,7 @@ const icons: Record<string, IconifyIcon> = {
   "lucide:notebook-tabs": bookOpenText,
   "lucide:play": play,
   "lucide:radio": radio,
+  "lucide:radio-tower": radioTower,
   "lucide:receipt-text": receipt,
   "lucide:route": route,
   "lucide:rotate-ccw": rotateCcw,
