@@ -77,7 +77,7 @@ class DatabaseCreditBalanceStore(CreditBalanceStore):
         return 0 if user is None else user.credit_balance
 
     def adjust(self, user_id: str, change_amount: int) -> int:
-        user = self._get_or_create_user(user_id)
+        user = self._get_or_create_user_for_update(user_id)
         balance_after = user.credit_balance + change_amount
         if balance_after < 0:
             if self._commit_on_write:
@@ -94,9 +94,11 @@ class DatabaseCreditBalanceStore(CreditBalanceStore):
         normalized_email = self._normalize_email(email)
         return self._session.execute(select(User).where(User.email == normalized_email)).scalar_one_or_none()
 
-    def _get_or_create_user(self, email: str) -> User:
+    def _get_or_create_user_for_update(self, email: str) -> User:
         normalized_email = self._normalize_email(email)
-        user = self._get_user(normalized_email)
+        user = self._session.execute(
+            select(User).where(User.email == normalized_email).with_for_update()
+        ).scalar_one_or_none()
         if user is not None:
             return user
         user = User(email=normalized_email, password_hash=None, role="user", credit_balance=0, is_active=True)
