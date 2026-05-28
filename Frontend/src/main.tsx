@@ -14,7 +14,6 @@ import "antd-mobile/es/components/selector/selector.css";
 import "antd-mobile/es/components/space/space.css";
 import "antd-mobile/es/components/spin-loading/spin-loading.css";
 import "antd-mobile/es/components/tabs/tabs.css";
-import "antd-mobile/es/components/toast/toast.css";
 import "./styles/index.css";
 
 unstableSetRender((node, container) => {

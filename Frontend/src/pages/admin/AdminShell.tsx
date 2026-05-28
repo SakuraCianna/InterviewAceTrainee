@@ -1043,7 +1043,7 @@ export function AdminShell() {
     setRefundAmountYuan("");
     setRefundCreditAdjustment("");
     setRefundSessionId("");
-    setMessage("已退出后台，请重新完成管理员双重认证。");
+    setMessage("已退出后台，请重新完成管理员后台登录。");
     window.location.assign("/");
   }
 
@@ -1067,10 +1067,9 @@ export function AdminShell() {
             </div>
             <span className="eyebrow">Admin Console</span>
             <h1 className="auth-title-login">
-              <span className="auth-title-line">运营后台</span>
-              <span className="auth-title-line">双重认证</span>
+              <span className="auth-title-line admin-auth-title-single">管理员后台登录</span>
             </h1>
-            <p>使用管理员邮箱、密码和邮箱验证码进入内部后台，处理用户次数、AI 服务状态、售后追踪和安全审计。</p>
+            <p>使用管理员邮箱、密码和邮箱验证码进入内部后台，集中处理用户次数、AI 服务状态、售后追踪和安全审计。</p>
             <div className="auth-status-card admin-auth-status-card" aria-label="后台能力状态">
               <span>
                 <AppIcon icon="lucide:shield-check" size={18} />
@@ -1151,12 +1150,12 @@ export function AdminShell() {
         <section className="admin-hero">
           <div className="admin-hero-copy">
             <span className="eyebrow">Operator Console</span>
-            <h1>运营后台</h1>
+            <h1>管理员后台</h1>
             <p>集中处理用户次数、AI 服务状态、售后追踪和安全审计。后台应该像工作台一样清晰、稳定、好扫描。</p>
           </div>
           <div className="admin-hero-panel" aria-label="后台安全状态">
             <span>{currentUser ? "SESSION LIVE" : "SECURE ENTRY"}</span>
-            <strong>{currentUser ? "已认证" : "双重认证"}</strong>
+            <strong>{currentUser ? "已认证" : "管理员登录"}</strong>
             <p>权限校验 / 邮箱验证码 / 操作留痕</p>
           </div>
         </section>
@@ -1183,7 +1182,7 @@ export function AdminShell() {
                 </span>
                 <div>
                   <span className="eyebrow">Secure Access</span>
-                  <h2>管理员认证</h2>
+                  <h2>管理员后台登录</h2>
                 </div>
               </div>
               <label>

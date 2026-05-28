@@ -92,7 +92,12 @@ class InMemoryUserCredentialStore(UserCredentialStore):
             raise UserDisabledError("user disabled")
         if existing is not None and existing.password_hash:
             raise UserAlreadyExistsError("email already registered")
-        _memory_users[normalized_email] = UserAccountRecord(email=normalized_email, password_hash=password_hash)
+        _memory_users[normalized_email] = UserAccountRecord(
+            email=normalized_email,
+            role=existing.role if existing is not None else "user",
+            is_active=existing.is_active if existing is not None else True,
+            password_hash=password_hash,
+        )
         _set_memory_initial_credit(normalized_email, initial_credit_balance)
 
     def get_password_hash(self, email: str) -> str | None:

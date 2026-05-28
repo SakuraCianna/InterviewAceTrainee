@@ -157,6 +157,11 @@ def normalize_auth_email(email: object) -> str:
     return str(email).strip().lower()
 
 
+def get_authenticated_role(user_store: UserCredentialStore, email: str) -> str:
+    user_record = user_store.get_user_record(email)
+    return user_record.role if user_record is not None else "user"
+
+
 def record_login_event(
     log_store: AuthLoginLogStore,
     request: Request,
@@ -217,8 +222,9 @@ def register_with_password(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user_disabled") from exc
 
     reset_auth_failures(attempt_key)
-    record_login_event(login_log_store, request, email=email, auth_method="password_register", role="user", success=True)
-    return issue_login_response(response, email, "user", settings, auth_session_store)
+    role = get_authenticated_role(user_store, email)
+    record_login_event(login_log_store, request, email=email, auth_method="password_register", role=role, success=True)
+    return issue_login_response(response, email, role, settings, auth_session_store)
 
 
 @router.post("/password/login", response_model=PasswordLoginResponse)
@@ -255,8 +261,9 @@ def login_with_password(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_credentials")
 
     reset_auth_failures(attempt_key)
-    record_login_event(login_log_store, request, email=email, auth_method="password", role="user", success=True)
-    return issue_login_response(response, email, "user", settings, auth_session_store)
+    role = get_authenticated_role(user_store, email)
+    record_login_event(login_log_store, request, email=email, auth_method="password", role=role, success=True)
+    return issue_login_response(response, email, role, settings, auth_session_store)
 
 
 @router.post("/password/reset", response_model=PasswordMutationResponse)
@@ -400,8 +407,9 @@ def login_with_email_code(
         record_login_event(login_log_store, request, email=email, auth_method="email_code", role="user", success=False, failure_reason="user_disabled")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user_disabled") from exc
     reset_auth_failures(attempt_key)
-    record_login_event(login_log_store, request, email=email, auth_method="email_code", role="user", success=True)
-    return issue_login_response(response, email, "user", settings, auth_session_store)
+    role = get_authenticated_role(user_store, email)
+    record_login_event(login_log_store, request, email=email, auth_method="email_code", role=role, success=True)
+    return issue_login_response(response, email, role, settings, auth_session_store)
 
 
 @router.post("/admin/login", response_model=PasswordLoginResponse)

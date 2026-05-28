@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Button, SafeArea, Toast } from "antd-mobile";
+import { Button, SafeArea } from "antd-mobile";
 import { gsap } from "gsap";
 import { AppIcon } from "../components/AppIcon";
 import { getApiErrorMessage } from "../lib/api";
@@ -45,14 +45,6 @@ function retryAfterSeconds(response: Response) {
   const rawValue = response.headers.get("Retry-After");
   const parsedValue = rawValue ? Number.parseInt(rawValue, 10) : CODE_REQUEST_COOLDOWN_SECONDS;
   return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : CODE_REQUEST_COOLDOWN_SECONDS;
-}
-
-function showToast(content: string, icon?: "success" | "fail" | "loading", duration = 2200) {
-  Toast.show({ content, icon, duration, position: "top" });
-}
-
-function showLoadingToast(content: string) {
-  Toast.show({ content, icon: "loading", duration: 0, position: "top" });
 }
 
 function isReducedMotionEnabled() {
@@ -189,18 +181,15 @@ export function AuthPage({ mode }: AuthPageProps) {
     const normalizedEmail = normalizeEmail(email);
     if (!normalizedEmail) {
       setMessage("请先填写邮箱");
-      showToast("请先填写邮箱", "fail");
       return;
     }
     if (codeCooldownSeconds > 0) {
       setMessage(`验证码已发送, ${codeCooldownSeconds} 秒后可以重新获取`);
-      showToast(`${codeCooldownSeconds} 秒后可以重新获取验证码`);
       return;
     }
 
     setIsRequestingCode(true);
     setMessage("正在发送验证码...");
-    showLoadingToast("正在发送验证码...");
     let response: Response;
     try {
       response = await fetch("/api/auth/email-code/request", {
@@ -210,34 +199,28 @@ export function AuthPage({ mode }: AuthPageProps) {
         body: JSON.stringify({ email: normalizedEmail }),
       });
     } catch {
-      Toast.clear();
       setIsRequestingCode(false);
       setMessage("网络连接异常, 请稍后再试");
-      showToast("网络连接异常, 请稍后再试", "fail");
       return;
     }
     const data = await parseAuthResponse(response);
     setIsRequestingCode(false);
-    Toast.clear();
 
     if (!response.ok) {
       if (response.status === 429) {
         const retryAfter = retryAfterSeconds(response);
         startCodeCooldown(retryAfter);
         setMessage(`获取太频繁, 请 ${retryAfter} 秒后再试`);
-        showToast(`获取太频繁, 请 ${retryAfter} 秒后再试`, "fail");
         return;
       }
       const errorMessage = getApiErrorMessage(data, "请稍后再试");
       setMessage(`验证码发送失败: ${errorMessage}`);
-      showToast(`验证码发送失败: ${errorMessage}`, "fail");
       return;
     }
 
     setCode(data.dev_code ?? "");
     startCodeCooldown(CODE_REQUEST_COOLDOWN_SECONDS);
     setMessage(data.dev_code ? `开发验证码: ${data.dev_code}` : "验证码已发送, 5 分钟内有效, 请查看邮箱");
-    showToast("验证码已发送, 5 分钟内有效", "success");
   }
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
@@ -248,7 +231,6 @@ export function AuthPage({ mode }: AuthPageProps) {
     }
     setIsSubmitting(true);
     setMessage("正在验证账户信息...");
-    showLoadingToast("正在验证账户信息...");
 
     const endpoint =
       mode === "register"
@@ -272,25 +254,20 @@ export function AuthPage({ mode }: AuthPageProps) {
         body: JSON.stringify(payload),
       });
     } catch {
-      Toast.clear();
       setIsSubmitting(false);
       setMessage("网络连接异常, 请稍后再试");
-      showToast("网络连接异常, 请稍后再试", "fail");
       return;
     }
     const data = await parseAuthResponse(response);
     setIsSubmitting(false);
-    Toast.clear();
 
     if (!response.ok || !data.access_token) {
       const errorMessage = getApiErrorMessage(data, "请检查输入信息");
       setMessage(`认证失败: ${errorMessage}`);
-      showToast(`认证失败: ${errorMessage}`, "fail");
       return;
     }
 
     setMessage("认证成功, 正在进入训练空间");
-    showToast("认证成功, 正在进入训练空间", "success", 1200);
     window.setTimeout(() => {
       window.location.href = "/interview";
     }, 350);
@@ -299,12 +276,10 @@ export function AuthPage({ mode }: AuthPageProps) {
   async function submitPasswordReset() {
     if (!code.trim() || password.trim().length < 8) {
       setMessage("请填写 6 位验证码和至少 8 位新密码");
-      showToast("请填写验证码和新密码", "fail");
       return;
     }
     setIsSubmitting(true);
     setMessage("正在重置密码...");
-    showLoadingToast("正在重置密码...");
     let response: Response;
     try {
       response = await fetch("/api/auth/password/reset", {
@@ -314,26 +289,21 @@ export function AuthPage({ mode }: AuthPageProps) {
         body: JSON.stringify({ email: normalizeEmail(email), code, new_password: password }),
       });
     } catch {
-      Toast.clear();
       setIsSubmitting(false);
       setMessage("网络连接异常, 请稍后再试");
-      showToast("网络连接异常, 请稍后再试", "fail");
       return;
     }
     const data = await parseAuthResponse(response);
     setIsSubmitting(false);
-    Toast.clear();
     if (!response.ok) {
       const errorMessage = getApiErrorMessage(data, "请检查验证码或账户状态");
       setMessage(`密码重置失败: ${errorMessage}`);
-      showToast(`密码重置失败: ${errorMessage}`, "fail");
       return;
     }
     setIsResetMode(false);
     setLoginMethod("password");
     setCode("");
     setMessage("密码已重置, 请使用新密码登录");
-    showToast("密码已重置, 请重新登录", "success");
   }
 
   function openResetMode() {

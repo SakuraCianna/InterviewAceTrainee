@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Button, SafeArea, Toast } from "antd-mobile";
+import { Button, SafeArea } from "antd-mobile";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AppIcon } from "../../components/AppIcon";
 import { AvatarStage, AvatarState } from "../../components/AvatarStage";
@@ -304,14 +304,6 @@ function isEffectiveVoice(rms: number, noiseFloor: number) {
   return rms > threshold;
 }
 
-function showInterviewToast(content: string, icon?: "success" | "fail" | "loading", duration = 2200) {
-  Toast.show({ content, icon, duration, position: "top" });
-}
-
-function showInterviewLoading(content: string) {
-  Toast.show({ content, icon: "loading", duration: 0, position: "top" });
-}
-
 function microphoneLabel(device: MediaDeviceInfo, index: number) {
   return device.label || `麦克风 ${index + 1}`;
 }
@@ -562,14 +554,12 @@ export function InterviewRoom() {
     if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) {
       setMicrophoneStatus("failed");
       setMicrophoneMessage("当前浏览器不支持录音，请使用新版 Chrome 或 Edge。");
-      showInterviewToast("当前浏览器不支持录音，请使用新版 Chrome 或 Edge", "fail");
       return;
     }
     stopMicrophoneTest();
     setMicrophoneStatus("testing");
     setMicrophoneReady(false);
     setMicrophoneMessage("正在打开麦克风，请试着说一句话。");
-    showInterviewLoading("正在检测麦克风，请试着说一句话");
     try {
       const stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints());
       await loadMicrophoneDevices();
@@ -595,8 +585,6 @@ export function InterviewRoom() {
           hasDetectedVoice = true;
           setMicrophoneStatus("ready");
           setMicrophoneMessage("麦克风可用，声音已经能被系统采集。");
-          Toast.clear();
-          showInterviewToast("麦克风检测通过", "success");
         }
         microphoneAnimationRef.current = window.requestAnimationFrame(updateLevel);
       };
@@ -604,16 +592,12 @@ export function InterviewRoom() {
       window.setTimeout(() => {
         if (!hasDetectedVoice && microphoneTestRef.current) {
           setMicrophoneMessage("麦克风已打开，但声音偏小。请靠近麦克风或换一个输入设备。");
-          Toast.clear();
-          showInterviewToast("声音偏小，请靠近麦克风再说一句");
         }
       }, 1800);
     } catch {
-      Toast.clear();
       setMicrophoneStatus("failed");
       setMicrophoneMessage("无法打开麦克风，请在浏览器地址栏允许麦克风权限后重新检测。");
       setMicrophoneLevel(0);
-      showInterviewToast("无法打开麦克风，请允许浏览器麦克风权限", "fail");
     }
   }
 
@@ -624,12 +608,10 @@ export function InterviewRoom() {
           ? "请先上传简历并填写目标岗位和岗位要求, 再进入设备检测"
           : "请先填写目标院校和报考专业, 再进入设备检测";
       setSocketMessage(message);
-      showInterviewToast(message, "fail");
       return;
     }
     if (resume && !activeSession) {
       setSocketMessage("暂时没有可恢复的未完成训练");
-      showInterviewToast("暂时没有可恢复的未完成训练", "fail");
       return;
     }
     stopMicrophoneTest();
@@ -638,19 +620,16 @@ export function InterviewRoom() {
     setMicrophoneLevel(0);
     setMicrophoneStatus("idle");
     setMicrophoneMessage("正式进入面试前, 请先选择并检测麦克风");
-    showInterviewToast("进入前先完成麦克风检测");
     navigate("/interview/check");
   }
 
   function enterInterviewRoom() {
     if (microphoneStatus !== "ready") {
       setMicrophoneMessage("请先完成一次麦克风检测，确认系统能听到声音。");
-      showInterviewToast("请先完成麦克风检测", "fail");
       return;
     }
     stopMicrophoneTest();
     setMicrophoneReady(true);
-    showInterviewToast("设备检测完成，正在进入面试房间", "success");
     navigate("/interview/room");
     void startSession(pendingResume);
     setPendingResume(false);
@@ -683,18 +662,15 @@ export function InterviewRoom() {
   async function requestAccountCode() {
     if (!currentUser?.email) {
       setAccountMessage("请先登录账户。");
-      showInterviewToast("请先登录账户", "fail");
       return;
     }
     if (accountCodeCooldownSeconds > 0) {
       const message = `${accountCodeCooldownSeconds} 秒后可以重新获取验证码。`;
       setAccountMessage(message);
-      showInterviewToast(message);
       return;
     }
     setIsRequestingAccountCode(true);
     setAccountMessage("正在发送验证码...");
-    showInterviewLoading("正在发送验证码...");
     let response: Response;
     try {
       response = await fetch("/api/auth/email-code/request", {
@@ -704,14 +680,11 @@ export function InterviewRoom() {
         body: JSON.stringify({ email: currentUser.email }),
       });
     } catch {
-      Toast.clear();
       setIsRequestingAccountCode(false);
       setAccountMessage("网络连接异常, 请稍后再试。");
-      showInterviewToast("网络连接异常, 请稍后再试", "fail");
       return;
     }
     const data = await parseApiPayload(response);
-    Toast.clear();
     setIsRequestingAccountCode(false);
     if (!response.ok) {
       if (response.status === 429) {
@@ -719,12 +692,10 @@ export function InterviewRoom() {
         startAccountCodeCooldown(retryAfter);
         const message = `获取太频繁, 请 ${retryAfter} 秒后再试。`;
         setAccountMessage(message);
-        showInterviewToast(message, "fail");
         return;
       }
       const errorMessage = getApiErrorMessage(data, "请稍后再试。");
       setAccountMessage(`验证码发送失败: ${errorMessage}`);
-      showInterviewToast(`验证码发送失败: ${errorMessage}`, "fail");
       return;
     }
     if (data.dev_code) {
@@ -732,24 +703,20 @@ export function InterviewRoom() {
     }
     startAccountCodeCooldown();
     setAccountMessage("验证码已发送, 5 分钟内有效。");
-    showInterviewToast("验证码已发送, 5 分钟内有效", "success");
   }
 
   async function changeAccountPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!currentUser?.email) {
       setAccountMessage("请先登录账户。");
-      showInterviewToast("请先登录账户", "fail");
       return;
     }
     if (accountCode.trim().length !== 6 || accountNewPassword.trim().length < 8) {
       setAccountMessage("请填写 6 位验证码和至少 8 位新密码。");
-      showInterviewToast("请填写验证码和新密码", "fail");
       return;
     }
     setIsChangingAccountPassword(true);
     setAccountMessage("正在修改密码...");
-    showInterviewLoading("正在修改密码...");
     let response: Response;
     try {
       response = await fetch("/api/auth/password/change", {
@@ -759,25 +726,20 @@ export function InterviewRoom() {
         body: JSON.stringify({ code: accountCode, new_password: accountNewPassword }),
       });
     } catch {
-      Toast.clear();
       setIsChangingAccountPassword(false);
       setAccountMessage("网络连接异常, 请稍后再试。");
-      showInterviewToast("网络连接异常, 请稍后再试", "fail");
       return;
     }
     const data = await parseApiPayload(response);
-    Toast.clear();
     setIsChangingAccountPassword(false);
     if (!response.ok) {
       const errorMessage = getApiErrorMessage(data, "请检查验证码或账户状态。");
       setAccountMessage(`密码修改失败: ${errorMessage}`);
-      showInterviewToast(`密码修改失败: ${errorMessage}`, "fail");
       return;
     }
     setAccountCode("");
     setAccountNewPassword("");
     setAccountMessage("密码已修改, 下次登录请使用新密码。");
-    showInterviewToast("密码已修改", "success");
   }
 
   async function loadHistory() {
@@ -823,7 +785,6 @@ export function InterviewRoom() {
     if (!resume && selectedModuleNeedsMaterial && !material) {
       const message = selectedModule.type === "job" ? "请先上传简历并填写目标岗位/JD。" : "请先填写目标院校和报考专业，再开始复试模拟。";
       setSocketMessage(message);
-      showInterviewToast(message, "fail");
       return;
     }
     setIsStartingSession(true);
@@ -843,7 +804,6 @@ export function InterviewRoom() {
     if (!response.ok) {
       const errorMessage = getApiErrorMessage(data, "请重新登录后再试。");
       setSocketMessage(`面试创建失败：${errorMessage}`);
-      showInterviewToast(`面试创建失败：${errorMessage}`, "fail");
       return;
     }
 
@@ -855,22 +815,18 @@ export function InterviewRoom() {
     setActiveSession(null);
     setStateIndex(1);
     setSocketMessage(data.status === "completed" ? "这场训练已完成，可查看复盘报告。" : `面试已就绪，剩余次数 ${data.balance_after ?? "已更新"}。`);
-    showInterviewToast(data.status === "completed" ? "这场训练已完成" : "面试已就绪", "success");
     await loadHistory();
     void speakQuestion(data.current_question?.text, data.interview_type, data.session_id);
   }
 
   async function prepareMaterial() {
     setIsPreparingMaterial(true);
-    showInterviewLoading("正在分析资料...");
     const formData = new FormData();
     formData.append("interview_type", selectedModule.type);
     if (selectedModule.type === "job") {
       if (!jobResumeFile || !jobTitle.trim() || !jobRequirements.trim()) {
         setSocketMessage("工作面试需要简历文件、目标岗位和岗位要求。");
         setIsPreparingMaterial(false);
-        Toast.clear();
-        showInterviewToast("请先补齐简历、岗位和 JD", "fail");
         return;
       }
       formData.append("resume_file", jobResumeFile);
@@ -881,8 +837,6 @@ export function InterviewRoom() {
       if (!postgraduateSchool.trim() || !postgraduateMajor.trim()) {
         setSocketMessage("研究生复试需要先填写目标院校和报考专业。");
         setIsPreparingMaterial(false);
-        Toast.clear();
-        showInterviewToast("请先填写目标院校和报考专业", "fail");
         return;
       }
       formData.append("target_school", postgraduateSchool.trim());
@@ -904,24 +858,19 @@ export function InterviewRoom() {
       data = (await response.json()) as InterviewMaterialResponse & { detail?: string; message?: string };
     } catch {
       setIsPreparingMaterial(false);
-      Toast.clear();
       setSocketMessage("资料分析请求失败，请检查网络后重试。");
-      showInterviewToast("资料分析请求失败，请检查网络后重试", "fail");
       return;
     }
     setIsPreparingMaterial(false);
-    Toast.clear();
 
     if (!response.ok) {
       const errorMessage = getApiErrorMessage(data, "请检查文件和填写内容。");
       setSocketMessage(`资料分析失败：${errorMessage}`);
-      showInterviewToast(`资料分析失败：${errorMessage}`, "fail");
       return;
     }
 
     setMaterialsByType((previous) => ({ ...previous, [data.interview_type]: data }));
     setSocketMessage(data.interview_type === "job" ? "简历和岗位要求已分析，可以开始工作面试。" : "复试院校和专业信息已保存，可以开始模拟。");
-    showInterviewToast("资料已分析，可以进入设备检测", "success");
   }
 
   function speakQuestionWithBrowser(questionText: string, interviewType?: InterviewType) {
@@ -1045,7 +994,6 @@ export function InterviewRoom() {
     if (now - idleBase >= SILENCE_AUTO_FINISH_MS) {
       autoFinishingRef.current = true;
       setSocketMessage("连续 3 秒未检测到有效人声，系统已自动结束本轮回答。");
-      showInterviewToast("连续 3 秒未检测到有效人声，系统自动结束本轮回答");
       void finishAnswer();
     }
   }
@@ -1213,17 +1161,14 @@ export function InterviewRoom() {
   async function startAnswer() {
     if (!interviewState || interviewState.status === "completed") {
       setSocketMessage("请先开始或恢复一场训练。");
-      showInterviewToast("请先开始或恢复一场训练", "fail");
       return;
     }
     if (isRecording) {
       setSocketMessage("当前正在回答，请说完后点击“回答完毕”。");
-      showInterviewToast("当前正在回答，说完后点击回答完毕");
       return;
     }
     if (isPreparingAnswer) {
       setSocketMessage("正在准备麦克风和实时识别通道，请稍等。");
-      showInterviewToast("正在准备麦克风和实时识别通道");
       return;
     }
     if (isFinishingAnswer) {
@@ -1233,7 +1178,6 @@ export function InterviewRoom() {
     const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
     if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) {
       setSocketMessage("当前浏览器不支持录音，请使用新版 Chrome 或 Edge。");
-      showInterviewToast("当前浏览器不支持录音，请使用新版 Chrome 或 Edge", "fail");
       return;
     }
 
@@ -1247,7 +1191,6 @@ export function InterviewRoom() {
       resetRecordingMeters(currentAnswerLimitMs);
       createTranscriptWaiter();
       setSocketMessage("正在打开麦克风并建立实时语音识别通道。");
-      showInterviewLoading("正在建立实时语音识别通道...");
       stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints());
       context = new AudioContextCtor();
       const asrSocket = await openRealtimeAsrSocket(interviewState.session_id, interviewState.interview_type);
@@ -1291,25 +1234,20 @@ export function InterviewRoom() {
       setIsPreparingAnswer(false);
       setIsRecording(false);
       setSocketMessage(error instanceof Error ? error.message : "无法打开麦克风或实时识别通道，请检查权限后重试。");
-      Toast.clear();
-      showInterviewToast(error instanceof Error ? error.message : "无法打开麦克风或实时识别通道", "fail");
       return;
     }
 
-    Toast.clear();
     setIsPreparingAnswer(false);
     setIsRecording(true);
     startRecordingProgressTimer(currentAnswerLimitMs);
     setStateIndex(2);
     setSocketMessage(`正在实时转写回答，${formatAnswerLimit(interviewState.interview_type, interviewState.current_question?.round_name)}。说完后点击“回答完毕”。`);
-    showInterviewToast("开始回答，系统正在实时转写", "success", 1600);
     sendSocketEvent("answer_started");
   }
 
   async function finishAnswer() {
     if (!interviewState) {
       setSocketMessage("请先开始或恢复一场训练。");
-      showInterviewToast("请先开始或恢复一场训练", "fail");
       return;
     }
     if (isFinishingAnswer) {
@@ -1317,7 +1255,6 @@ export function InterviewRoom() {
     }
     if (!recorderRef.current) {
       setSocketMessage("当前还没有开始录音，请先点击“开始回答”。");
-      showInterviewToast("请先点击开始回答", "fail");
       return;
     }
     setIsFinishingAnswer(true);
@@ -1329,22 +1266,17 @@ export function InterviewRoom() {
     let answerText = "";
     try {
       setSocketMessage("正在收尾实时转写结果。");
-      showInterviewLoading("正在整理本轮回答...");
       answerText = await waitForFinalTranscript();
     } catch (error) {
       setStateIndex(0);
       setIsFinishingAnswer(false);
       setSocketMessage(error instanceof Error ? error.message : "腾讯云实时语音识别暂时不可用，本轮回答没有提交。");
-      Toast.clear();
-      showInterviewToast(error instanceof Error ? error.message : "实时语音识别暂时不可用", "fail");
       return;
     }
     if (!answerText) {
       setStateIndex(0);
       setIsFinishingAnswer(false);
       setSocketMessage("没有识别到有效回答，请重新点击“开始回答”后再试。");
-      Toast.clear();
-      showInterviewToast("没有识别到有效回答，请重新回答", "fail");
       return;
     }
     const response = await fetch(`/api/interviews/${encodeURIComponent(interviewState.session_id)}/answers`, {
@@ -1358,22 +1290,17 @@ export function InterviewRoom() {
       setIsFinishingAnswer(false);
       const errorMessage = getApiErrorMessage(data, "请稍后重试。");
       setSocketMessage(`回答提交失败：${errorMessage}`);
-      Toast.clear();
-      showInterviewToast(`回答提交失败：${errorMessage}`, "fail");
       return;
     }
-    Toast.clear();
     setInterviewState(data);
     setIsFinishingAnswer(false);
     await loadHistory();
     if (data.status === "completed") {
       setStateIndex(0);
       setSocketMessage("训练完成，复盘报告已生成。");
-      showInterviewToast("训练完成，复盘报告已生成", "success");
       return;
     }
     setSocketMessage("已进入下一问，问题正在播放。");
-    showInterviewToast("已进入下一问", "success", 1200);
     void speakQuestion(data.current_question?.text, data.interview_type, data.session_id);
   }
 
@@ -1381,7 +1308,6 @@ export function InterviewRoom() {
     const response = await fetch(`/api/interviews/${encodeURIComponent(item.session_id)}`, { credentials: "include" });
     if (!response.ok) {
       setSocketMessage("这条训练记录暂时无法打开，请刷新后重试。");
-      showInterviewToast("这条训练记录暂时无法打开", "fail");
       return;
     }
     const data = (await response.json()) as InterviewStateResponse;
@@ -1393,7 +1319,6 @@ export function InterviewRoom() {
     setInterviewState(data);
     setActiveSession(null);
     setSocketMessage(data.status === "completed" ? "已打开历史复盘报告。" : "已恢复这场未完成训练。");
-    showInterviewToast(data.status === "completed" ? "已打开历史复盘报告" : "已恢复未完成训练", "success");
     navigate("/interview/room");
   }
 
@@ -1414,7 +1339,6 @@ export function InterviewRoom() {
     resetRecordingMeters();
     setSocketState("已退出");
     setSocketMessage("已退出登录，可以重新登录其他账号。");
-    showInterviewToast("已退出登录", "success");
     navigate("/", { replace: true });
   }
 
@@ -1434,7 +1358,6 @@ export function InterviewRoom() {
     setMicrophoneLevel(0);
     setSessionId(createSessionId());
     setSocketMessage("已切换到新训练，选择模块后开始。");
-    showInterviewToast("已切换到新训练");
     navigate("/interview");
   }
 
