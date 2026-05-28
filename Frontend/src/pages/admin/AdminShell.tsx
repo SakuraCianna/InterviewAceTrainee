@@ -16,6 +16,14 @@ function loadECharts() {
 
 const ADMIN_CODE_COOLDOWN_SECONDS = 90;
 const ADMIN_CODE_STORAGE_PREFIX = "mianba_admin_code_next:";
+const ADMIN_NAV_ITEMS = [
+  { href: "#admin-overview", icon: "lucide:layout-dashboard", label: "概览" },
+  { href: "#admin-credits", icon: "lucide:coins", label: "次数" },
+  { href: "#admin-users", icon: "lucide:users", label: "用户" },
+  { href: "#admin-ai", icon: "lucide:bot", label: "AI 服务" },
+  { href: "#admin-system", icon: "lucide:sliders-horizontal", label: "系统" },
+  { href: "#admin-audit", icon: "lucide:shield-check", label: "审计" },
+];
 
 function normalizeAdminEmail(email: string) {
   return email.trim().toLowerCase();
@@ -1128,36 +1136,42 @@ export function AdminShell() {
     );
   }
 
+  const adminStatusMessage = message.startsWith("已进入后台") ? "后台在线，操作会记录到审计日志" : message;
+
   return (
     <main className="workspace-page admin-page admin-page--authed">
-      <header className="workspace-header admin-console-header">
-        <a href="/" className="brand-mark">
-          <BrandLogo size={28} />
-          面霸练习生
+      <aside className="admin-sidebar" aria-label="管理员后台导航">
+        <a href="/" className="admin-sidebar-brand">
+          <BrandLogo size={30} />
+          <span>面霸练习生</span>
         </a>
-        <div className="workspace-header-actions">
-          <span className="session-pill session-pill--admin">{currentUser.email}</span>
-          <button type="button" className="logout-button" onClick={() => void logout()}>
-            <AppIcon icon="lucide:log-out" size={16} />
+        <nav className="admin-sidebar-nav">
+          {ADMIN_NAV_ITEMS.map((item) => (
+            <a href={item.href} key={item.href}>
+              <AppIcon icon={item.icon} size={18} />
+              {item.label}
+            </a>
+          ))}
+        </nav>
+        <div className="admin-sidebar-status" aria-live="polite">
+          <span>当前账号</span>
+          <strong>{currentUser.email}</strong>
+          <p>{adminStatusMessage}</p>
+        </div>
+        <div className="admin-sidebar-actions">
+          <button type="button" onClick={refreshAdminData}>
+            <AppIcon icon="lucide:refresh-cw" size={18} />
+            刷新数据
+          </button>
+          <button type="button" className="admin-sidebar-logout" onClick={() => void logout()}>
+            <AppIcon icon="lucide:log-out" size={18} />
             退出
           </button>
         </div>
-      </header>
-
+      </aside>
       <div className="admin-console-layout">
         <section className="admin-console-main">
-          <div className="admin-status-row">
-            <span>
-              <AppIcon icon="lucide:radio-tower" size={18} />
-              {message}
-            </span>
-            <button type="button" onClick={refreshAdminData}>
-              <AppIcon icon="lucide:activity" size={18} />
-              刷新配置
-            </button>
-          </div>
-
-          <section className="admin-grid admin-grid--compact">
+          <section className="admin-grid admin-grid--compact" id="admin-overview">
             <article className="admin-card">
               <AppIcon icon="lucide:bot" size={24} />
               <h2>{enabledProviderCount} / {providers.length}</h2>
@@ -1295,7 +1309,7 @@ export function AdminShell() {
             </section>
           )}
 
-          <section className="admin-workbench">
+          <section className="admin-workbench" id="admin-credits">
             <form className="admin-panel" onSubmit={submitCreditGrant}>
               <h2>发放 / 调整次数</h2>
               <label>
@@ -1356,7 +1370,7 @@ export function AdminShell() {
             </article>
           </section>
 
-          <section className="admin-provider-table admin-user-table">
+          <section className="admin-provider-table admin-user-table" id="admin-users">
             <div className="admin-section-heading">
               <span className="eyebrow">User Operations</span>
               <h2>用户检索与训练追踪</h2>
@@ -1618,7 +1632,7 @@ export function AdminShell() {
             )}
           </section>
 
-          <section className="admin-provider-table">
+          <section className="admin-provider-table" id="admin-ai">
             <div className="admin-section-heading">
               <span className="eyebrow">Model Router</span>
               <h2>AI 服务状态</h2>
@@ -1645,7 +1659,7 @@ export function AdminShell() {
             </div>
           </section>
 
-          <section className="admin-provider-table">
+          <section className="admin-provider-table" id="admin-system">
             <div className="admin-section-heading">
               <span className="eyebrow">System Config</span>
               <h2>系统参数</h2>
@@ -1679,7 +1693,7 @@ export function AdminShell() {
             </div>
           </section>
 
-          <section className="admin-provider-table admin-audit-table">
+          <section className="admin-provider-table admin-audit-table" id="admin-audit">
             <div className="admin-section-heading">
               <span className="eyebrow">Audit Trail</span>
               <h2>操作审计日志</h2>
