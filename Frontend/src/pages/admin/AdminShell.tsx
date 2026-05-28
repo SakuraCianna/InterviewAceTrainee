@@ -1020,8 +1020,90 @@ export function AdminShell() {
     window.location.assign("/");
   }
 
+  if (!currentUser) {
+    return (
+      <main className="auth-page admin-auth-page">
+        <div className="auth-ambient" aria-hidden="true">
+          <span className="auth-glow auth-glow-blue" />
+          <span className="auth-glow auth-glow-lime" />
+          <span className="auth-glow auth-glow-fog" />
+        </div>
+        <a className="back-link auth-anim-back admin-auth-back" href="/">
+          <AppIcon icon="lucide:arrow-left" size={18} />
+          返回首页
+        </a>
+        <section className="auth-shell admin-auth-shell">
+          <div className="auth-narrative admin-auth-narrative">
+            <div className="admin-auth-brand">
+              <BrandLogo size={30} />
+              <span>面霸练习生</span>
+            </div>
+            <span className="eyebrow">Admin Console</span>
+            <h1 className="auth-title-login">
+              <span className="auth-title-line">运营后台</span>
+              <span className="auth-title-line">双重认证</span>
+            </h1>
+            <p>使用管理员邮箱、密码和邮箱验证码进入内部后台，处理用户次数、AI 服务状态、售后追踪和安全审计。</p>
+            <div className="auth-status-card admin-auth-status-card" aria-label="后台能力状态">
+              <span>
+                <AppIcon icon="lucide:shield-check" size={18} />
+                权限校验
+              </span>
+              <span>
+                <AppIcon icon="lucide:mail-check" size={18} />
+                邮箱验证
+              </span>
+              <span>
+                <AppIcon icon="lucide:file-clock" size={18} />
+                操作留痕
+              </span>
+            </div>
+          </div>
+
+          <form className="auth-card auth-glass-card admin-auth-card" onSubmit={submitAdminLogin}>
+            <div className="auth-card-heading admin-auth-card-heading">
+              <span>{isLoading ? "正在检查会话" : "管理员登录"}</span>
+            </div>
+            <div className="auth-form-body">
+              <label>
+                管理员邮箱
+                <div className="input-shell">
+                  <AppIcon icon="lucide:mail" size={18} />
+                  <input type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="admin@example.com" required />
+                </div>
+              </label>
+              <label>
+                密码
+                <div className="input-shell">
+                  <AppIcon icon="lucide:key-round" size={18} />
+                  <input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} placeholder="至少 8 位" minLength={8} required />
+                </div>
+              </label>
+              <label>
+                邮箱验证码
+                <div className="code-row">
+                  <div className="input-shell">
+                    <AppIcon icon="lucide:key-round" size={18} />
+                    <input value={loginCode} onChange={(event) => setLoginCode(event.target.value)} placeholder="6 位验证码" minLength={6} maxLength={6} required />
+                  </div>
+                  <button type="button" className="code-button admin-auth-code-button" onClick={requestAdminCode} disabled={isRequestingAdminCode || adminCodeCooldownSeconds > 0}>
+                    {isRequestingAdminCode ? "发送中" : adminCodeCooldownSeconds > 0 ? `${adminCodeCooldownSeconds}s` : "获取"}
+                  </button>
+                </div>
+              </label>
+              <button type="submit" className="auth-submit admin-auth-submit" disabled={isLoading}>
+                {isLoading ? "检查中" : "进入后台"}
+              </button>
+              <p className="auth-message" role="status" aria-live="polite">{message}</p>
+            </div>
+          </form>
+        </section>
+      </main>
+    );
+  }
+
   return (
-    <main className={`workspace-page admin-page ${currentUser ? "admin-page--authed" : "admin-page--guest"}`}>
+    <main className="workspace-page admin-page admin-page--authed">
       <header className="workspace-header admin-console-header">
         <a href="/" className="brand-mark">
           <BrandLogo size={28} />
