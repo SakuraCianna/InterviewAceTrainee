@@ -1136,78 +1136,27 @@ export function AdminShell() {
           面霸练习生
         </a>
         <div className="workspace-header-actions">
-          <span className="session-pill session-pill--admin">{currentUser ? currentUser.email : "Admin Console"}</span>
-          {currentUser && (
-            <button type="button" className="logout-button" onClick={() => void logout()}>
-              <AppIcon icon="lucide:log-out" size={16} />
-              退出
-            </button>
-          )}
+          <span className="session-pill session-pill--admin">{currentUser.email}</span>
+          <button type="button" className="logout-button" onClick={() => void logout()}>
+            <AppIcon icon="lucide:log-out" size={16} />
+            退出
+          </button>
         </div>
       </header>
 
       <div className="admin-console-layout">
-        <section className="admin-hero">
-          <div className="admin-hero-copy">
-            <span className="eyebrow">Operator Console</span>
-            <h1>管理员后台</h1>
-            <p>集中处理用户次数、AI 服务状态、售后追踪和安全审计。后台应该像工作台一样清晰、稳定、好扫描。</p>
-          </div>
-          <div className="admin-hero-panel" aria-label="后台安全状态">
-            <span>{currentUser ? "SESSION LIVE" : "SECURE ENTRY"}</span>
-            <strong>{currentUser ? "已认证" : "管理员登录"}</strong>
-            <p>权限校验 / 邮箱验证码 / 操作留痕</p>
-          </div>
-        </section>
-
         <section className="admin-console-main">
           <div className="admin-status-row">
             <span>
-              <AppIcon icon={currentUser ? "lucide:radio-tower" : "lucide:lock-keyhole"} size={18} />
+              <AppIcon icon="lucide:radio-tower" size={18} />
               {message}
             </span>
-            {currentUser && (
-              <button type="button" onClick={refreshAdminData}>
-                <AppIcon icon="lucide:activity" size={18} />
-                刷新配置
-              </button>
-            )}
+            <button type="button" onClick={refreshAdminData}>
+              <AppIcon icon="lucide:activity" size={18} />
+              刷新配置
+            </button>
           </div>
 
-          {!currentUser && !isLoading && (
-            <form className="admin-login-panel" onSubmit={submitAdminLogin}>
-              <div className="admin-login-title">
-                <span className="admin-login-icon">
-                  <AppIcon icon="lucide:key-round" size={22} />
-                </span>
-                <div>
-                  <span className="eyebrow">Secure Access</span>
-                  <h2>管理员后台登录</h2>
-                </div>
-              </div>
-              <label>
-                管理员邮箱
-                <input type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} autoComplete="username" required />
-              </label>
-              <label>
-                密码
-                <input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} minLength={8} autoComplete="current-password" required />
-              </label>
-              <label>
-                邮箱验证码
-                <div className="admin-code-row">
-                  <input value={loginCode} onChange={(event) => setLoginCode(event.target.value)} minLength={6} maxLength={6} autoComplete="one-time-code" required />
-                  <button type="button" onClick={requestAdminCode} disabled={isRequestingAdminCode || adminCodeCooldownSeconds > 0}>
-                    {isRequestingAdminCode ? "发送中" : adminCodeCooldownSeconds > 0 ? `${adminCodeCooldownSeconds}s` : "获取验证码"}
-                  </button>
-                </div>
-              </label>
-              <button type="submit" className="admin-primary-button">进入后台</button>
-            </form>
-          )}
-
-          {currentUser && (
-            <>
           <section className="admin-grid admin-grid--compact">
             <article className="admin-card">
               <AppIcon icon="lucide:bot" size={24} />
@@ -1849,8 +1798,6 @@ export function AdminShell() {
               ))}
             </div>
           </section>
-            </>
-          )}
         </section>
       </div>
     </main>
