@@ -16,14 +16,6 @@ function loadECharts() {
 
 const ADMIN_CODE_COOLDOWN_SECONDS = 90;
 const ADMIN_CODE_STORAGE_PREFIX = "mianba_admin_code_next:";
-const ADMIN_NAV_ITEMS = [
-  { href: "#admin-overview", icon: "lucide:layout-dashboard", label: "概览" },
-  { href: "#admin-credits", icon: "lucide:coins", label: "次数" },
-  { href: "#admin-users", icon: "lucide:users", label: "用户" },
-  { href: "#admin-ai", icon: "lucide:bot", label: "AI 服务" },
-  { href: "#admin-system", icon: "lucide:sliders-horizontal", label: "系统" },
-  { href: "#admin-audit", icon: "lucide:shield-check", label: "审计" },
-];
 
 function normalizeAdminEmail(email: string) {
   return email.trim().toLowerCase();
@@ -390,7 +382,6 @@ export function AdminShell() {
   const [message, setMessage] = useState("请使用管理员邮箱、密码和邮箱验证码进入后台。");
   const [isLoading, setIsLoading] = useState(false);
 
-  const enabledProviderCount = useMemo(() => providers.filter((provider) => provider.enabled).length, [providers]);
   const dashboardChartOptions = useMemo(() => {
     if (!dashboardStats) {
       return null;
@@ -1140,24 +1131,36 @@ export function AdminShell() {
 
   return (
     <main className="workspace-page admin-page admin-page--authed">
-      <aside className="admin-sidebar" aria-label="管理员后台导航">
+      <aside className="admin-sidebar" aria-label="管理员后台侧栏">
         <a href="/" className="admin-sidebar-brand">
           <BrandLogo size={30} />
           <span>面霸练习生</span>
         </a>
-        <nav className="admin-sidebar-nav">
-          {ADMIN_NAV_ITEMS.map((item) => (
-            <a href={item.href} key={item.href}>
-              <AppIcon icon={item.icon} size={18} />
-              {item.label}
-            </a>
-          ))}
-        </nav>
         <div className="admin-sidebar-status" aria-live="polite">
           <span>当前账号</span>
           <strong>{currentUser.email}</strong>
           <p>{adminStatusMessage}</p>
         </div>
+        {dashboardStats && (
+          <dl className="admin-sidebar-metrics" aria-label="后台关键数据">
+            <div>
+              <dt>总用户</dt>
+              <dd>{dashboardStats.overview.total_users.toLocaleString("zh-CN")}</dd>
+            </div>
+            <div>
+              <dt>训练场次</dt>
+              <dd>{dashboardStats.overview.total_sessions.toLocaleString("zh-CN")}</dd>
+            </div>
+            <div>
+              <dt>报告产出</dt>
+              <dd>{dashboardStats.overview.total_reports.toLocaleString("zh-CN")}</dd>
+            </div>
+            <div>
+              <dt>AI 成功率</dt>
+              <dd>{dashboardStats.overview.ai_success_rate == null ? "暂无" : `${Math.round(dashboardStats.overview.ai_success_rate * 100)}%`}</dd>
+            </div>
+          </dl>
+        )}
         <div className="admin-sidebar-actions">
           <button type="button" onClick={refreshAdminData}>
             <AppIcon icon="lucide:refresh-cw" size={18} />
@@ -1171,26 +1174,8 @@ export function AdminShell() {
       </aside>
       <div className="admin-console-layout">
         <section className="admin-console-main">
-          <section className="admin-grid admin-grid--compact" id="admin-overview">
-            <article className="admin-card">
-              <AppIcon icon="lucide:bot" size={24} />
-              <h2>{enabledProviderCount} / {providers.length}</h2>
-              <p>在线 AI 路由</p>
-            </article>
-            <article className="admin-card">
-              <AppIcon icon="lucide:coins" size={24} />
-              <h2>次数作业台</h2>
-              <p>按用户沟通结果发放、扣减或补偿面试训练次数。</p>
-            </article>
-            <article className="admin-card">
-              <AppIcon icon="lucide:shield-check" size={24} />
-              <h2>审计边界</h2>
-              <p>入口可以隐藏，关键权限始终由服务端校验并记录。</p>
-            </article>
-          </section>
-
           {dashboardStats && dashboardChartOptions && (
-            <section className="admin-dashboard">
+            <section className="admin-dashboard" id="admin-overview">
               <div className="admin-section-heading admin-dashboard-heading">
                 <div>
                   <span className="eyebrow">Data Dashboard</span>
