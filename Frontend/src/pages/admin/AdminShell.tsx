@@ -247,6 +247,17 @@ type AdminDashboardStats = {
   top_users: AdminTopUserUsage[];
 };
 
+type AdminSectionKey = "overview" | "credits" | "users" | "ai" | "system" | "audit";
+
+const adminSectionNavItems: { key: AdminSectionKey; label: string; icon: string }[] = [
+  { key: "overview", label: "概览", icon: "lucide:gauge" },
+  { key: "credits", label: "次数", icon: "lucide:coins" },
+  { key: "users", label: "用户", icon: "lucide:users" },
+  { key: "ai", label: "AI 服务", icon: "lucide:bot" },
+  { key: "system", label: "系统", icon: "lucide:settings-2" },
+  { key: "audit", label: "审计", icon: "lucide:shield-check" },
+];
+
 const chartTextColor = "#334155";
 
 function lineDashboardOption(stats: AdminDashboardStats): EChartsOption {
@@ -381,6 +392,7 @@ export function AdminShell() {
   const [reportMessage, setReportMessage] = useState("");
   const [message, setMessage] = useState("请使用管理员邮箱、密码和邮箱验证码进入后台。");
   const [isLoading, setIsLoading] = useState(false);
+  const [activeAdminSection, setActiveAdminSection] = useState<AdminSectionKey>("overview");
 
   const dashboardChartOptions = useMemo(() => {
     if (!dashboardStats) {
@@ -402,6 +414,20 @@ export function AdminShell() {
     }
     void loadCurrentUser();
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, [currentUser]);
 
   useEffect(() => {
     const normalizedEmail = normalizeAdminEmail(loginEmail);
@@ -448,6 +474,15 @@ export function AdminShell() {
 
   function formatDashboardRate(value?: number | null) {
     return value == null ? "暂无" : `${value}%`;
+  }
+
+  const consoleLayoutRef = useRef<HTMLDivElement | null>(null);
+
+  function selectAdminSection(section: AdminSectionKey) {
+    setActiveAdminSection(section);
+    window.requestAnimationFrame(() => {
+      consoleLayoutRef.current?.scrollTo({ top: 0 });
+    });
   }
 
   function parseOptionalInteger(rawValue: string) {
@@ -1130,37 +1165,30 @@ export function AdminShell() {
   const adminStatusMessage = message.startsWith("已进入后台") ? "后台在线，操作会记录到审计日志" : message;
 
   return (
-    <main className="workspace-page admin-page admin-page--authed">
+    <main className="workspace-page admin-page admin-page--authed" data-admin-section={activeAdminSection}>
       <aside className="admin-sidebar" aria-label="管理员后台侧栏">
         <a href="/" className="admin-sidebar-brand">
           <BrandLogo size={30} />
           <span>面霸练习生</span>
         </a>
+        <nav className="admin-sidebar-nav" aria-label="后台导航">
+          {adminSectionNavItems.map((item) => (
+            <button
+              type="button"
+              className={activeAdminSection === item.key ? "is-active" : ""}
+              key={item.key}
+              onClick={() => selectAdminSection(item.key)}
+            >
+              <AppIcon icon={item.icon} size={20} />
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
         <div className="admin-sidebar-status" aria-live="polite">
           <span>当前账号</span>
           <strong>{currentUser.email}</strong>
           <p>{adminStatusMessage}</p>
         </div>
-        {dashboardStats && (
-          <dl className="admin-sidebar-metrics" aria-label="后台关键数据">
-            <div>
-              <dt>总用户</dt>
-              <dd>{dashboardStats.overview.total_users.toLocaleString("zh-CN")}</dd>
-            </div>
-            <div>
-              <dt>训练场次</dt>
-              <dd>{dashboardStats.overview.total_sessions.toLocaleString("zh-CN")}</dd>
-            </div>
-            <div>
-              <dt>报告产出</dt>
-              <dd>{dashboardStats.overview.total_reports.toLocaleString("zh-CN")}</dd>
-            </div>
-            <div>
-              <dt>AI 成功率</dt>
-              <dd>{dashboardStats.overview.ai_success_rate == null ? "暂无" : `${Math.round(dashboardStats.overview.ai_success_rate * 100)}%`}</dd>
-            </div>
-          </dl>
-        )}
         <div className="admin-sidebar-actions">
           <button type="button" onClick={refreshAdminData}>
             <AppIcon icon="lucide:refresh-cw" size={18} />
@@ -1172,10 +1200,10 @@ export function AdminShell() {
           </button>
         </div>
       </aside>
-      <div className="admin-console-layout">
+      <div className="admin-console-layout" ref={consoleLayoutRef}>
         <section className="admin-console-main">
           {dashboardStats && dashboardChartOptions && (
-            <section className="admin-dashboard" id="admin-overview">
+            <section className="admin-dashboard admin-section-view admin-section-view--overview" id="admin-overview">
               <div className="admin-section-heading admin-dashboard-heading">
                 <div>
                   <span className="eyebrow">Data Dashboard</span>
@@ -1294,7 +1322,7 @@ export function AdminShell() {
             </section>
           )}
 
-          <section className="admin-workbench" id="admin-credits">
+          <section className="admin-workbench admin-section-view admin-section-view--credits" id="admin-credits">
             <form className="admin-panel" onSubmit={submitCreditGrant}>
               <h2>发放 / 调整次数</h2>
               <label>
@@ -1355,7 +1383,7 @@ export function AdminShell() {
             </article>
           </section>
 
-          <section className="admin-provider-table admin-user-table" id="admin-users">
+          <section className="admin-provider-table admin-user-table admin-section-view admin-section-view--users" id="admin-users">
             <div className="admin-section-heading">
               <span className="eyebrow">User Operations</span>
               <h2>用户检索与训练追踪</h2>
@@ -1617,7 +1645,7 @@ export function AdminShell() {
             )}
           </section>
 
-          <section className="admin-provider-table" id="admin-ai">
+          <section className="admin-provider-table admin-section-view admin-section-view--ai" id="admin-ai">
             <div className="admin-section-heading">
               <span className="eyebrow">Model Router</span>
               <h2>AI 服务状态</h2>
@@ -1644,7 +1672,7 @@ export function AdminShell() {
             </div>
           </section>
 
-          <section className="admin-provider-table" id="admin-system">
+          <section className="admin-provider-table admin-section-view admin-section-view--system" id="admin-system">
             <div className="admin-section-heading">
               <span className="eyebrow">System Config</span>
               <h2>系统参数</h2>
@@ -1678,7 +1706,7 @@ export function AdminShell() {
             </div>
           </section>
 
-          <section className="admin-provider-table admin-audit-table" id="admin-audit">
+          <section className="admin-provider-table admin-audit-table admin-section-view admin-section-view--audit" id="admin-audit">
             <div className="admin-section-heading">
               <span className="eyebrow">Audit Trail</span>
               <h2>操作审计日志</h2>
@@ -1698,7 +1726,7 @@ export function AdminShell() {
             </div>
           </section>
 
-          <section className="admin-provider-table admin-audit-table">
+          <section className="admin-provider-table admin-audit-table admin-section-view admin-section-view--audit">
             <div className="admin-section-heading">
               <span className="eyebrow">Account Trace</span>
               <h2>{selectedUserEmail ? `${selectedUserEmail} 的认证与售后记录` : "最近认证与售后记录"}</h2>
@@ -1737,7 +1765,7 @@ export function AdminShell() {
             </div>
           </section>
 
-          <section className="admin-provider-table admin-audit-table">
+          <section className="admin-provider-table admin-audit-table admin-section-view admin-section-view--audit">
             <div className="admin-section-heading">
               <span className="eyebrow">Content Safety</span>
               <h2>内容安全拦截记录</h2>
@@ -1763,7 +1791,7 @@ export function AdminShell() {
             </div>
           </section>
 
-          <section className="admin-provider-table admin-audit-table">
+          <section className="admin-provider-table admin-audit-table admin-section-view admin-section-view--ai">
             <div className="admin-section-heading">
               <span className="eyebrow">AI Call Logs</span>
               <h2>模型调用记录</h2>
