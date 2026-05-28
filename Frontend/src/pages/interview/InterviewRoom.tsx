@@ -454,6 +454,11 @@ export function InterviewRoom() {
   }, []);
 
   useEffect(() => {
+    if (!getCookie(CSRF_COOKIE_NAME)) {
+      socketRef.current?.close();
+      setSocketState("已断开");
+      return;
+    }
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const websocket = new WebSocket(`${protocol}://${window.location.host}/api/ws/interviews/${socketSessionId}`);
     socketRef.current = websocket;
