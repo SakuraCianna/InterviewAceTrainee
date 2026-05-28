@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { EChartsOption } from "echarts";
 import { AppIcon } from "../../components/AppIcon";
 import { BrandLogo } from "../../components/BrandLogo";
-import { csrfHeaders, getApiErrorMessage } from "../../lib/api";
+import { CSRF_COOKIE_NAME, csrfHeaders, getApiErrorMessage, getCookie } from "../../lib/api";
 
 type EChartsModule = typeof import("echarts");
 type EChartsInstance = ReturnType<EChartsModule["init"]>;
@@ -317,17 +317,19 @@ function AdminChart({ option, height = 280 }: { option: EChartsOption; height?: 
     let disposed = false;
     let resizeObserver: ResizeObserver | null = null;
 
-    void loadECharts().then((echarts) => {
-      if (disposed || !containerRef.current) {
-        return;
-      }
-      chartRef.current = echarts.init(containerRef.current);
-      chartRef.current.setOption(optionRef.current);
-      if ("ResizeObserver" in window) {
-        resizeObserver = new ResizeObserver(() => chartRef.current?.resize());
-        resizeObserver.observe(containerRef.current);
-      }
-    });
+    void loadECharts()
+      .then((echarts) => {
+        if (disposed || !containerRef.current) {
+          return;
+        }
+        chartRef.current = echarts.init(containerRef.current);
+        chartRef.current.setOption(optionRef.current);
+        if ("ResizeObserver" in window) {
+          resizeObserver = new ResizeObserver(() => chartRef.current?.resize());
+          resizeObserver.observe(containerRef.current);
+        }
+      })
+      .catch(() => undefined);
 
     return () => {
       disposed = true;
@@ -361,6 +363,7 @@ export function AdminShell() {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginCode, setLoginCode] = useState("");
   const [isRequestingAdminCode, setIsRequestingAdminCode] = useState(false);
+  const [isSubmittingAdminLogin, setIsSubmittingAdminLogin] = useState(false);
   const [adminCodeCooldownSeconds, setAdminCodeCooldownSeconds] = useState(0);
   const [creditUser, setCreditUser] = useState("");
   const [creditAmount, setCreditAmount] = useState("1");
@@ -376,8 +379,8 @@ export function AdminShell() {
   const [refundSessionId, setRefundSessionId] = useState("");
   const [selectedReport, setSelectedReport] = useState<AdminInterviewReport | null>(null);
   const [reportMessage, setReportMessage] = useState("");
-  const [message, setMessage] = useState("正在检查管理员会话。");
-  const [isLoading, setIsLoading] = useState(true);
+  const [message, setMessage] = useState("请使用管理员邮箱、密码和邮箱验证码进入后台。");
+  const [isLoading, setIsLoading] = useState(false);
 
   const enabledProviderCount = useMemo(() => providers.filter((provider) => provider.enabled).length, [providers]);
   const dashboardChartOptions = useMemo(() => {
@@ -395,6 +398,9 @@ export function AdminShell() {
   }, [dashboardStats]);
 
   useEffect(() => {
+    if (!getCookie(CSRF_COOKIE_NAME)) {
+      return;
+    }
     void loadCurrentUser();
   }, []);
 
@@ -465,7 +471,15 @@ export function AdminShell() {
 
   async function loadCurrentUser() {
     setIsLoading(true);
-    const response = await fetch("/api/auth/me", { credentials: "include" });
+    let response: Response;
+    try {
+      response = await fetch("/api/auth/me", { credentials: "include" });
+    } catch {
+      setCurrentUser(null);
+      setIsLoading(false);
+      setMessage("网络连接异常, 请稍后再试");
+      return;
+    }
     if (!response.ok) {
       setCurrentUser(null);
       setIsLoading(false);
@@ -484,7 +498,7 @@ export function AdminShell() {
     setCurrentUser(user);
     setIsLoading(false);
     setMessage(`已进入后台：${user.email}`);
-    await Promise.all([
+    await Promise.allSettled([
       loadProviders(),
       loadDashboardStats(),
       loadSystemConfigs(),
@@ -706,19 +720,32 @@ export function AdminShell() {
 
   async function submitAdminLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const response = await fetch("/api/auth/admin/login", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: loginEmail, password: loginPassword, code: loginCode }),
-    });
-    const data = (await response.json()) as AdminLoginResponse;
+    if (isSubmittingAdminLogin) {
+      return;
+    }
+    setIsSubmittingAdminLogin(true);
+    let response: Response;
+    try {
+      response = await fetch("/api/auth/admin/login", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: loginEmail, password: loginPassword, code: loginCode }),
+      });
+    } catch {
+      setIsSubmittingAdminLogin(false);
+      setMessage("网络连接异常, 请稍后再试");
+      return;
+    }
+    const data = (await response.json().catch(() => ({}))) as AdminLoginResponse;
     if (!response.ok || !data.access_token) {
+      setIsSubmittingAdminLogin(false);
       setMessage(`后台登录失败：${getApiErrorMessage(data, "请检查邮箱、密码和验证码。")}`);
       return;
     }
 
     await loadCurrentUser();
+    setIsSubmittingAdminLogin(false);
   }
 
   async function submitCreditGrant(event: FormEvent<HTMLFormElement>) {
@@ -975,7 +1002,7 @@ export function AdminShell() {
   }
 
   async function refreshAdminData() {
-    await Promise.all([
+    await Promise.allSettled([
       loadProviders(),
       loadDashboardStats(),
       loadSystemConfigs(),
@@ -1091,8 +1118,8 @@ export function AdminShell() {
                   </button>
                 </div>
               </label>
-              <button type="submit" className="auth-submit admin-auth-submit" disabled={isLoading}>
-                {isLoading ? "检查中" : "进入后台"}
+              <button type="submit" className="auth-submit admin-auth-submit" disabled={isLoading || isSubmittingAdminLogin}>
+                {isLoading ? "检查中" : isSubmittingAdminLogin ? "登录中" : "进入后台"}
               </button>
               <p className="auth-message" role="status" aria-live="polite">{message}</p>
             </div>

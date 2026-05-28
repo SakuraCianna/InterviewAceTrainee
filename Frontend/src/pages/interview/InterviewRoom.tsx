@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { AppIcon } from "../../components/AppIcon";
 import { AvatarStage, AvatarState } from "../../components/AvatarStage";
 import { BrandLogo } from "../../components/BrandLogo";
-import { csrfHeaders, getApiErrorMessage } from "../../lib/api";
+import { CSRF_COOKIE_NAME, csrfHeaders, getApiErrorMessage, getCookie } from "../../lib/api";
 
 type InterviewType = "job" | "postgraduate" | "civil_service" | "ielts";
 
@@ -406,9 +406,15 @@ export function InterviewRoom() {
   const socketSessionId = useMemo(() => interviewState?.session_id ?? activeSession?.session_id ?? sessionId, [activeSession, interviewState, sessionId]);
 
   useEffect(() => {
-    void loadAccount();
-    void loadActiveSession();
-    void loadHistory();
+    if (getCookie(CSRF_COOKIE_NAME)) {
+      void loadAccount();
+      void loadActiveSession();
+      void loadHistory();
+    } else {
+      setCurrentUser(null);
+      setHistoryItems([]);
+      setSocketMessage("请先登录账号，再进入训练房间。");
+    }
     void loadMicrophoneDevices();
   }, []);
 
@@ -651,7 +657,13 @@ export function InterviewRoom() {
   }
 
   async function loadAccount() {
-    const response = await fetch("/api/auth/me", { credentials: "include" });
+    let response: Response;
+    try {
+      response = await fetch("/api/auth/me", { credentials: "include" });
+    } catch {
+      setCurrentUser(null);
+      return;
+    }
     if (!response.ok) {
       setCurrentUser(null);
       return;
@@ -769,7 +781,13 @@ export function InterviewRoom() {
   }
 
   async function loadHistory() {
-    const response = await fetch("/api/interviews/history", { credentials: "include" });
+    let response: Response;
+    try {
+      response = await fetch("/api/interviews/history", { credentials: "include" });
+    } catch {
+      setHistoryItems([]);
+      return;
+    }
     if (!response.ok) {
       setHistoryItems([]);
       return;
@@ -778,7 +796,13 @@ export function InterviewRoom() {
   }
 
   async function loadActiveSession() {
-    const response = await fetch("/api/interviews/active", { credentials: "include" });
+    let response: Response;
+    try {
+      response = await fetch("/api/interviews/active", { credentials: "include" });
+    } catch {
+      setSocketMessage("网络连接异常, 请稍后再试。");
+      return;
+    }
     if (response.status === 401) {
       setSocketMessage("请先登录账号，再进入训练房间。");
       return;
