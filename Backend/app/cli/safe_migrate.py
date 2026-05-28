@@ -40,6 +40,8 @@ def run_safe_migration(database_url: str, project_root: Path, backend_dir: Path)
 
     backup_root = resolve_backup_root(project_root)
     backup_root.mkdir(parents=True, exist_ok=True)
+    prune_old_backups(backup_root, keep_count=BACKUP_KEEP_COUNT)
+
     should_backup = has_pending_database_operations(database_url=database_url, backend_dir=backend_dir)
     backup_path: Path | None = None
     if should_backup:
@@ -56,6 +58,7 @@ def run_safe_migration(database_url: str, project_root: Path, backend_dir: Path)
         print("database backup skipped: alembic version is already up to date")
 
     run_alembic_upgrade(backend_dir)
+    prune_old_backups(backup_root, keep_count=BACKUP_KEEP_COUNT)
     return backup_path
 
 
@@ -139,11 +142,25 @@ def prune_old_backups(backup_root: Path, keep_count: int = BACKUP_KEEP_COUNT) ->
 
 def has_pending_database_operations(database_url: str, backend_dir: Path) -> bool:
     current_versions, has_existing_schema = inspect_database_migration_state(database_url)
-    if current_versions & REMOVED_DEV_REVISIONS:
-        return True
-
     head_versions = get_script_head_versions(backend_dir)
+    return has_pending_database_operations_for_state(
+        current_versions=current_versions,
+        has_existing_schema=has_existing_schema,
+        head_versions=head_versions,
+    )
+
+
+def has_pending_database_operations_for_state(
+    *,
+    current_versions: set[str],
+    has_existing_schema: bool,
+    head_versions: set[str],
+) -> bool:
     if current_versions:
+        if head_versions and head_versions.issubset(current_versions):
+            return False
+        if current_versions & REMOVED_DEV_REVISIONS:
+            return True
         return current_versions != head_versions
 
     return has_existing_schema
@@ -179,8 +196,13 @@ def normalize_removed_dev_revisions(database_url: str) -> None:
             if "alembic_version" not in inspector.get_table_names():
                 return
 
-            version = connection.execute(text("SELECT version_num FROM alembic_version LIMIT 1")).scalar()
-            if version not in REMOVED_DEV_REVISIONS:
+            versions = [
+                str(version)
+                for version in connection.execute(text("SELECT version_num FROM alembic_version")).scalars().all()
+                if version
+            ]
+            removed_versions = [version for version in versions if version in REMOVED_DEV_REVISIONS]
+            if not removed_versions:
                 return
 
             if inspector.has_table("interview_materials"):
@@ -188,7 +210,17 @@ def normalize_removed_dev_revisions(database_url: str) -> None:
                 if "target_school" not in columns:
                     connection.execute(text("ALTER TABLE interview_materials ADD COLUMN target_school VARCHAR(160)"))
 
-            connection.execute(text("UPDATE alembic_version SET version_num = :version"), {"version": BASELINE_REVISION})
+            remaining_versions = [version for version in versions if version not in REMOVED_DEV_REVISIONS]
+            for removed_version in REMOVED_DEV_REVISIONS:
+                connection.execute(
+                    text("DELETE FROM alembic_version WHERE version_num = :version"),
+                    {"version": removed_version},
+                )
+            if not remaining_versions:
+                connection.execute(
+                    text("INSERT INTO alembic_version (version_num) VALUES (:version)"),
+                    {"version": BASELINE_REVISION},
+                )
     finally:
         engine.dispose()
 

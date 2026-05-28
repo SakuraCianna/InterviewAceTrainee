@@ -174,10 +174,12 @@ npm run dev
 启动：
 
 ```powershell
-docker compose up --build -d
+docker compose build
+docker compose --profile migrate run --rm migrate
+docker compose up -d
 ```
 
-若数据库发生变化，生产环境直接执行 `docker compose up -d --build` 即可；后端容器启动时会先执行安全迁移流程。
+若数据库发生变化，生产环境先执行 `docker compose build`，再执行 `docker compose --profile migrate run --rm migrate`。迁移命令会在迁移前备份一次数据库并保留最新 5 份，后端容器正常启动和重启不会自动生成备份。
 
 查看状态：
 
@@ -210,4 +212,4 @@ https://sakuracianna.icu/
 - HTTPS 可用后设置 `AUTH_COOKIE_SECURE=true`。
 - Resend 或其他邮件服务的发信域名完成 DNS 验证。
 - 管理员账号需要在后台或数据库中拥有 `admin` 角色，并使用密码 + 邮箱验证码登录后台。
-- 首次上线前执行 `uv run python -m app.cli.safe_migrate` 或通过 Docker 启动自动迁移。
+- 首次上线前执行 `uv run python -m app.cli.safe_migrate`，Docker 环境执行 `docker compose --profile migrate run --rm migrate`。

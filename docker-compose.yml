@@ -34,6 +34,7 @@ services:
   backend:
     build:
       context: ./Backend
+    image: mianba-backend:local
     container_name: mianba-backend
     restart: unless-stopped
     env_file:
@@ -50,6 +51,26 @@ services:
       - ./database_backups:/app/database_backups
     expose:
       - "8000"
+
+  migrate:
+    build:
+      context: ./Backend
+    image: mianba-backend:local
+    container_name: mianba-migrate
+    restart: "no"
+    profiles:
+      - migrate
+    env_file:
+      - ./Backend/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://mianba:mianba@postgres:5432/mianba
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./database_backups:/app/database_backups
+    command: ["uv", "run", "python", "-m", "app.cli.safe_migrate"]
 
   frontend:
     build:
