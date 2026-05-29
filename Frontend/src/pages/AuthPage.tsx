@@ -3,6 +3,7 @@ import { Button, SafeArea } from "antd-mobile";
 import { gsap } from "gsap";
 import { AppIcon } from "../components/AppIcon";
 import { getApiErrorMessage } from "../lib/api";
+import { emailCodeCooldownKey, normalizeEmail, retryAfterSeconds, secondsUntil } from "../lib/emailCooldown";
 
 type AuthMode = "login" | "register";
 
@@ -21,16 +22,8 @@ type AuthResponse = {
 const CODE_REQUEST_COOLDOWN_SECONDS = 90;
 const CODE_REQUEST_STORAGE_PREFIX = "mianba_email_code_next:";
 
-function normalizeEmail(email: string) {
-  return email.trim().toLowerCase();
-}
-
 function codeCooldownKey(email: string) {
-  return `${CODE_REQUEST_STORAGE_PREFIX}${normalizeEmail(email)}`;
-}
-
-function secondsUntil(timestamp: number) {
-  return Math.max(0, Math.ceil((timestamp - Date.now()) / 1000));
+  return emailCodeCooldownKey(CODE_REQUEST_STORAGE_PREFIX, email);
 }
 
 async function parseAuthResponse(response: Response): Promise<AuthResponse> {
@@ -39,12 +32,6 @@ async function parseAuthResponse(response: Response): Promise<AuthResponse> {
   } catch {
     return {};
   }
-}
-
-function retryAfterSeconds(response: Response) {
-  const rawValue = response.headers.get("Retry-After");
-  const parsedValue = rawValue ? Number.parseInt(rawValue, 10) : CODE_REQUEST_COOLDOWN_SECONDS;
-  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : CODE_REQUEST_COOLDOWN_SECONDS;
 }
 
 function isReducedMotionEnabled() {
@@ -208,7 +195,7 @@ export function AuthPage({ mode }: AuthPageProps) {
 
     if (!response.ok) {
       if (response.status === 429) {
-        const retryAfter = retryAfterSeconds(response);
+        const retryAfter = retryAfterSeconds(response, CODE_REQUEST_COOLDOWN_SECONDS);
         startCodeCooldown(retryAfter);
         setMessage(`获取太频繁, 请 ${retryAfter} 秒后再试`);
         return;

@@ -2,7 +2,9 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AppIcon } from "../../components/AppIcon";
 import { BrandLogo } from "../../components/BrandLogo";
 import { CSRF_COOKIE_NAME, csrfHeaders, getApiErrorMessage, getCookie } from "../../lib/api";
+import { emailCodeCooldownKey, normalizeEmail, retryAfterSeconds, secondsUntil } from "../../lib/emailCooldown";
 import { AdminChart, barDashboardOption, donutDashboardOption, lineDashboardOption } from "./dashboardCharts";
+import { configInputValue, parseConfigInput, parseOptionalAmountCents, parseOptionalInteger } from "./formUtils";
 import type {
   AICallLogEntry,
   AdminAuditLog,
@@ -26,22 +28,8 @@ import type {
 const ADMIN_CODE_COOLDOWN_SECONDS = 90;
 const ADMIN_CODE_STORAGE_PREFIX = "mianba_admin_code_next:";
 
-function normalizeAdminEmail(email: string) {
-  return email.trim().toLowerCase();
-}
-
 function adminCodeCooldownKey(email: string) {
-  return `${ADMIN_CODE_STORAGE_PREFIX}${normalizeAdminEmail(email)}`;
-}
-
-function secondsUntil(timestamp: number) {
-  return Math.max(0, Math.ceil((timestamp - Date.now()) / 1000));
-}
-
-function retryAfterSeconds(response: Response) {
-  const rawValue = response.headers.get("Retry-After");
-  const parsedValue = rawValue ? Number.parseInt(rawValue, 10) : ADMIN_CODE_COOLDOWN_SECONDS;
-  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : ADMIN_CODE_COOLDOWN_SECONDS;
+  return emailCodeCooldownKey(ADMIN_CODE_STORAGE_PREFIX, email);
 }
 
 const adminSectionNavItems: { key: AdminSectionKey; label: string; icon: string }[] = [
@@ -156,7 +144,7 @@ export function AdminShell() {
   }, [currentUser]);
 
   useEffect(() => {
-    const normalizedEmail = normalizeAdminEmail(loginEmail);
+    const normalizedEmail = normalizeEmail(loginEmail);
     if (!normalizedEmail) {
       setAdminCodeCooldownSeconds(0);
       return;
@@ -177,7 +165,7 @@ export function AdminShell() {
   }, [adminCodeCooldownSeconds, loginEmail]);
 
   function startAdminCodeCooldown(seconds = ADMIN_CODE_COOLDOWN_SECONDS) {
-    const normalizedEmail = normalizeAdminEmail(loginEmail);
+    const normalizedEmail = normalizeEmail(loginEmail);
     if (!normalizedEmail) {
       return;
     }
@@ -212,24 +200,6 @@ export function AdminShell() {
     window.requestAnimationFrame(() => {
       consoleLayoutRef.current?.scrollTo({ top: 0 });
     });
-  }
-
-  function parseOptionalInteger(rawValue: string) {
-    const trimmed = rawValue.trim();
-    if (!trimmed) {
-      return undefined;
-    }
-    const value = Number.parseInt(trimmed, 10);
-    return Number.isNaN(value) ? null : value;
-  }
-
-  function parseOptionalAmountCents(rawValue: string) {
-    const trimmed = rawValue.trim();
-    if (!trimmed) {
-      return undefined;
-    }
-    const value = Number.parseFloat(trimmed);
-    return Number.isNaN(value) || value < 0 ? null : Math.round(value * 100);
   }
 
   async function loadCurrentUser() {
@@ -456,7 +426,7 @@ export function AdminShell() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizeAdminEmail(loginEmail) }),
+        body: JSON.stringify({ email: normalizeEmail(loginEmail) }),
       });
     } catch {
       setIsRequestingAdminCode(false);
@@ -467,7 +437,7 @@ export function AdminShell() {
     setIsRequestingAdminCode(false);
     if (!response.ok) {
       if (response.status === 429) {
-        const retryAfter = retryAfterSeconds(response);
+        const retryAfter = retryAfterSeconds(response, ADMIN_CODE_COOLDOWN_SECONDS);
         startAdminCodeCooldown(retryAfter);
         setMessage(`获取太频繁, 请 ${retryAfter} 秒后再试`);
         return;
@@ -756,33 +726,6 @@ export function AdminShell() {
     );
     setMessage(`${user.email} 已${role === "admin" ? "设为管理员" : "撤销管理员"}，该账号需要重新登录后生效。`);
     await Promise.all([loadDashboardStats(), loadAuditLogs()]);
-  }
-
-  function configInputValue(value: SystemConfig["value"]) {
-    if (typeof value === "string") {
-      return value;
-    }
-    if (typeof value === "number" || typeof value === "boolean") {
-      return String(value);
-    }
-    return JSON.stringify(value);
-  }
-
-  function parseConfigInput(currentValue: SystemConfig["value"], rawValue: string) {
-    if (typeof currentValue === "boolean") {
-      return rawValue === "true";
-    }
-    if (typeof currentValue === "number") {
-      const parsed = Number(rawValue);
-      if (Number.isNaN(parsed)) {
-        throw new Error("invalid_number_config");
-      }
-      return parsed;
-    }
-    if (Array.isArray(currentValue) || (currentValue && typeof currentValue === "object")) {
-      return JSON.parse(rawValue);
-    }
-    return rawValue;
   }
 
   async function updateSystemConfig(config: SystemConfig, rawValue: string) {
