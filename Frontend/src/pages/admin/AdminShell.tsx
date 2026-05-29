@@ -83,6 +83,15 @@ type CreditLedgerEntry = {
   created_at: string;
 };
 
+type VoucherIssueResponse = {
+  total_recipients: number;
+  total_vouchers: number;
+  recipients: string[];
+  voucher_type: string;
+  reason: string;
+  operator_admin_email: string;
+};
+
 type AICallLogEntry = {
   id: string;
   session_id?: string | null;
@@ -394,6 +403,11 @@ export function AdminShell() {
   const [creditAmount, setCreditAmount] = useState("1");
   const [creditReason, setCreditReason] = useState("manual_grant");
   const [creditNote, setCreditNote] = useState("");
+  const [voucherEmails, setVoucherEmails] = useState("");
+  const [voucherQuantity, setVoucherQuantity] = useState("1");
+  const [voucherAllUsers, setVoucherAllUsers] = useState(false);
+  const [voucherReason, setVoucherReason] = useState("manual_voucher_grant");
+  const [voucherNote, setVoucherNote] = useState("");
   const [noteCategory, setNoteCategory] = useState("general");
   const [noteContent, setNoteContent] = useState("");
   const [noteSessionId, setNoteSessionId] = useState("");
@@ -833,6 +847,50 @@ export function AdminShell() {
     setCreditReason("manual_grant");
     setCreditNote("");
     await Promise.all([loadDashboardStats(), loadAuditLogs(), loadCreditLedger(creditUser)]);
+  }
+
+  async function submitVoucherIssue(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const quantity = Number.parseInt(voucherQuantity, 10);
+    const userEmails = voucherEmails
+      .split(/[\s,;]+/)
+      .map((email) => email.trim())
+      .filter(Boolean);
+    if (!voucherAllUsers && userEmails.length === 0) {
+      setMessage("请填写至少一个用户邮箱，或选择发放给全部普通用户。");
+      return;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setMessage("体验券数量需要填写为正整数。");
+      return;
+    }
+
+    const response = await fetch("/api/admin/vouchers", {
+      method: "POST",
+      credentials: "include",
+      headers: csrfHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        user_emails: voucherAllUsers ? [] : userEmails,
+        issue_all_active_users: voucherAllUsers,
+        quantity,
+        voucher_type: "admin_grant",
+        reason: voucherReason.trim() || "manual_voucher_grant",
+        note: voucherNote.trim() || undefined,
+      }),
+    });
+    const data = (await response.json().catch(() => ({}))) as VoucherIssueResponse & { detail?: string; message?: string };
+    if (!response.ok) {
+      setMessage(`体验券发放失败：${getApiErrorMessage(data, "请检查用户邮箱和发放数量。")}`);
+      return;
+    }
+
+    setMessage(`已发放 ${data.total_vouchers} 张体验券，覆盖 ${data.total_recipients} 个用户。`);
+    setVoucherEmails("");
+    setVoucherQuantity("1");
+    setVoucherAllUsers(false);
+    setVoucherReason("manual_voucher_grant");
+    setVoucherNote("");
+    await Promise.all([loadDashboardStats(), loadAuditLogs()]);
   }
 
   async function submitCustomerServiceNote(event: FormEvent<HTMLFormElement>) {
@@ -1384,6 +1442,43 @@ export function AdminShell() {
                     <span>{entry.reason} · 余额 {entry.balance_after}{entry.note ? ` · ${entry.note}` : ""}</span>
                   </div>
                 ))}
+              </div>
+            </form>
+            <form className="admin-panel" onSubmit={submitVoucherIssue}>
+              <h2>发放体验券</h2>
+              <label className="admin-checkbox-line">
+                <input
+                  type="checkbox"
+                  checked={voucherAllUsers}
+                  onChange={(event) => setVoucherAllUsers(event.target.checked)}
+                />
+                发放给全部启用中的普通用户
+              </label>
+              <label>
+                用户邮箱
+                <textarea
+                  value={voucherEmails}
+                  onChange={(event) => setVoucherEmails(event.target.value)}
+                  placeholder="多个邮箱可用换行、空格或逗号分隔"
+                  disabled={voucherAllUsers}
+                  rows={4}
+                />
+              </label>
+              <label>
+                每人发放张数
+                <input type="number" min={1} max={20} value={voucherQuantity} onChange={(event) => setVoucherQuantity(event.target.value)} required />
+              </label>
+              <label>
+                发放原因
+                <input value={voucherReason} onChange={(event) => setVoucherReason(event.target.value)} placeholder="manual_voucher_grant / launch_bonus" required maxLength={120} />
+                <small className="admin-field-help">体验券优先抵扣下一场模拟面试，不改变用户的训练次数余额。</small>
+              </label>
+              <label>
+                处理备注
+                <input value={voucherNote} onChange={(event) => setVoucherNote(event.target.value)} placeholder="例如：首批内测用户体验券" maxLength={240} />
+              </label>
+              <div className="admin-action-row">
+                <button type="submit" className="admin-primary-button">发放体验券</button>
               </div>
             </form>
             <article className="admin-panel admin-trace-summary">

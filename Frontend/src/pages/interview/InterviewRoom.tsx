@@ -41,6 +41,8 @@ type InterviewStateResponse = {
   current_question: InterviewQuestion | null;
   report: InterviewReport | null;
   balance_after?: number;
+  voucher_applied?: boolean;
+  voucher_id?: string | null;
   detail?: string;
   message?: string;
 };
@@ -49,6 +51,7 @@ type CurrentUserResponse = {
   email: string;
   role: string;
   credit_balance: number;
+  trial_voucher_count: number;
 };
 
 type InterviewHistoryItem = {
@@ -394,6 +397,9 @@ export function InterviewRoom() {
     ? `${Math.min(interviewState.current_step_index + 1, interviewState.total_steps)} / ${interviewState.total_steps}`
     : "未开始";
   const recordingProgressPercent = Math.min(1, recordingElapsedMs / Math.max(answerLimitMs, 1));
+  const accountQuotaText = currentUser
+    ? `${currentUser.credit_balance} 次${currentUser.trial_voucher_count > 0 ? ` / 体验券 ${currentUser.trial_voucher_count} 张` : ""}`
+    : "未登录";
 
   const socketSessionId = useMemo(() => interviewState?.session_id ?? activeSession?.session_id ?? sessionId, [activeSession, interviewState, sessionId]);
 
@@ -813,13 +819,27 @@ export function InterviewRoom() {
     }
 
     if (typeof data.balance_after === "number") {
-      setCurrentUser((user) => (user ? { ...user, credit_balance: data.balance_after ?? user.credit_balance } : user));
+      setCurrentUser((user) =>
+        user
+          ? {
+              ...user,
+              credit_balance: data.balance_after ?? user.credit_balance,
+              trial_voucher_count: data.voucher_applied ? Math.max(0, user.trial_voucher_count - 1) : user.trial_voucher_count,
+            }
+          : user,
+      );
     }
     setSessionId(data.session_id);
     setInterviewState(data);
     setActiveSession(null);
     setStateIndex(1);
-    setSocketMessage(data.status === "completed" ? "这场训练已完成，可查看复盘报告。" : `面试已就绪，剩余次数 ${data.balance_after ?? "已更新"}。`);
+    setSocketMessage(
+      data.status === "completed"
+        ? "这场训练已完成，可查看复盘报告。"
+        : data.voucher_applied
+          ? `面试已就绪，已使用体验券，剩余次数 ${data.balance_after ?? "已更新"}。`
+          : `面试已就绪，剩余次数 ${data.balance_after ?? "已更新"}。`,
+    );
     await loadHistory();
     void speakQuestion(data.current_question?.text, data.interview_type, data.session_id);
   }
@@ -1461,7 +1481,7 @@ export function InterviewRoom() {
             <span className="session-pill">{socketState} · 设备检测</span>
             <span className="credit-pill">
               <AppIcon icon="lucide:coins" size={16} />
-              {currentUser ? `${currentUser.credit_balance} 次` : "未登录"}
+              {accountQuotaText}
             </span>
             {currentUser && (
               <>
@@ -1582,7 +1602,7 @@ export function InterviewRoom() {
           <span className="session-pill">{socketState} · {isSelectionStage ? "选择场景" : progressText}</span>
           <span className="credit-pill">
             <AppIcon icon="lucide:coins" size={16} />
-            {currentUser ? `${currentUser.credit_balance} 次` : "未登录"}
+            {accountQuotaText}
           </span>
           {currentUser && (
             <>

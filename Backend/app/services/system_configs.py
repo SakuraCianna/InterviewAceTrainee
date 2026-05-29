@@ -24,7 +24,8 @@ class SystemConfig:
 
 DEFAULT_SYSTEM_CONFIGS: dict[str, SystemConfig] = {
     "registration_open": SystemConfig("registration_open", True, "是否开放新用户注册"),
-    "new_user_default_credits": SystemConfig("new_user_default_credits", 1, "新用户默认赠送训练次数"),
+    "new_user_default_credits": SystemConfig("new_user_default_credits", 0, "新用户默认赠送训练次数"),
+    "new_user_trial_vouchers": SystemConfig("new_user_trial_vouchers", 1, "新用户默认赠送体验券数量"),
     "password_login_enabled": SystemConfig("password_login_enabled", True, "是否允许普通用户密码登录"),
     "email_code_login_enabled": SystemConfig("email_code_login_enabled", True, "是否允许普通用户邮箱验证码登录"),
     "max_interview_steps": SystemConfig("max_interview_steps", 8, "单场训练最大轮数上限"),

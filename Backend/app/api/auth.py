@@ -41,6 +41,7 @@ from app.services.email_codes import (
 from app.services.mailers import EmailDeliveryError, send_verification_code_email
 from app.services.redis_runtime import get_redis_client
 from app.services.system_configs import DatabaseSystemConfigStore, InMemorySystemConfigStore, get_system_config_store
+from app.services.interview_vouchers import InterviewVoucherStore, get_interview_voucher_store
 from app.services.user_credentials import (
     UserAlreadyExistsError,
     UserCredentialStore,
@@ -162,6 +163,23 @@ def get_authenticated_role(user_store: UserCredentialStore, email: str) -> str:
     return user_record.role if user_record is not None else "user"
 
 
+def issue_registration_vouchers(
+    email: str,
+    system_config_store: DatabaseSystemConfigStore | InMemorySystemConfigStore,
+    voucher_store: InterviewVoucherStore,
+) -> None:
+    voucher_count = max(0, system_config_store.get_int("new_user_trial_vouchers"))
+    if voucher_count <= 0:
+        return
+    voucher_store.issue(
+        user_email=email,
+        voucher_type="new_user_trial",
+        issue_reason="registration_bonus",
+        quantity=voucher_count,
+        note="new_user_trial",
+    )
+
+
 def record_login_event(
     log_store: AuthLoginLogStore,
     request: Request,
@@ -192,6 +210,7 @@ def register_with_password(
     code_store: EmailCodeStore | RedisEmailCodeStore = Depends(get_email_code_store),
     user_store: UserCredentialStore = Depends(get_user_credential_store),
     system_config_store: DatabaseSystemConfigStore | InMemorySystemConfigStore = Depends(get_system_config_store),
+    voucher_store: InterviewVoucherStore = Depends(get_interview_voucher_store),
     login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
     auth_session_store: AuthSessionStore = Depends(get_auth_session_store),
 ) -> PasswordLoginResponse:
@@ -209,11 +228,14 @@ def register_with_password(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_email_code") from exc
 
     try:
+        is_new_user = not user_store.user_exists(email)
         user_store.create_user(
             email,
             hash_password(payload.password),
             initial_credit_balance=system_config_store.get_int("new_user_default_credits"),
         )
+        if is_new_user:
+            issue_registration_vouchers(email, system_config_store, voucher_store)
     except UserAlreadyExistsError as exc:
         record_login_event(login_log_store, request, email=email, auth_method="password_register", role="user", success=False, failure_reason="email_already_registered")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email_already_registered") from exc
@@ -398,10 +420,13 @@ def login_with_email_code(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_email_code") from exc
 
     try:
+        is_new_user = not user_store.user_exists(email)
         user_store.create_placeholder_user(
             email,
             initial_credit_balance=system_config_store.get_int("new_user_default_credits"),
         )
+        if is_new_user:
+            issue_registration_vouchers(email, system_config_store, voucher_store)
     except UserDisabledError as exc:
         record_auth_failure(attempt_key, settings)
         record_login_event(login_log_store, request, email=email, auth_method="email_code", role="user", success=False, failure_reason="user_disabled")
@@ -492,9 +517,11 @@ def logout(
 def read_current_user(
     claims: TokenClaims = Depends(get_current_user_claims),
     credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
+    voucher_store: InterviewVoucherStore = Depends(get_interview_voucher_store),
 ) -> CurrentUserResponse:
     return CurrentUserResponse(
         email=claims["sub"],
         role=claims["role"],
         credit_balance=credit_store.get_balance(claims["sub"]),
+        trial_voucher_count=voucher_store.available_count(claims["sub"]),
     )

@@ -9,12 +9,19 @@ from app.services.system_configs import DEFAULT_SYSTEM_CONFIGS
 
 
 class BusinessDefaultTests(unittest.TestCase):
-    def test_new_users_receive_one_default_credit(self) -> None:
-        self.assertEqual(DEFAULT_SYSTEM_CONFIGS["new_user_default_credits"].value, 1)
+    def test_new_users_receive_trial_voucher_not_default_credits(self) -> None:
+        self.assertEqual(DEFAULT_SYSTEM_CONFIGS["new_user_default_credits"].value, 0)
+        self.assertEqual(DEFAULT_SYSTEM_CONFIGS["new_user_trial_vouchers"].value, 1)
 
-    def test_every_interview_type_costs_one_credit(self) -> None:
-        for interview_type in InterviewType:
-            self.assertEqual(INTERVIEW_PRODUCTS[interview_type].credit_cost, 1)
+    def test_interview_types_have_weighted_credit_costs(self) -> None:
+        expected_costs = {
+            InterviewType.JOB: 2,
+            InterviewType.POSTGRADUATE: 1,
+            InterviewType.CIVIL_SERVICE: 1,
+            InterviewType.IELTS: 2,
+        }
+        for interview_type, expected_cost in expected_costs.items():
+            self.assertEqual(INTERVIEW_PRODUCTS[interview_type].credit_cost, expected_cost)
 
     def test_provider_response_counts_environment_credentials(self) -> None:
         settings = Settings(

@@ -44,6 +44,24 @@ class CreditLedgerModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
+class InterviewVoucher(Base):
+    __tablename__ = "interview_vouchers"
+
+    id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_pk)
+    user_email: Mapped[str] = mapped_column(String(255), index=True)
+    voucher_type: Mapped[str] = mapped_column(String(80), default="admin_grant")
+    scope_interview_type: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    remaining_uses: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(32), default="available", index=True)
+    issue_reason: Mapped[str] = mapped_column(String(120), default="manual_grant")
+    issued_by_admin_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    redeemed_session_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    redeemed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
 class InterviewSession(Base):
     __tablename__ = "interview_sessions"
 

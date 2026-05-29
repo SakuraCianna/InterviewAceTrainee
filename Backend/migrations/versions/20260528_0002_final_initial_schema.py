@@ -57,6 +57,27 @@ def upgrade() -> None:
     op.create_index("ix_credit_ledger_user_email", "credit_ledger", ["user_email"])
 
     op.create_table(
+        "interview_vouchers",
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("user_email", sa.String(length=255), nullable=False),
+        sa.Column("voucher_type", sa.String(length=80), nullable=False),
+        sa.Column("scope_interview_type", sa.String(length=32), nullable=True),
+        sa.Column("remaining_uses", sa.Integer(), nullable=False),
+        sa.Column("status", sa.String(length=32), nullable=False),
+        sa.Column("issue_reason", sa.String(length=120), nullable=False),
+        sa.Column("issued_by_admin_email", sa.String(length=255), nullable=True),
+        sa.Column("note", sa.Text(), nullable=True),
+        sa.Column("redeemed_session_id", sa.String(length=120), nullable=True),
+        sa.Column("redeemed_at", sa.DateTime(), nullable=True),
+        sa.Column("expires_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+    )
+    op.create_index("ix_interview_vouchers_user_email", "interview_vouchers", ["user_email"])
+    op.create_index("ix_interview_vouchers_scope_interview_type", "interview_vouchers", ["scope_interview_type"])
+    op.create_index("ix_interview_vouchers_status", "interview_vouchers", ["status"])
+    op.create_index("ix_interview_vouchers_redeemed_session_id", "interview_vouchers", ["redeemed_session_id"])
+
+    op.create_table(
         "interview_sessions",
         sa.Column("id", sa.String(length=120), primary_key=True),
         sa.Column("user_email", sa.String(length=255), nullable=False),
@@ -286,5 +307,10 @@ def downgrade() -> None:
     op.drop_table("interview_sessions")
     op.drop_index("ix_credit_ledger_user_email", table_name="credit_ledger")
     op.drop_table("credit_ledger")
+    op.drop_index("ix_interview_vouchers_redeemed_session_id", table_name="interview_vouchers")
+    op.drop_index("ix_interview_vouchers_status", table_name="interview_vouchers")
+    op.drop_index("ix_interview_vouchers_scope_interview_type", table_name="interview_vouchers")
+    op.drop_index("ix_interview_vouchers_user_email", table_name="interview_vouchers")
+    op.drop_table("interview_vouchers")
     op.drop_index("ix_users_email", table_name="users")
     op.drop_table("users")

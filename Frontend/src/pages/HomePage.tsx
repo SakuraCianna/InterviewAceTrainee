@@ -10,7 +10,7 @@ const modules = [
     icon: "lucide:briefcase-business",
     label: "工作面试",
     headline: "专业一面 + 专业二面 + HR 面",
-    cost: "1 次 / 单场模拟",
+    cost: "2 次 / 深度模拟",
     detail: "按求职链路逐轮推进，覆盖项目深挖、岗位匹配、沟通动机和临场追问。",
   },
   {
@@ -31,7 +31,7 @@ const modules = [
     icon: "lucide:languages",
     label: "雅思口语",
     headline: "Part 1 / 2 / 3 全流程",
-    cost: "1 次 / 单场模拟",
+    cost: "2 次 / 完整口语",
     detail: "按口语考试节奏训练流利度、词汇、语法、发音和观点展开。",
   },
 ];
@@ -393,8 +393,8 @@ export function HomePage() {
       <section className="home-section pricing-panel motion-section">
         <div className="pricing-copy motion-item">
           <p className="home-eyebrow">Scenario-based credits</p>
-          <h2>一次训练消耗 1 次，四类场景任选。</h2>
-          <p>新用户注册后默认获得 1 次免费面试机会，可在工作面试、研究生复试、考公面试和雅思口语中任选一类开始模拟。</p>
+          <h2>新人送 1 张体验券，正式训练按场景扣次。</h2>
+          <p>新人体验券可在四类场景中任选一场使用；之后研究生复试和考公面试消耗 1 次，工作面试和雅思口语消耗 2 次。</p>
         </div>
         <div className="pricing-table motion-item">
           {modules.map((module) => (

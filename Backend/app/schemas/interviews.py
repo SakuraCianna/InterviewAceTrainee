@@ -65,6 +65,8 @@ class InterviewStartResponse(BaseModel):
     credit_change: int
     balance_after: int
     ledger_reason: str
+    voucher_applied: bool = False
+    voucher_id: str | None = None
     status: str
     current_step_index: int
     total_steps: int

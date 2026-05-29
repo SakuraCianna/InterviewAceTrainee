@@ -8,8 +8,8 @@ INTERVIEW_PRODUCTS: dict[InterviewType, InterviewProduct] = {
         tagline="完整模拟求职面试链路",
         description="覆盖岗位专业面、项目深挖、表达稳定性和 HR 动机面。",
         rounds=["专业一面", "专业二面", "HR 面"],
-        credit_cost=1,
-        pricing_unit="single_session",
+        credit_cost=2,
+        pricing_unit="deep_session",
         report_focus=["岗位匹配与动机", "专业解释准确性", "项目证据与量化结果", "问题定位与复盘", "压力追问应对"],
     ),
     InterviewType.POSTGRADUATE: InterviewProduct(
@@ -38,8 +38,8 @@ INTERVIEW_PRODUCTS: dict[InterviewType, InterviewProduct] = {
         tagline="Part 1 到 Part 3 的口语陪练",
         description="模拟雅思口语问答节奏，训练流利度、词汇、语法和观点展开。",
         rounds=["Part 1", "Part 2", "Part 3"],
-        credit_cost=1,
-        pricing_unit="single_session",
+        credit_cost=2,
+        pricing_unit="deep_session",
         report_focus=["Fluency and coherence", "Lexical resource", "Grammatical range and accuracy", "Pronunciation"],
     ),
 }

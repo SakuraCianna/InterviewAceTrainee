@@ -1,8 +1,9 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 from app.schemas.interviews import InterviewHistoryItem, InterviewReportResponse
+from app.schemas.interviews import InterviewType
 
 
 class AdminCreditAdjustmentRequest(BaseModel):
@@ -18,6 +19,25 @@ class AdminCreditAdjustmentResponse(BaseModel):
     balance_after: int
     reason: str
     operator_admin_id: str
+
+
+class AdminVoucherIssueRequest(BaseModel):
+    user_emails: list[EmailStr] = Field(default_factory=list, max_length=200)
+    issue_all_active_users: bool = False
+    quantity: int = Field(default=1, ge=1, le=20)
+    voucher_type: str = Field(default="admin_grant", min_length=2, max_length=80)
+    reason: str = Field(default="manual_voucher_grant", min_length=2, max_length=120)
+    interview_type: InterviewType | None = None
+    note: str | None = Field(default=None, max_length=240)
+
+
+class AdminVoucherIssueResponse(BaseModel):
+    total_recipients: int
+    total_vouchers: int
+    recipients: list[str]
+    voucher_type: str
+    reason: str
+    operator_admin_email: str
 
 
 class AdminAuditLogResponse(BaseModel):

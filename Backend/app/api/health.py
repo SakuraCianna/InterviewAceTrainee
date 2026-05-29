@@ -11,6 +11,7 @@ router = APIRouter(prefix="/health", tags=["health"])
 REQUIRED_TABLES = (
     "users",
     "credit_ledger",
+    "interview_vouchers",
     "interview_sessions",
     "interview_materials",
     "interview_turns",

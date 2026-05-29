@@ -6423,6 +6423,7 @@ body:has(.admin-page--authed) {
 
 .admin-page.admin-page--authed .admin-panel input,
 .admin-page.admin-page--authed .admin-panel select,
+.admin-page.admin-page--authed .admin-panel textarea,
 .admin-page.admin-page--authed .admin-ops-card input,
 .admin-page.admin-page--authed .admin-ops-card textarea,
 .admin-page.admin-page--authed .admin-search-form input,
@@ -6435,9 +6436,32 @@ body:has(.admin-page--authed) {
   box-shadow: none;
 }
 
+.admin-page.admin-page--authed .admin-panel textarea {
+  min-height: 98px;
+  padding: 14px;
+  resize: vertical;
+}
+
 .admin-page.admin-page--authed .admin-panel select {
   min-height: 46px;
   padding: 0 14px;
+}
+
+.admin-page.admin-page--authed .admin-checkbox-line {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 8px;
+  flex-direction: row;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.admin-page.admin-page--authed .admin-checkbox-line input {
+  height: 18px;
+  margin: 0;
+  min-height: 18px;
+  width: 18px;
 }
 
 .admin-page.admin-page--authed .admin-field-help {

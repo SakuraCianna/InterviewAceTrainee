@@ -22,7 +22,7 @@ from app.services.credit_balances import CreditBalanceStore, get_credit_balance_
 from app.services.credit_balances import DatabaseCreditBalanceStore
 from app.services.credit_ledger import CreditLedgerStore, get_credit_ledger_store
 from app.services.credit_ledger import DatabaseCreditLedgerStore
-from app.services.credits import CreditLedger, InsufficientCreditsError
+from app.services.credits import CreditLedger, CreditLedgerEntry, InsufficientCreditsError
 from app.services.ai_call_logs import AICallLogStore, get_ai_call_log_store
 from app.services.content_safety import BLOCKED_MESSAGE_CODE, check_user_answer
 from app.services.content_safety_logs import ContentSafetyLogStore, get_content_safety_log_store
@@ -39,6 +39,7 @@ from app.services.ai_router import AIServiceRouter
 from app.services.interview_ai import generate_next_interview_question
 from app.services.interview_products import get_interview_product
 from app.services.interview_presets import build_preset_prompt_context
+from app.services.interview_vouchers import DatabaseInterviewVoucherStore, InterviewVoucherStore, get_interview_voucher_store
 from app.services.llm_gateway import OpenAICompatibleLLMClient
 from app.services.provider_configs import DatabaseProviderConfigStore, InMemoryProviderConfigStore
 
@@ -49,6 +50,7 @@ INTERVIEW_REQUIRED_TABLES = ("interview_sessions", "interview_turns", "interview
 INTERVIEW_START_REQUIRED_TABLES = (
     "users",
     "credit_ledger",
+    "interview_vouchers",
     "interview_sessions",
     "interview_turns",
     "interview_reports",
@@ -77,6 +79,7 @@ def build_start_response(
     credit_change: int,
     balance_after: int,
     ledger_reason: str,
+    voucher_id: str | None = None,
 ) -> InterviewStartResponse:
     return InterviewStartResponse(
         session_id=state.session_id,
@@ -84,6 +87,8 @@ def build_start_response(
         credit_change=credit_change,
         balance_after=balance_after,
         ledger_reason=ledger_reason,
+        voucher_applied=voucher_id is not None,
+        voucher_id=voucher_id,
         status=state.status,
         current_step_index=state.current_step_index,
         total_steps=state.total_steps,
@@ -110,6 +115,7 @@ def start_interview(
     claims: TokenClaims = Depends(get_current_user_claims),
     fallback_credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
     fallback_credit_ledger_store: CreditLedgerStore = Depends(get_credit_ledger_store),
+    fallback_voucher_store: InterviewVoucherStore = Depends(get_interview_voucher_store),
     fallback_interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
     fallback_material_store: InterviewMaterialStore = Depends(get_interview_material_store),
     start_db_session: Session | None = Depends(get_optional_interview_start_db_session),
@@ -121,6 +127,7 @@ def start_interview(
                 claims=claims,
                 credit_store=DatabaseCreditBalanceStore(start_db_session, commit_on_write=False),
                 credit_ledger_store=DatabaseCreditLedgerStore(start_db_session, commit_on_write=False),
+                voucher_store=DatabaseInterviewVoucherStore(start_db_session, commit_on_write=False),
                 interview_store=DatabaseInterviewRuntimeStore(start_db_session, commit_on_write=False),
                 material_store=DatabaseInterviewMaterialStore(start_db_session),
             )
@@ -135,6 +142,7 @@ def start_interview(
         claims=claims,
         credit_store=fallback_credit_store,
         credit_ledger_store=fallback_credit_ledger_store,
+        voucher_store=fallback_voucher_store,
         interview_store=fallback_interview_store,
         material_store=fallback_material_store,
     )
@@ -145,6 +153,7 @@ def start_interview_with_stores(
     claims: TokenClaims,
     credit_store: CreditBalanceStore,
     credit_ledger_store: CreditLedgerStore,
+    voucher_store: InterviewVoucherStore,
     interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore,
     material_store: InterviewMaterialStore,
 ) -> InterviewStartResponse:
@@ -169,6 +178,7 @@ def start_interview_with_stores(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="interview_material_not_found")
 
     try:
+        voucher_id = None
         if is_admin:
             ledger = CreditLedger(initial_balance=credit_store.get_balance(claims["sub"]), is_admin=True)
             entry = ledger.consume_for_interview(
@@ -177,15 +187,25 @@ def start_interview_with_stores(
                 interview_type=str(interview_type),
             )
         else:
-            balance_after = credit_store.adjust(claims["sub"], -product.credit_cost)
-            entry = CreditLedger(
-                initial_balance=balance_after + product.credit_cost,
-                is_admin=False,
-            ).consume_for_interview(
-                payload.session_id,
-                credit_cost=product.credit_cost,
-                interview_type=str(interview_type),
-            )
+            voucher = voucher_store.redeem_for_interview(claims["sub"], payload.session_id, interview_type)
+            if voucher is not None:
+                voucher_id = voucher.id
+                entry = CreditLedgerEntry(
+                    change_amount=0,
+                    balance_after=credit_store.get_balance(claims["sub"]),
+                    reason=f"voucher_redeemed:{interview_type}",
+                    related_session_id=payload.session_id,
+                )
+            else:
+                balance_after = credit_store.adjust(claims["sub"], -product.credit_cost)
+                entry = CreditLedger(
+                    initial_balance=balance_after + product.credit_cost,
+                    is_admin=False,
+                ).consume_for_interview(
+                    payload.session_id,
+                    credit_cost=product.credit_cost,
+                    interview_type=str(interview_type),
+                )
     except InsufficientCreditsError as exc:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="insufficient_credits") from exc
 
@@ -203,12 +223,14 @@ def start_interview_with_stores(
         reason=entry.reason,
         related_session_id=entry.related_session_id,
         operator_admin_email=claims["sub"] if is_admin else None,
+        note=f"voucher:{voucher_id}" if voucher_id else None,
     )
     return build_start_response(
         state,
         credit_change=entry.change_amount,
         balance_after=entry.balance_after,
         ledger_reason=entry.reason,
+        voucher_id=voucher_id,
     )
 
 

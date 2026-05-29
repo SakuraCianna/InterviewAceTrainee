@@ -37,6 +37,7 @@ class CurrentUserResponse(BaseModel):
     email: EmailStr
     role: str
     credit_balance: int
+    trial_voucher_count: int = 0
 
 
 class EmailCodeRequest(BaseModel):
