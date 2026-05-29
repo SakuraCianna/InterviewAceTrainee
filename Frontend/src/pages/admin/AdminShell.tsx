@@ -1,9 +1,39 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AppIcon } from "../../components/AppIcon";
-import { BrandLogo } from "../../components/BrandLogo";
-import { CSRF_COOKIE_NAME, csrfHeaders, getApiErrorMessage, getCookie } from "../../lib/api";
+import { CSRF_COOKIE_NAME, getApiErrorMessage, getCookie } from "../../lib/api";
 import { useEmailCodeCooldown } from "../../hooks/useEmailCodeCooldown";
 import { normalizeEmail, retryAfterSeconds } from "../../lib/emailCooldown";
+import { AdminLoginView } from "./AdminLoginView";
+import { AdminSidebar } from "./AdminSidebar";
+import {
+  adjustUserCredits,
+  createCustomerServiceNote,
+  createRefundCase,
+  getCurrentUser,
+  getDashboardStats,
+  getUserInterviewReport,
+  issueVouchers,
+  listAiCallLogs,
+  listAuditLogs,
+  listAuthLoginLogs,
+  listContentSafetyLogs,
+  listCreditLedger,
+  listCustomerServiceNotes,
+  listProviders,
+  listRefundCases,
+  listSystemConfigs,
+  listUserInterviews,
+  loginAdmin,
+  logoutAdmin,
+  requestAdminEmailCode,
+  searchAdminUsers,
+  testProviderConfig,
+  updateAdminUserRole,
+  updateAdminUserStatus,
+  updateProviderEnabled,
+  updateRefundCase,
+  updateSystemConfigValue,
+} from "./adminApi";
 import { AdminChart, barDashboardOption, donutDashboardOption, lineDashboardOption } from "./dashboardCharts";
 import { configInputValue, parseConfigInput, parseOptionalAmountCents, parseOptionalInteger } from "./formUtils";
 import type {
@@ -12,7 +42,6 @@ import type {
   AdminDashboardStats,
   AdminInterviewHistoryItem,
   AdminInterviewReport,
-  AdminLoginResponse,
   AdminSectionKey,
   AdminUserSearchItem,
   AuthLoginLogEntry,
@@ -23,7 +52,6 @@ import type {
   ProviderConfig,
   RefundCaseEntry,
   SystemConfig,
-  VoucherIssueResponse,
 } from "./types";
 
 const ADMIN_CODE_COOLDOWN_SECONDS = 90;
@@ -174,15 +202,16 @@ export function AdminShell() {
 
   async function loadCurrentUser() {
     setIsLoading(true);
-    let response: Response;
+    let result: Awaited<ReturnType<typeof getCurrentUser>>;
     try {
-      response = await fetch("/api/auth/me", { credentials: "include" });
+      result = await getCurrentUser();
     } catch {
       setCurrentUser(null);
       setIsLoading(false);
       setMessage("网络连接异常, 请稍后再试");
       return;
     }
+    const { response, data: user } = result;
     if (!response.ok) {
       setCurrentUser(null);
       setIsLoading(false);
@@ -190,7 +219,6 @@ export function AdminShell() {
       return;
     }
 
-    const user = (await response.json()) as CurrentUser;
     if (user.role !== "admin") {
       setCurrentUser(null);
       setIsLoading(false);
@@ -214,48 +242,44 @@ export function AdminShell() {
   }
 
   async function loadProviders() {
-    const response = await fetch("/api/ai-providers", { credentials: "include" });
+    const { response, data } = await listProviders();
     if (!response.ok) {
       setMessage("AI 服务状态读取失败。");
       return;
     }
-    setProviders((await response.json()) as ProviderConfig[]);
+    setProviders(data);
   }
 
   async function loadAuditLogs() {
-    const response = await fetch("/api/admin/audit-logs", { credentials: "include" });
+    const { response, data } = await listAuditLogs();
     if (!response.ok) {
       return;
     }
-    setAuditLogs((await response.json()) as AdminAuditLog[]);
+    setAuditLogs(data);
   }
 
   async function loadAiCallLogs() {
-    const response = await fetch("/api/admin/ai-call-logs", { credentials: "include" });
+    const { response, data } = await listAiCallLogs();
     if (!response.ok) {
       return;
     }
-    setAiCallLogs((await response.json()) as AICallLogEntry[]);
+    setAiCallLogs(data);
   }
 
   async function loadContentSafetyLogs() {
-    const response = await fetch("/api/admin/content-safety-logs", { credentials: "include" });
+    const { response, data } = await listContentSafetyLogs();
     if (!response.ok) {
       return;
     }
-    setContentSafetyLogs((await response.json()) as ContentSafetyLogEntry[]);
+    setContentSafetyLogs(data);
   }
 
   async function loadAuthLoginLogs(userEmail?: string) {
-    const normalizedEmail = userEmail?.trim();
-    const url = normalizedEmail
-      ? `/api/admin/users/${encodeURIComponent(normalizedEmail)}/auth-login-logs`
-      : "/api/admin/auth-login-logs";
-    const response = await fetch(url, { credentials: "include" });
+    const { response, data } = await listAuthLoginLogs(userEmail);
     if (!response.ok) {
       return;
     }
-    setAuthLoginLogs((await response.json()) as AuthLoginLogEntry[]);
+    setAuthLoginLogs(data);
   }
 
   async function loadCustomerServiceNotes(userEmail?: string) {
@@ -264,41 +288,35 @@ export function AdminShell() {
       setCustomerServiceNotes([]);
       return;
     }
-    const response = await fetch(`/api/admin/users/${encodeURIComponent(normalizedEmail)}/notes`, {
-      credentials: "include",
-    });
+    const { response, data } = await listCustomerServiceNotes(normalizedEmail);
     if (!response.ok) {
       return;
     }
-    setCustomerServiceNotes((await response.json()) as CustomerServiceNoteEntry[]);
+    setCustomerServiceNotes(data);
   }
 
   async function loadRefundCases(userEmail?: string) {
-    const normalizedEmail = userEmail?.trim();
-    const url = normalizedEmail
-      ? `/api/admin/users/${encodeURIComponent(normalizedEmail)}/refund-cases`
-      : "/api/admin/refund-cases";
-    const response = await fetch(url, { credentials: "include" });
+    const { response, data } = await listRefundCases(userEmail);
     if (!response.ok) {
       return;
     }
-    setRefundCases((await response.json()) as RefundCaseEntry[]);
+    setRefundCases(data);
   }
 
   async function loadSystemConfigs() {
-    const response = await fetch("/api/admin/system-configs", { credentials: "include" });
+    const { response, data } = await listSystemConfigs();
     if (!response.ok) {
       return;
     }
-    setSystemConfigs((await response.json()) as SystemConfig[]);
+    setSystemConfigs(data);
   }
 
   async function loadDashboardStats() {
-    const response = await fetch("/api/admin/stats", { credentials: "include" });
+    const { response, data } = await getDashboardStats();
     if (!response.ok) {
       return;
     }
-    setDashboardStats((await response.json()) as AdminDashboardStats);
+    setDashboardStats(data);
   }
 
   async function loadCreditLedger(userEmail = creditUser) {
@@ -307,13 +325,11 @@ export function AdminShell() {
       return;
     }
 
-    const response = await fetch(`/api/admin/users/${encodeURIComponent(userEmail)}/credit-ledger`, {
-      credentials: "include",
-    });
+    const { response, data } = await listCreditLedger(userEmail);
     if (!response.ok) {
       return;
     }
-    setCreditLedger((await response.json()) as CreditLedgerEntry[]);
+    setCreditLedger(data);
   }
 
   async function searchUsers(event?: FormEvent<HTMLFormElement>) {
@@ -324,15 +340,12 @@ export function AdminShell() {
       return;
     }
 
-    const response = await fetch(`/api/admin/users/search?query=${encodeURIComponent(query)}`, {
-      credentials: "include",
-    });
+    const { response, data: users } = await searchAdminUsers(query);
     if (!response.ok) {
       setMessage("用户搜索失败，请确认管理员会话仍然有效。");
       return;
     }
 
-    const users = (await response.json()) as AdminUserSearchItem[];
     setUserSearchResults(users);
     setMessage(users.length > 0 ? `找到 ${users.length} 个用户记录。` : "没有匹配的用户。");
     if (users.length > 0) {
@@ -351,30 +364,25 @@ export function AdminShell() {
       loadRefundCases(userEmail),
       loadAuthLoginLogs(userEmail),
     ]);
-    const response = await fetch(`/api/admin/users/${encodeURIComponent(userEmail)}/interviews`, {
-      credentials: "include",
-    });
+    const { response, data } = await listUserInterviews(userEmail);
     if (!response.ok) {
       setSelectedUserHistory([]);
       setMessage("用户训练记录读取失败。");
       return;
     }
-    setSelectedUserHistory((await response.json()) as AdminInterviewHistoryItem[]);
+    setSelectedUserHistory(data);
   }
 
   async function loadInterviewReport(userEmail: string, sessionId: string) {
     setSelectedReport(null);
     setReportMessage("正在读取报告。");
-    const response = await fetch(
-      `/api/admin/users/${encodeURIComponent(userEmail)}/interviews/${encodeURIComponent(sessionId)}/report`,
-      { credentials: "include" },
-    );
+    const { response, data } = await getUserInterviewReport(userEmail, sessionId);
     if (!response.ok) {
       setReportMessage("该训练尚未生成报告，或当前管理员会话已失效。");
       return;
     }
 
-    setSelectedReport((await response.json()) as AdminInterviewReport);
+    setSelectedReport(data);
     setReportMessage("报告已读取，可用于售后复核和争议追溯。");
   }
 
@@ -390,20 +398,15 @@ export function AdminShell() {
 
     setIsRequestingAdminCode(true);
     setMessage("正在发送管理员验证码...");
-    let response: Response;
+    let result: Awaited<ReturnType<typeof requestAdminEmailCode>>;
     try {
-      response = await fetch("/api/auth/email-code/request", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizeEmail(loginEmail) }),
-      });
+      result = await requestAdminEmailCode(normalizeEmail(loginEmail));
     } catch {
       setIsRequestingAdminCode(false);
       setMessage("网络连接异常, 请稍后再试");
       return;
     }
-    const data = (await response.json().catch(() => ({}))) as AdminLoginResponse;
+    const { response, data } = result;
     setIsRequestingAdminCode(false);
     if (!response.ok) {
       if (response.status === 429) {
@@ -427,20 +430,15 @@ export function AdminShell() {
       return;
     }
     setIsSubmittingAdminLogin(true);
-    let response: Response;
+    let result: Awaited<ReturnType<typeof loginAdmin>>;
     try {
-      response = await fetch("/api/auth/admin/login", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginEmail, password: loginPassword, code: loginCode }),
-      });
+      result = await loginAdmin(loginEmail, loginPassword, loginCode);
     } catch {
       setIsSubmittingAdminLogin(false);
       setMessage("网络连接异常, 请稍后再试");
       return;
     }
-    const data = (await response.json().catch(() => ({}))) as AdminLoginResponse;
+    const { response, data } = result;
     if (!response.ok || !data.access_token) {
       setIsSubmittingAdminLogin(false);
       setMessage(`后台登录失败：${getApiErrorMessage(data, "请检查邮箱、密码和验证码。")}`);
@@ -461,13 +459,11 @@ export function AdminShell() {
       return;
     }
 
-    const response = await fetch(`/api/admin/users/${encodeURIComponent(creditUser)}/credits`, {
-      method: "POST",
-      credentials: "include",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ change_amount: amount, reason, note: note || undefined }),
+    const { response, data } = await adjustUserCredits(creditUser, {
+      change_amount: amount,
+      reason,
+      note: note || undefined,
     });
-    const data = await response.json();
     if (!response.ok) {
       setMessage(`次数调整失败：${getApiErrorMessage(data, "请检查用户邮箱和次数。")}`);
       return;
@@ -496,20 +492,14 @@ export function AdminShell() {
       return;
     }
 
-    const response = await fetch("/api/admin/vouchers", {
-      method: "POST",
-      credentials: "include",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        user_emails: voucherAllUsers ? [] : userEmails,
-        issue_all_active_users: voucherAllUsers,
-        quantity,
-        voucher_type: "admin_grant",
-        reason: voucherReason.trim() || "manual_voucher_grant",
-        note: voucherNote.trim() || undefined,
-      }),
+    const { response, data } = await issueVouchers({
+      user_emails: voucherAllUsers ? [] : userEmails,
+      issue_all_active_users: voucherAllUsers,
+      quantity,
+      voucher_type: "admin_grant",
+      reason: voucherReason.trim() || "manual_voucher_grant",
+      note: voucherNote.trim() || undefined,
     });
-    const data = (await response.json().catch(() => ({}))) as VoucherIssueResponse & { detail?: string; message?: string };
     if (!response.ok) {
       setMessage(`体验券发放失败：${getApiErrorMessage(data, "请检查用户邮箱和发放数量。")}`);
       return;
@@ -537,17 +527,11 @@ export function AdminShell() {
       return;
     }
 
-    const response = await fetch(`/api/admin/users/${encodeURIComponent(selectedUserEmail)}/notes`, {
-      method: "POST",
-      credentials: "include",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        category,
-        content,
-        related_session_id: noteSessionId.trim() || undefined,
-      }),
+    const { response, data } = await createCustomerServiceNote(selectedUserEmail, {
+      category,
+      content,
+      related_session_id: noteSessionId.trim() || undefined,
     });
-    const data = await response.json();
     if (!response.ok) {
       setMessage(`客服备注保存失败：${getApiErrorMessage(data, "请检查备注内容。")}`);
       return;
@@ -583,20 +567,14 @@ export function AdminShell() {
       return;
     }
 
-    const response = await fetch(`/api/admin/users/${encodeURIComponent(selectedUserEmail)}/refund-cases`, {
-      method: "POST",
-      credentials: "include",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        reason,
-        description,
-        amount_cents: amountCents,
-        currency: "CNY",
-        credit_adjustment: creditAdjustment,
-        related_session_id: refundSessionId.trim() || undefined,
-      }),
+    const { response, data } = await createRefundCase(selectedUserEmail, {
+      reason,
+      description,
+      amount_cents: amountCents,
+      currency: "CNY",
+      credit_adjustment: creditAdjustment,
+      related_session_id: refundSessionId.trim() || undefined,
     });
-    const data = await response.json();
     if (!response.ok) {
       setMessage(`退款纠纷记录创建失败：${getApiErrorMessage(data, "请检查纠纷记录内容。")}`);
       return;
@@ -612,16 +590,10 @@ export function AdminShell() {
   }
 
   async function updateRefundCaseStatus(refundCase: RefundCaseEntry, statusValue: string) {
-    const response = await fetch(`/api/admin/refund-cases/${encodeURIComponent(refundCase.id)}`, {
-      method: "PUT",
-      credentials: "include",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        status: statusValue,
-        resolution: statusValue === "resolved" ? refundCase.resolution || "已人工处理完成" : refundCase.resolution,
-      }),
+    const { response, data } = await updateRefundCase(refundCase.id, {
+      status: statusValue,
+      resolution: statusValue === "resolved" ? refundCase.resolution || "已人工处理完成" : refundCase.resolution,
     });
-    const data = await response.json();
     if (!response.ok) {
       setMessage(`退款纠纷状态更新失败：${getApiErrorMessage(data, "请稍后重试。")}`);
       return;
@@ -632,12 +604,7 @@ export function AdminShell() {
   }
 
   async function toggleProvider(provider: ProviderConfig) {
-    const response = await fetch(`/api/ai-providers/${encodeURIComponent(provider.id)}`, {
-      method: "PUT",
-      credentials: "include",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ enabled: !provider.enabled }),
-    });
+    const { response } = await updateProviderEnabled(provider.id, !provider.enabled);
     if (!response.ok) {
       setMessage("模型启停更新失败。");
       return;
@@ -649,12 +616,7 @@ export function AdminShell() {
 
   async function testProvider(provider: ProviderConfig) {
     setProviderTestResults((previous) => ({ ...previous, [provider.id]: "测试中" }));
-    const response = await fetch(`/api/ai-providers/${encodeURIComponent(provider.id)}/test`, {
-      method: "POST",
-      credentials: "include",
-      headers: csrfHeaders(),
-    });
-    const data = await response.json();
+    const { response, data } = await testProviderConfig(provider.id);
     const resultDetail = getApiErrorMessage(data, "服务测试未返回明确结果。");
     const resultText = response.ok
       ? `${data.success ? "通过" : "未通过"}：${resultDetail}`
@@ -664,13 +626,7 @@ export function AdminShell() {
   }
 
   async function updateUserStatus(user: AdminUserSearchItem, isActive: boolean) {
-    const response = await fetch(`/api/admin/users/${encodeURIComponent(user.email)}/status`, {
-      method: "PUT",
-      credentials: "include",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ is_active: isActive, reason: isActive ? "manual_restore" : "manual_disable" }),
-    });
-    const data = await response.json();
+    const { response, data } = await updateAdminUserStatus(user.email, isActive);
     if (!response.ok) {
       setMessage(`用户状态更新失败：${getApiErrorMessage(data, "请稍后重试。")}`);
       return;
@@ -680,13 +636,7 @@ export function AdminShell() {
   }
 
   async function updateUserRole(user: AdminUserSearchItem, role: "user" | "admin") {
-    const response = await fetch(`/api/admin/users/${encodeURIComponent(user.email)}/role`, {
-      method: "PUT",
-      credentials: "include",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ role, reason: role === "admin" ? "grant_admin" : "revoke_admin" }),
-    });
-    const data = (await response.json()) as { role?: string; detail?: string };
+    const { response, data } = await updateAdminUserRole(user.email, role);
     if (!response.ok) {
       setMessage(`用户角色更新失败：${getApiErrorMessage(data, "请稍后重试。")}`);
       return;
@@ -706,13 +656,7 @@ export function AdminShell() {
       setMessage(`${config.key} 需要合法 JSON。`);
       return;
     }
-    const response = await fetch(`/api/admin/system-configs/${encodeURIComponent(config.key)}`, {
-      method: "PUT",
-      credentials: "include",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ value }),
-    });
-    const data = await response.json();
+    const { response, data } = await updateSystemConfigValue(config.key, value);
     if (!response.ok) {
       setMessage(`系统配置保存失败：${getApiErrorMessage(data, "请检查配置值。")}`);
       return;
@@ -737,7 +681,7 @@ export function AdminShell() {
   }
 
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrfHeaders() });
+    await logoutAdmin();
     setCurrentUser(null);
     setProviders([]);
     setAuditLogs([]);
@@ -769,82 +713,21 @@ export function AdminShell() {
 
   if (!currentUser) {
     return (
-      <main className="auth-page admin-auth-page">
-        <div className="auth-ambient" aria-hidden="true">
-          <span className="auth-glow auth-glow-blue" />
-          <span className="auth-glow auth-glow-lime" />
-          <span className="auth-glow auth-glow-fog" />
-        </div>
-        <a className="back-link auth-anim-back admin-auth-back" href="/">
-          <AppIcon icon="lucide:arrow-left" size={18} />
-          返回首页
-        </a>
-        <section className="auth-shell admin-auth-shell">
-          <div className="auth-narrative admin-auth-narrative">
-            <div className="admin-auth-brand">
-              <BrandLogo size={30} />
-              <span>面霸练习生</span>
-            </div>
-            <span className="eyebrow">Admin Console</span>
-            <h1 className="auth-title-login">
-              <span className="auth-title-line admin-auth-title-single">管理员后台登录</span>
-            </h1>
-            <p>使用管理员邮箱、密码和邮箱验证码进入内部后台，集中处理用户次数、AI 服务状态、售后追踪和安全审计。</p>
-            <div className="auth-status-card admin-auth-status-card" aria-label="后台能力状态">
-              <span>
-                <AppIcon icon="lucide:shield-check" size={18} />
-                权限校验
-              </span>
-              <span>
-                <AppIcon icon="lucide:mail-check" size={18} />
-                邮箱验证
-              </span>
-              <span>
-                <AppIcon icon="lucide:file-clock" size={18} />
-                操作留痕
-              </span>
-            </div>
-          </div>
-
-          <form className="auth-card auth-glass-card admin-auth-card" onSubmit={submitAdminLogin}>
-            <div className="auth-card-heading admin-auth-card-heading">
-              <span>{isLoading ? "正在检查会话" : "管理员登录"}</span>
-            </div>
-            <div className="auth-form-body">
-              <label>
-                管理员邮箱
-                <div className="input-shell">
-                  <AppIcon icon="lucide:mail" size={18} />
-                  <input type="email" value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} placeholder="admin@example.com" autoComplete="username" required />
-                </div>
-              </label>
-              <label>
-                密码
-                <div className="input-shell">
-                  <AppIcon icon="lucide:key-round" size={18} />
-                  <input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} placeholder="至少 8 位" minLength={8} autoComplete="current-password" required />
-                </div>
-              </label>
-              <label>
-                邮箱验证码
-                <div className="code-row">
-                  <div className="input-shell">
-                    <AppIcon icon="lucide:key-round" size={18} />
-                    <input value={loginCode} onChange={(event) => setLoginCode(event.target.value)} placeholder="6 位验证码" minLength={6} maxLength={6} autoComplete="one-time-code" required />
-                  </div>
-                  <button type="button" className="code-button admin-auth-code-button" onClick={requestAdminCode} disabled={isRequestingAdminCode || adminCodeCooldownSeconds > 0}>
-                    {isRequestingAdminCode ? "发送中" : adminCodeCooldownSeconds > 0 ? `${adminCodeCooldownSeconds}s` : "获取"}
-                  </button>
-                </div>
-              </label>
-              <button type="submit" className="auth-submit admin-auth-submit" disabled={isLoading || isSubmittingAdminLogin}>
-                {isLoading ? "检查中" : isSubmittingAdminLogin ? "登录中" : "进入后台"}
-              </button>
-              <p className="auth-message" role="status" aria-live="polite">{message}</p>
-            </div>
-          </form>
-        </section>
-      </main>
+      <AdminLoginView
+        isLoading={isLoading}
+        isRequestingCode={isRequestingAdminCode}
+        isSubmitting={isSubmittingAdminLogin}
+        codeCooldownSeconds={adminCodeCooldownSeconds}
+        email={loginEmail}
+        password={loginPassword}
+        code={loginCode}
+        message={message}
+        onEmailChange={setLoginEmail}
+        onPasswordChange={setLoginPassword}
+        onCodeChange={setLoginCode}
+        onRequestCode={requestAdminCode}
+        onSubmit={submitAdminLogin}
+      />
     );
   }
 
@@ -852,40 +735,15 @@ export function AdminShell() {
 
   return (
     <main className="workspace-page admin-page admin-page--authed" data-admin-section={activeAdminSection}>
-      <aside className="admin-sidebar" aria-label="管理员后台侧栏">
-        <a href="/" className="admin-sidebar-brand">
-          <BrandLogo size={30} />
-          <span>面霸练习生</span>
-        </a>
-        <nav className="admin-sidebar-nav" aria-label="后台导航">
-          {adminSectionNavItems.map((item) => (
-            <button
-              type="button"
-              className={activeAdminSection === item.key ? "is-active" : ""}
-              key={item.key}
-              onClick={() => selectAdminSection(item.key)}
-            >
-              <AppIcon icon={item.icon} size={20} />
-              <span>{item.label}</span>
-            </button>
-          ))}
-        </nav>
-        <div className="admin-sidebar-status" aria-live="polite">
-          <span>当前账号</span>
-          <strong>{currentUser.email}</strong>
-          <p>{adminStatusMessage}</p>
-        </div>
-        <div className="admin-sidebar-actions">
-          <button type="button" onClick={refreshAdminData}>
-            <AppIcon icon="lucide:refresh-cw" size={18} />
-            刷新数据
-          </button>
-          <button type="button" className="admin-sidebar-logout" onClick={() => void logout()}>
-            <AppIcon icon="lucide:log-out" size={18} />
-            退出
-          </button>
-        </div>
-      </aside>
+      <AdminSidebar
+        activeSection={activeAdminSection}
+        currentUser={currentUser}
+        navItems={adminSectionNavItems}
+        statusMessage={adminStatusMessage}
+        onSelectSection={selectAdminSection}
+        onRefresh={() => void refreshAdminData()}
+        onLogout={() => void logout()}
+      />
       <div className="admin-console-layout" ref={consoleLayoutRef}>
         <section className="admin-console-main">
           {dashboardStats && dashboardChartOptions && (
