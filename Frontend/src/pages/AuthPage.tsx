@@ -2,8 +2,9 @@ import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button, SafeArea } from "antd-mobile";
 import { gsap } from "gsap";
 import { AppIcon } from "../components/AppIcon";
+import { useEmailCodeCooldown } from "../hooks/useEmailCodeCooldown";
 import { getApiErrorMessage } from "../lib/api";
-import { emailCodeCooldownKey, normalizeEmail, retryAfterSeconds, secondsUntil } from "../lib/emailCooldown";
+import { normalizeEmail, retryAfterSeconds } from "../lib/emailCooldown";
 
 type AuthMode = "login" | "register";
 
@@ -21,10 +22,6 @@ type AuthResponse = {
 
 const CODE_REQUEST_COOLDOWN_SECONDS = 90;
 const CODE_REQUEST_STORAGE_PREFIX = "mianba_email_code_next:";
-
-function codeCooldownKey(email: string) {
-  return emailCodeCooldownKey(CODE_REQUEST_STORAGE_PREFIX, email);
-}
 
 async function parseAuthResponse(response: Response): Promise<AuthResponse> {
   try {
@@ -47,7 +44,11 @@ export function AuthPage({ mode }: AuthPageProps) {
   const [message, setMessage] = useState(mode === "login" ? "默认使用密码登录, 也可以切换邮箱验证码" : "先填写邮箱获取验证码, 再完成注册");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRequestingCode, setIsRequestingCode] = useState(false);
-  const [codeCooldownSeconds, setCodeCooldownSeconds] = useState(0);
+  const { cooldownSeconds: codeCooldownSeconds, startCooldown: startCodeCooldown } = useEmailCodeCooldown({
+    email,
+    storagePrefix: CODE_REQUEST_STORAGE_PREFIX,
+    defaultSeconds: CODE_REQUEST_COOLDOWN_SECONDS,
+  });
   const pageRef = useRef<HTMLElement | null>(null);
   const backRef = useRef<HTMLAnchorElement | null>(null);
   const eyebrowRef = useRef<HTMLSpanElement | null>(null);
@@ -132,37 +133,6 @@ export function AuthPage({ mode }: AuthPageProps) {
       );
     }
   }, [loginMethod, isResetMode, mode]);
-
-  useEffect(() => {
-    const normalizedEmail = normalizeEmail(email);
-    if (!normalizedEmail) {
-      setCodeCooldownSeconds(0);
-      return;
-    }
-    const nextAllowedAt = Number.parseInt(window.localStorage.getItem(codeCooldownKey(normalizedEmail)) ?? "0", 10);
-    setCodeCooldownSeconds(secondsUntil(nextAllowedAt));
-  }, [email]);
-
-  useEffect(() => {
-    if (codeCooldownSeconds <= 0) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      const nextAllowedAt = Number.parseInt(window.localStorage.getItem(codeCooldownKey(email)) ?? "0", 10);
-      setCodeCooldownSeconds(secondsUntil(nextAllowedAt));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [codeCooldownSeconds, email]);
-
-  function startCodeCooldown(seconds = CODE_REQUEST_COOLDOWN_SECONDS) {
-    const normalizedEmail = normalizeEmail(email);
-    if (!normalizedEmail) {
-      return;
-    }
-    const safeSeconds = Math.max(1, seconds);
-    window.localStorage.setItem(codeCooldownKey(normalizedEmail), String(Date.now() + safeSeconds * 1000));
-    setCodeCooldownSeconds(safeSeconds);
-  }
 
   async function requestCode() {
     const normalizedEmail = normalizeEmail(email);

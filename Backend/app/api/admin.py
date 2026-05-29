@@ -40,10 +40,19 @@ from app.services.auth_sessions import AuthSessionStore, get_auth_session_store
 from app.services.auth_login_logs import AuthLoginLogStore, get_auth_login_log_store
 from app.services.content_safety_logs import ContentSafetyLogStore, get_content_safety_log_store
 from app.services.admin_dashboard import build_admin_dashboard_stats
+from app.services.admin_operations import (
+    CreditBalanceCannotBeNegativeError,
+    VoucherRecipientsRequiredError,
+    VoucherUserDisabledError,
+    VoucherUserNotFoundError,
+    adjust_user_credits_with_stores,
+    issue_vouchers_with_stores,
+    normalize_user_email,
+    resolve_voucher_recipients,
+)
 from app.services.credit_balances import CreditBalanceStore, DatabaseCreditBalanceStore, get_credit_balance_store
 from app.services.credit_ledger import CreditLedgerStore, DatabaseCreditLedgerStore, get_credit_ledger_store
 from app.services.customer_service_notes import CustomerServiceNoteStore, get_customer_service_note_store
-from app.services.credits import InsufficientCreditsError
 from app.services.interview_vouchers import (
     DatabaseInterviewVoucherStore,
     InterviewVoucherStore,
@@ -106,10 +115,6 @@ def get_admin_interview_store(
     if db_session is None:
         return memory_interview_store
     return DatabaseInterviewRuntimeStore(db_session)
-
-
-def normalize_user_email(user_id: str) -> str:
-    return user_id.strip().lower()
 
 
 def history_record_to_schema(record: InterviewHistoryRecord) -> InterviewHistoryItem:
@@ -377,7 +382,7 @@ def adjust_user_credits(
             response = adjust_user_credits_with_stores(
                 user_id=user_id,
                 payload=payload,
-                admin_claims=admin_claims,
+                admin_email=admin_claims["sub"],
                 credit_store=DatabaseCreditBalanceStore(adjustment_db_session, commit_on_write=False),
                 credit_ledger_store=DatabaseCreditLedgerStore(adjustment_db_session, commit_on_write=False),
                 audit_store=DatabaseAuditLogStore(adjustment_db_session, commit_on_write=False),
@@ -386,102 +391,26 @@ def adjust_user_credits(
             )
             adjustment_db_session.commit()
             return response
+        except CreditBalanceCannotBeNegativeError as exc:
+            adjustment_db_session.rollback()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="credit_balance_cannot_be_negative") from exc
         except Exception:
             adjustment_db_session.rollback()
             raise
 
-    return adjust_user_credits_with_stores(
-        user_id=user_id,
-        payload=payload,
-        admin_claims=admin_claims,
-        credit_store=fallback_credit_store,
-        credit_ledger_store=fallback_credit_ledger_store,
-        audit_store=fallback_audit_store,
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
-
-
-def adjust_user_credits_with_stores(
-    user_id: str,
-    payload: AdminCreditAdjustmentRequest,
-    admin_claims: TokenClaims,
-    credit_store: CreditBalanceStore,
-    credit_ledger_store: CreditLedgerStore,
-    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore,
-    ip_address: str | None,
-    user_agent: str | None,
-) -> AdminCreditAdjustmentResponse:
-    normalized_user_id = normalize_user_email(user_id)
-    balance_before = credit_store.get_balance(normalized_user_id)
     try:
-        balance_after = credit_store.adjust(normalized_user_id, payload.change_amount)
-    except InsufficientCreditsError as exc:
+        return adjust_user_credits_with_stores(
+            user_id=user_id,
+            payload=payload,
+            admin_email=admin_claims["sub"],
+            credit_store=fallback_credit_store,
+            credit_ledger_store=fallback_credit_ledger_store,
+            audit_store=fallback_audit_store,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+    except CreditBalanceCannotBeNegativeError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="credit_balance_cannot_be_negative") from exc
-
-    audit_store.record(
-        admin_email=admin_claims["sub"],
-        action="credit_adjust",
-        target_type="user_credit",
-        target_id=normalized_user_id,
-        before_snapshot={"balance": balance_before},
-        after_snapshot={
-            "balance": balance_after,
-            "change_amount": payload.change_amount,
-            "reason": payload.reason,
-            "note": payload.note,
-        },
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
-    credit_ledger_store.record(
-        user_email=normalized_user_id,
-        change_amount=payload.change_amount,
-        balance_after=balance_after,
-        reason=payload.reason,
-        operator_admin_email=admin_claims["sub"],
-        note=payload.note or "admin_manual_adjustment",
-    )
-    return AdminCreditAdjustmentResponse(
-        user_id=normalized_user_id,
-        change_amount=payload.change_amount,
-        balance_after=balance_after,
-        reason=payload.reason,
-        operator_admin_id=admin_claims["sub"],
-    )
-
-
-def resolve_voucher_recipients(
-    payload: AdminVoucherIssueRequest,
-    user_store: UserCredentialStore,
-    db_session: Session | None,
-) -> list[str]:
-    if payload.issue_all_active_users:
-        if db_session is not None:
-            rows = db_session.execute(
-                select(User.email).where(User.is_active.is_(True), User.role == "user").order_by(User.created_at.desc())
-            ).scalars()
-            return [normalize_user_email(email) for email in rows]
-        return [
-            record.email
-            for record in user_store.search_users("", limit=10000)
-            if record.is_active and record.role == "user"
-        ]
-
-    recipients: list[str] = []
-    for email_value in payload.user_emails:
-        email = normalize_user_email(str(email_value))
-        if email in recipients:
-            continue
-        record = user_store.get_user_record(email)
-        if record is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"user_not_found:{email}")
-        if not record.is_active:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"user_disabled:{email}")
-        recipients.append(email)
-    if not recipients:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="voucher_recipients_required")
-    return recipients
 
 
 @router.post("/vouchers", response_model=AdminVoucherIssueResponse, status_code=status.HTTP_201_CREATED)
@@ -494,7 +423,15 @@ def issue_vouchers(
     user_store: UserCredentialStore = Depends(get_user_credential_store),
     voucher_db_session: Session | None = Depends(get_optional_voucher_issue_db_session),
 ) -> AdminVoucherIssueResponse:
-    target_emails = resolve_voucher_recipients(payload, user_store, voucher_db_session)
+    try:
+        target_emails = resolve_voucher_recipients(payload, user_store, voucher_db_session)
+    except VoucherUserNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"user_not_found:{exc.email}") from exc
+    except VoucherUserDisabledError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"user_disabled:{exc.email}") from exc
+    except VoucherRecipientsRequiredError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="voucher_recipients_required") from exc
+
     ip_address = client_ip(request)
     user_agent = request.headers.get("user-agent")
     if voucher_db_session is not None:
@@ -510,68 +447,25 @@ def issue_vouchers(
             )
             voucher_db_session.commit()
             return response
+        except VoucherRecipientsRequiredError as exc:
+            voucher_db_session.rollback()
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="voucher_recipients_required") from exc
         except Exception:
             voucher_db_session.rollback()
             raise
 
-    return issue_vouchers_with_stores(
-        payload=payload,
-        admin_email=admin_claims["sub"],
-        target_emails=target_emails,
-        voucher_store=fallback_voucher_store,
-        audit_store=fallback_audit_store,
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
-
-
-def issue_vouchers_with_stores(
-    payload: AdminVoucherIssueRequest,
-    admin_email: str,
-    target_emails: list[str],
-    voucher_store: InterviewVoucherStore,
-    audit_store: DatabaseAuditLogStore | InMemoryAuditLogStore,
-    ip_address: str | None,
-    user_agent: str | None,
-) -> AdminVoucherIssueResponse:
-    if not target_emails:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="voucher_recipients_required")
-    issued_vouchers = voucher_store.issue_many(
-        target_emails,
-        voucher_type=payload.voucher_type,
-        issue_reason=payload.reason,
-        quantity=payload.quantity,
-        scope_interview_type=payload.interview_type,
-        issued_by_admin_email=admin_email,
-        note=payload.note,
-    )
-    total_vouchers = len(issued_vouchers)
-    audit_store.record(
-        admin_email=admin_email,
-        action="voucher_issue",
-        target_type="interview_voucher",
-        target_id="all_active_users" if payload.issue_all_active_users else ",".join(target_emails[:5]),
-        after_snapshot={
-            "recipients": target_emails,
-            "total_recipients": len(target_emails),
-            "quantity_per_user": payload.quantity,
-            "total_vouchers": total_vouchers,
-            "voucher_type": payload.voucher_type,
-            "reason": payload.reason,
-            "interview_type": str(payload.interview_type) if payload.interview_type else None,
-            "note": payload.note,
-        },
-        ip_address=ip_address,
-        user_agent=user_agent,
-    )
-    return AdminVoucherIssueResponse(
-        total_recipients=len(target_emails),
-        total_vouchers=total_vouchers,
-        recipients=target_emails,
-        voucher_type=payload.voucher_type,
-        reason=payload.reason,
-        operator_admin_email=admin_email,
-    )
+    try:
+        return issue_vouchers_with_stores(
+            payload=payload,
+            admin_email=admin_claims["sub"],
+            target_emails=target_emails,
+            voucher_store=fallback_voucher_store,
+            audit_store=fallback_audit_store,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+    except VoucherRecipientsRequiredError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="voucher_recipients_required") from exc
 
 
 @router.get("/audit-logs", response_model=list[AdminAuditLogResponse])

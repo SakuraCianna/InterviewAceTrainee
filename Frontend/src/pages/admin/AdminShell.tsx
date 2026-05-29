@@ -2,7 +2,8 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AppIcon } from "../../components/AppIcon";
 import { BrandLogo } from "../../components/BrandLogo";
 import { CSRF_COOKIE_NAME, csrfHeaders, getApiErrorMessage, getCookie } from "../../lib/api";
-import { emailCodeCooldownKey, normalizeEmail, retryAfterSeconds, secondsUntil } from "../../lib/emailCooldown";
+import { useEmailCodeCooldown } from "../../hooks/useEmailCodeCooldown";
+import { normalizeEmail, retryAfterSeconds } from "../../lib/emailCooldown";
 import { AdminChart, barDashboardOption, donutDashboardOption, lineDashboardOption } from "./dashboardCharts";
 import { configInputValue, parseConfigInput, parseOptionalAmountCents, parseOptionalInteger } from "./formUtils";
 import type {
@@ -27,10 +28,6 @@ import type {
 
 const ADMIN_CODE_COOLDOWN_SECONDS = 90;
 const ADMIN_CODE_STORAGE_PREFIX = "mianba_admin_code_next:";
-
-function adminCodeCooldownKey(email: string) {
-  return emailCodeCooldownKey(ADMIN_CODE_STORAGE_PREFIX, email);
-}
 
 const adminSectionNavItems: { key: AdminSectionKey; label: string; icon: string }[] = [
   { key: "overview", label: "概览", icon: "lucide:gauge" },
@@ -77,7 +74,11 @@ export function AdminShell() {
   const [loginCode, setLoginCode] = useState("");
   const [isRequestingAdminCode, setIsRequestingAdminCode] = useState(false);
   const [isSubmittingAdminLogin, setIsSubmittingAdminLogin] = useState(false);
-  const [adminCodeCooldownSeconds, setAdminCodeCooldownSeconds] = useState(0);
+  const { cooldownSeconds: adminCodeCooldownSeconds, startCooldown: startAdminCodeCooldown } = useEmailCodeCooldown({
+    email: loginEmail,
+    storagePrefix: ADMIN_CODE_STORAGE_PREFIX,
+    defaultSeconds: ADMIN_CODE_COOLDOWN_SECONDS,
+  });
   const [creditUser, setCreditUser] = useState("");
   const [creditAmount, setCreditAmount] = useState("1");
   const [creditReason, setCreditReason] = useState("manual_grant");
@@ -142,37 +143,6 @@ export function AdminShell() {
       document.documentElement.style.overflow = previousHtmlOverflow;
     };
   }, [currentUser]);
-
-  useEffect(() => {
-    const normalizedEmail = normalizeEmail(loginEmail);
-    if (!normalizedEmail) {
-      setAdminCodeCooldownSeconds(0);
-      return;
-    }
-    const nextAllowedAt = Number.parseInt(window.localStorage.getItem(adminCodeCooldownKey(normalizedEmail)) ?? "0", 10);
-    setAdminCodeCooldownSeconds(secondsUntil(nextAllowedAt));
-  }, [loginEmail]);
-
-  useEffect(() => {
-    if (adminCodeCooldownSeconds <= 0) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      const nextAllowedAt = Number.parseInt(window.localStorage.getItem(adminCodeCooldownKey(loginEmail)) ?? "0", 10);
-      setAdminCodeCooldownSeconds(secondsUntil(nextAllowedAt));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [adminCodeCooldownSeconds, loginEmail]);
-
-  function startAdminCodeCooldown(seconds = ADMIN_CODE_COOLDOWN_SECONDS) {
-    const normalizedEmail = normalizeEmail(loginEmail);
-    if (!normalizedEmail) {
-      return;
-    }
-    const safeSeconds = Math.max(1, seconds);
-    window.localStorage.setItem(adminCodeCooldownKey(normalizedEmail), String(Date.now() + safeSeconds * 1000));
-    setAdminCodeCooldownSeconds(safeSeconds);
-  }
 
   function formatDateTime(value: string) {
     return new Date(value).toLocaleString("zh-CN");

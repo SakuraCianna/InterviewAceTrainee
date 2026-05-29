@@ -4,8 +4,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { AppIcon } from "../../components/AppIcon";
 import { AvatarStage } from "../../components/AvatarStage";
 import { BrandLogo } from "../../components/BrandLogo";
+import { useEmailCodeCooldown } from "../../hooks/useEmailCodeCooldown";
 import { CSRF_COOKIE_NAME, csrfHeaders, getApiErrorMessage, getCookie } from "../../lib/api";
-import { emailCodeCooldownKey, retryAfterSeconds, secondsUntil } from "../../lib/emailCooldown";
+import { retryAfterSeconds } from "../../lib/emailCooldown";
 import {
   ANSWER_LIMIT_MS,
   FINAL_TRANSCRIPT_TIMEOUT_MS,
@@ -47,10 +48,6 @@ declare global {
 
 const ACCOUNT_CODE_COOLDOWN_SECONDS = 90;
 const ACCOUNT_CODE_STORAGE_PREFIX = "mianba_account_code_next:";
-
-function accountCodeCooldownKey(email: string) {
-  return emailCodeCooldownKey(ACCOUNT_CODE_STORAGE_PREFIX, email);
-}
 
 async function parseApiPayload(response: Response): Promise<ApiPayload> {
   try {
@@ -104,7 +101,11 @@ export function InterviewRoom() {
   const [accountMessage, setAccountMessage] = useState("使用邮箱验证码修改账户密码。");
   const [isRequestingAccountCode, setIsRequestingAccountCode] = useState(false);
   const [isChangingAccountPassword, setIsChangingAccountPassword] = useState(false);
-  const [accountCodeCooldownSeconds, setAccountCodeCooldownSeconds] = useState(0);
+  const { cooldownSeconds: accountCodeCooldownSeconds, startCooldown: startAccountCodeCooldown } = useEmailCodeCooldown({
+    email: currentUser?.email ?? "",
+    storagePrefix: ACCOUNT_CODE_STORAGE_PREFIX,
+    defaultSeconds: ACCOUNT_CODE_COOLDOWN_SECONDS,
+  });
   const [historyItems, setHistoryItems] = useState<InterviewHistoryItem[]>([]);
   const [interviewState, setInterviewState] = useState<InterviewStateResponse | null>(null);
   const [activeSession, setActiveSession] = useState<InterviewStateResponse | null>(null);
@@ -177,26 +178,6 @@ export function InterviewRoom() {
     }
     void loadMicrophoneDevices();
   }, []);
-
-  useEffect(() => {
-    if (!currentUser?.email) {
-      setAccountCodeCooldownSeconds(0);
-      return;
-    }
-    const nextAllowedAt = Number.parseInt(window.localStorage.getItem(accountCodeCooldownKey(currentUser.email)) ?? "0", 10);
-    setAccountCodeCooldownSeconds(secondsUntil(nextAllowedAt));
-  }, [currentUser?.email]);
-
-  useEffect(() => {
-    if (accountCodeCooldownSeconds <= 0 || !currentUser?.email) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      const nextAllowedAt = Number.parseInt(window.localStorage.getItem(accountCodeCooldownKey(currentUser.email)) ?? "0", 10);
-      setAccountCodeCooldownSeconds(secondsUntil(nextAllowedAt));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [accountCodeCooldownSeconds, currentUser?.email]);
 
   useEffect(() => {
     return () => {
@@ -421,15 +402,6 @@ export function InterviewRoom() {
       return;
     }
     setCurrentUser((await response.json()) as CurrentUserResponse);
-  }
-
-  function startAccountCodeCooldown(seconds = ACCOUNT_CODE_COOLDOWN_SECONDS) {
-    if (!currentUser?.email) {
-      return;
-    }
-    const safeSeconds = Math.max(1, seconds);
-    window.localStorage.setItem(accountCodeCooldownKey(currentUser.email), String(Date.now() + safeSeconds * 1000));
-    setAccountCodeCooldownSeconds(safeSeconds);
   }
 
   async function requestAccountCode() {
