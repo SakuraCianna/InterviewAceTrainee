@@ -1,11 +1,12 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Button, SafeArea } from "antd-mobile";
 import { useLocation, useNavigate } from "react-router-dom";
+import { AccountSettingsPanel } from "./AccountSettingsPanel";
 import { AppIcon } from "../../components/AppIcon";
 import { AvatarStage } from "../../components/AvatarStage";
 import { BrandLogo } from "../../components/BrandLogo";
 import { useEmailCodeCooldown } from "../../hooks/useEmailCodeCooldown";
-import { CSRF_COOKIE_NAME, csrfHeaders, getApiErrorMessage, getCookie } from "../../lib/api";
+import { CSRF_COOKIE_NAME, getApiErrorMessage, getCookie } from "../../lib/api";
 import { retryAfterSeconds } from "../../lib/emailCooldown";
 import {
   ANSWER_LIMIT_MS,
@@ -25,9 +26,22 @@ import {
   isEffectiveVoice,
   resampleAudio,
 } from "./audio";
+import {
+  changePasswordWithEmailCode,
+  getActiveInterviewSession,
+  getCurrentAccount,
+  getInterviewSession,
+  listInterviewHistory,
+  logoutAccount,
+  requestAccountEmailCode,
+  startInterviewSession,
+  submitInterviewAnswer,
+  synthesizeQuestionSpeech,
+  uploadInterviewMaterial,
+} from "./interviewApi";
 import { moduleDetails, modules, states } from "./modules";
+import { createSessionId, formatHistoryDate, microphoneLabel, moduleByType, statusLabel } from "./roomUtils";
 import type {
-  ApiPayload,
   AudioRecorderSession,
   CurrentUserResponse,
   InterviewHistoryItem,
@@ -36,7 +50,6 @@ import type {
   InterviewType,
   MicrophoneTestSession,
   RealtimeAsrMessage,
-  SpeechSynthesisApiResponse,
   TranscriptWaiter,
 } from "./types";
 
@@ -48,44 +61,6 @@ declare global {
 
 const ACCOUNT_CODE_COOLDOWN_SECONDS = 90;
 const ACCOUNT_CODE_STORAGE_PREFIX = "mianba_account_code_next:";
-
-async function parseApiPayload(response: Response): Promise<ApiPayload> {
-  try {
-    return (await response.json()) as ApiPayload;
-  } catch {
-    return {};
-  }
-}
-
-function createSessionId() {
-  const random = Math.random().toString(36).slice(2, 8);
-  return `session-${Date.now()}-${random}`;
-}
-
-function moduleByType(type: InterviewType) {
-  return modules.find((module) => module.type === type) ?? modules[0];
-}
-
-function microphoneLabel(device: MediaDeviceInfo, index: number) {
-  return device.label || `麦克风 ${index + 1}`;
-}
-
-function statusLabel(status: string) {
-  return status === "completed" ? "已完成" : "进行中";
-}
-
-function formatHistoryDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "刚刚";
-  }
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
 
 export function InterviewRoom() {
   const location = useLocation();
@@ -390,18 +365,19 @@ export function InterviewRoom() {
   }
 
   async function loadAccount() {
-    let response: Response;
+    let result: Awaited<ReturnType<typeof getCurrentAccount>>;
     try {
-      response = await fetch("/api/auth/me", { credentials: "include" });
+      result = await getCurrentAccount();
     } catch {
       setCurrentUser(null);
       return;
     }
+    const { response, data } = result;
     if (!response.ok) {
       setCurrentUser(null);
       return;
     }
-    setCurrentUser((await response.json()) as CurrentUserResponse);
+    setCurrentUser(data);
   }
 
   async function requestAccountCode() {
@@ -416,20 +392,15 @@ export function InterviewRoom() {
     }
     setIsRequestingAccountCode(true);
     setAccountMessage("正在发送验证码...");
-    let response: Response;
+    let result: Awaited<ReturnType<typeof requestAccountEmailCode>>;
     try {
-      response = await fetch("/api/auth/email-code/request", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: currentUser.email }),
-      });
+      result = await requestAccountEmailCode(currentUser.email);
     } catch {
       setIsRequestingAccountCode(false);
       setAccountMessage("网络连接异常, 请稍后再试。");
       return;
     }
-    const data = await parseApiPayload(response);
+    const { response, data } = result;
     setIsRequestingAccountCode(false);
     if (!response.ok) {
       if (response.status === 429) {
@@ -462,20 +433,15 @@ export function InterviewRoom() {
     }
     setIsChangingAccountPassword(true);
     setAccountMessage("正在修改密码...");
-    let response: Response;
+    let result: Awaited<ReturnType<typeof changePasswordWithEmailCode>>;
     try {
-      response = await fetch("/api/auth/password/change", {
-        method: "POST",
-        credentials: "include",
-        headers: csrfHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ code: accountCode, new_password: accountNewPassword }),
-      });
+      result = await changePasswordWithEmailCode({ code: accountCode, new_password: accountNewPassword });
     } catch {
       setIsChangingAccountPassword(false);
       setAccountMessage("网络连接异常, 请稍后再试。");
       return;
     }
-    const data = await parseApiPayload(response);
+    const { response, data } = result;
     setIsChangingAccountPassword(false);
     if (!response.ok) {
       const errorMessage = getApiErrorMessage(data, "请检查验证码或账户状态。");
@@ -488,28 +454,30 @@ export function InterviewRoom() {
   }
 
   async function loadHistory() {
-    let response: Response;
+    let result: Awaited<ReturnType<typeof listInterviewHistory>>;
     try {
-      response = await fetch("/api/interviews/history", { credentials: "include" });
+      result = await listInterviewHistory();
     } catch {
       setHistoryItems([]);
       return;
     }
+    const { response, data } = result;
     if (!response.ok) {
       setHistoryItems([]);
       return;
     }
-    setHistoryItems((await response.json()) as InterviewHistoryItem[]);
+    setHistoryItems(data);
   }
 
   async function loadActiveSession() {
-    let response: Response;
+    let result: Awaited<ReturnType<typeof getActiveInterviewSession>>;
     try {
-      response = await fetch("/api/interviews/active", { credentials: "include" });
+      result = await getActiveInterviewSession();
     } catch {
       setSocketMessage("网络连接异常, 请稍后再试。");
       return;
     }
+    const { response, data } = result;
     if (response.status === 401) {
       setSocketMessage("请先登录账号，再进入训练房间。");
       return;
@@ -518,7 +486,6 @@ export function InterviewRoom() {
       setSocketMessage("没有未完成训练，可以开始新的模拟。");
       return;
     }
-    const data = (await response.json()) as InterviewStateResponse;
     setActiveSession(data);
     setSessionId(data.session_id);
     setSocketMessage("发现上次未完成训练，可以从中断处恢复。");
@@ -533,17 +500,11 @@ export function InterviewRoom() {
       return;
     }
     setIsStartingSession(true);
-    const response = await fetch("/api/interviews", {
-      method: "POST",
-      credentials: "include",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        session_id: targetSessionId,
-        interview_type: resume && activeSession ? activeSession.interview_type : selectedModule.type,
-        material_id: material?.id,
-      }),
+    const { response, data } = await startInterviewSession({
+      session_id: targetSessionId,
+      interview_type: resume && activeSession ? activeSession.interview_type : selectedModule.type,
+      material_id: material?.id,
     });
-    const data = (await response.json()) as InterviewStateResponse;
     setIsStartingSession(false);
 
     if (!response.ok) {
@@ -605,21 +566,15 @@ export function InterviewRoom() {
       }
     }
 
-    let response: Response;
-    let data: InterviewMaterialResponse & { detail?: string; message?: string };
+    let result: Awaited<ReturnType<typeof uploadInterviewMaterial>>;
     try {
-      response = await fetch("/api/interview-materials", {
-        method: "POST",
-        credentials: "include",
-        headers: csrfHeaders(),
-        body: formData,
-      });
-      data = (await response.json()) as InterviewMaterialResponse & { detail?: string; message?: string };
+      result = await uploadInterviewMaterial(formData);
     } catch {
       setIsPreparingMaterial(false);
       setSocketMessage("资料分析请求失败，请检查网络后重试。");
       return;
     }
+    const { response, data } = result;
     setIsPreparingMaterial(false);
 
     if (!response.ok) {
@@ -651,13 +606,11 @@ export function InterviewRoom() {
     }
     setStateIndex(1);
     try {
-      const response = await fetch("/api/speech/tts", {
-        method: "POST",
-        credentials: "include",
-        headers: csrfHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ text: questionText, interview_type: interviewType, session_id: targetSessionId }),
+      const { response, data } = await synthesizeQuestionSpeech({
+        text: questionText,
+        interview_type: interviewType,
+        session_id: targetSessionId,
       });
-      const data = (await response.json()) as SpeechSynthesisApiResponse;
       if (!response.ok || !data.audio_base64 || !data.mime_type) {
         throw new Error(getApiErrorMessage(data, "语音合成失败。"));
       }
@@ -1038,13 +991,7 @@ export function InterviewRoom() {
       setSocketMessage("没有识别到有效回答，请重新点击“开始回答”后再试。");
       return;
     }
-    const response = await fetch(`/api/interviews/${encodeURIComponent(interviewState.session_id)}/answers`, {
-      method: "POST",
-      credentials: "include",
-      headers: csrfHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ answer_text: answerText }),
-    });
-    const data = (await response.json()) as InterviewStateResponse;
+    const { response, data } = await submitInterviewAnswer(interviewState.session_id, answerText);
     if (!response.ok) {
       setIsFinishingAnswer(false);
       const errorMessage = getApiErrorMessage(data, "请稍后重试。");
@@ -1064,12 +1011,11 @@ export function InterviewRoom() {
   }
 
   async function openHistoryItem(item: InterviewHistoryItem) {
-    const response = await fetch(`/api/interviews/${encodeURIComponent(item.session_id)}`, { credentials: "include" });
+    const { response, data } = await getInterviewSession(item.session_id);
     if (!response.ok) {
       setSocketMessage("这条训练记录暂时无法打开，请刷新后重试。");
       return;
     }
-    const data = (await response.json()) as InterviewStateResponse;
     const moduleIndex = modules.findIndex((module) => module.type === data.interview_type);
     if (moduleIndex >= 0) {
       setSelectedModuleIndex(moduleIndex);
@@ -1082,7 +1028,7 @@ export function InterviewRoom() {
   }
 
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "include", headers: csrfHeaders() });
+    await logoutAccount();
     window.speechSynthesis?.cancel();
     stopRecorder();
     stopMicrophoneTest();
@@ -1147,60 +1093,19 @@ export function InterviewRoom() {
   ) : null;
 
   const accountSettingsPanel = currentUser && isSettingsOpen ? (
-    <section className="account-settings-panel" aria-label="账户设置">
-      <div className="account-settings-copy">
-        <span className="eyebrow">Account Settings</span>
-        <h2>账户与密码</h2>
-        <p>{currentUser.email}</p>
-      </div>
-      <form className="account-password-form" onSubmit={changeAccountPassword}>
-        <label>
-          <span>邮箱验证码</span>
-          <div className="code-row">
-            <div className="input-shell">
-              <AppIcon icon="lucide:key-round" size={17} />
-              <input
-                value={accountCode}
-                onChange={(event) => setAccountCode(event.currentTarget.value)}
-                placeholder="6 位验证码"
-                minLength={6}
-                maxLength={6}
-                required
-              />
-            </div>
-            <Button
-              type="button"
-              className="code-button"
-              fill="outline"
-              shape="rounded"
-              loading={isRequestingAccountCode}
-              disabled={isRequestingAccountCode || accountCodeCooldownSeconds > 0}
-              onClick={() => void requestAccountCode()}
-            >
-              {isRequestingAccountCode ? "发送中" : accountCodeCooldownSeconds > 0 ? `${accountCodeCooldownSeconds}s` : "获取"}
-            </Button>
-          </div>
-        </label>
-        <label>
-          <span>新密码</span>
-          <div className="input-shell">
-            <AppIcon icon="lucide:key-round" size={17} />
-            <input
-              type="password"
-              value={accountNewPassword}
-              onChange={(event) => setAccountNewPassword(event.currentTarget.value)}
-              placeholder="至少 8 位"
-              minLength={8}
-              required
-            />
-          </div>
-        </label>
-        <Button className="auth-submit account-password-submit" color="primary" loading={isChangingAccountPassword} shape="rounded" type="submit">
-          {isChangingAccountPassword ? "修改中" : "修改密码"}
-        </Button>
-        <p className="account-settings-message" role="status" aria-live="polite">{accountMessage}</p>
-      </form>
-    </section>
+    <AccountSettingsPanel
+      email={currentUser.email}
+      code={accountCode}
+      newPassword={accountNewPassword}
+      message={accountMessage}
+      isRequestingCode={isRequestingAccountCode}
+      isChangingPassword={isChangingAccountPassword}
+      codeCooldownSeconds={accountCodeCooldownSeconds}
+      onCodeChange={setAccountCode}
+      onPasswordChange={setAccountNewPassword}
+      onRequestCode={() => void requestAccountCode()}
+      onSubmit={changeAccountPassword}
+    />
   ) : null;
 
   if (routeStage === "check") {
