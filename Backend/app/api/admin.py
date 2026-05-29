@@ -759,7 +759,7 @@ def issue_vouchers_with_stores(
 ) -> AdminVoucherIssueResponse:
     if not target_emails:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="voucher_recipients_required")
-    voucher_store.issue_many(
+    issued_vouchers = voucher_store.issue_many(
         target_emails,
         voucher_type=payload.voucher_type,
         issue_reason=payload.reason,
@@ -768,7 +768,7 @@ def issue_vouchers_with_stores(
         issued_by_admin_email=admin_email,
         note=payload.note,
     )
-    total_vouchers = len(target_emails) * payload.quantity
+    total_vouchers = len(issued_vouchers)
     audit_store.record(
         admin_email=admin_email,
         action="voucher_issue",

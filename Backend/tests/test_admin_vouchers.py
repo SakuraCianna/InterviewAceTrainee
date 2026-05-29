@@ -36,6 +36,8 @@ class AdminVoucherTests(unittest.TestCase):
         self.assertEqual(response.total_vouchers, 4)
         self.assertEqual(voucher_store.available_count("one@example.com"), 2)
         self.assertEqual(voucher_store.available_count("two@example.com"), 2)
+        self.assertEqual(len(voucher_store.list_for_user("one@example.com")), 2)
+        self.assertTrue(all(record.remaining_uses == 1 for record in voucher_store.list_for_user("one@example.com")))
 
     def test_admin_can_resolve_all_active_users_for_voucher_issue(self) -> None:
         user_store = InMemoryUserCredentialStore()

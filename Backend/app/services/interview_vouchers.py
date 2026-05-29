@@ -62,19 +62,22 @@ class InterviewVoucherStore:
         note: str | None = None,
         expires_at: datetime | None = None,
     ) -> list[InterviewVoucherRecord]:
-        return [
-            self.issue(
-                user_email=email,
-                voucher_type=voucher_type,
-                issue_reason=issue_reason,
-                quantity=quantity,
-                scope_interview_type=scope_interview_type,
-                issued_by_admin_email=issued_by_admin_email,
-                note=note,
-                expires_at=expires_at,
-            )
-            for email in user_emails
-        ]
+        records: list[InterviewVoucherRecord] = []
+        for email in user_emails:
+            for _ in range(quantity):
+                records.append(
+                    self.issue(
+                        user_email=email,
+                        voucher_type=voucher_type,
+                        issue_reason=issue_reason,
+                        quantity=1,
+                        scope_interview_type=scope_interview_type,
+                        issued_by_admin_email=issued_by_admin_email,
+                        note=note,
+                        expires_at=expires_at,
+                    )
+                )
+        return records
 
     def redeem_for_interview(
         self,

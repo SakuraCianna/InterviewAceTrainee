@@ -163,6 +163,28 @@ def get_authenticated_role(user_store: UserCredentialStore, email: str) -> str:
     return user_record.role if user_record is not None else "user"
 
 
+def reject_admin_on_user_login(
+    user_store: UserCredentialStore,
+    email: str,
+    login_log_store: AuthLoginLogStore,
+    request: Request,
+    auth_method: str,
+) -> None:
+    user_record = user_store.get_user_record(email)
+    if user_record is None or user_record.role != "admin":
+        return
+    record_login_event(
+        login_log_store,
+        request,
+        email=email,
+        auth_method=auth_method,
+        role="admin",
+        success=False,
+        failure_reason="admin_login_required",
+    )
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin_login_required")
+
+
 def issue_registration_vouchers(
     email: str,
     system_config_store: DatabaseSystemConfigStore | InMemorySystemConfigStore,
@@ -171,8 +193,8 @@ def issue_registration_vouchers(
     voucher_count = max(0, system_config_store.get_int("new_user_trial_vouchers"))
     if voucher_count <= 0:
         return
-    voucher_store.issue(
-        user_email=email,
+    voucher_store.issue_many(
+        [email],
         voucher_type="new_user_trial",
         issue_reason="registration_bonus",
         quantity=voucher_count,
@@ -227,6 +249,7 @@ def register_with_password(
         record_login_event(login_log_store, request, email=email, auth_method="password_register", role="user", success=False, failure_reason="invalid_email_code")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_email_code") from exc
 
+    reject_admin_on_user_login(user_store, email, login_log_store, request, "password_register")
     try:
         is_new_user = not user_store.user_exists(email)
         user_store.create_user(
@@ -281,6 +304,7 @@ def login_with_password(
         record_auth_failure(attempt_key, settings)
         record_login_event(login_log_store, request, email=email, auth_method="password", role="user", success=False, failure_reason="invalid_credentials")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_credentials")
+    reject_admin_on_user_login(user_store, email, login_log_store, request, "password")
 
     reset_auth_failures(attempt_key)
     role = get_authenticated_role(user_store, email)
@@ -400,6 +424,7 @@ def login_with_email_code(
     code_store: EmailCodeStore | RedisEmailCodeStore = Depends(get_email_code_store),
     user_store: UserCredentialStore = Depends(get_user_credential_store),
     system_config_store: DatabaseSystemConfigStore | InMemorySystemConfigStore = Depends(get_system_config_store),
+    voucher_store: InterviewVoucherStore = Depends(get_interview_voucher_store),
     login_log_store: AuthLoginLogStore = Depends(get_auth_login_log_store),
     auth_session_store: AuthSessionStore = Depends(get_auth_session_store),
 ) -> PasswordLoginResponse:
@@ -419,6 +444,7 @@ def login_with_email_code(
         record_login_event(login_log_store, request, email=email, auth_method="email_code", role="user", success=False, failure_reason="invalid_email_code")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid_email_code") from exc
 
+    reject_admin_on_user_login(user_store, email, login_log_store, request, "email_code")
     try:
         is_new_user = not user_store.user_exists(email)
         user_store.create_placeholder_user(

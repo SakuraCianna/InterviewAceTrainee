@@ -9,6 +9,7 @@ export type ApiErrorPayload = {
 const API_ERROR_MESSAGES: Record<string, string> = {
   active_interview_not_found: "当前没有未完成的面试训练。",
   admin_required: "当前账号没有管理员权限。",
+  admin_login_required: "管理员账号必须从管理员后台登录，并完成密码和邮箱验证码双重认证。",
   admin_role_required: "当前账号不是管理员账号，请联系管理员确认权限。",
   asr_provider_failed: "语音识别服务调用失败，请稍后重试。",
   asr_provider_not_available: "语音识别服务暂时不可用，请联系管理员检查配置。",
