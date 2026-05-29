@@ -5,119 +5,37 @@ import { AppIcon } from "../../components/AppIcon";
 import { AvatarStage, AvatarState } from "../../components/AvatarStage";
 import { BrandLogo } from "../../components/BrandLogo";
 import { CSRF_COOKIE_NAME, csrfHeaders, getApiErrorMessage, getCookie } from "../../lib/api";
-
-type InterviewType = "job" | "postgraduate" | "civil_service" | "ielts";
-
-type InterviewQuestion = {
-  turn_index: number;
-  round_name: string;
-  text: string;
-};
-
-type InterviewReport = {
-  session_id: string;
-  interview_type: InterviewType;
-  total_score: number;
-  readiness_level: string;
-  score_explanation: string;
-  summary: string;
-  dimensions: { name: string; score: number; comment: string; level?: string | null; evidence?: string[]; action?: string | null }[];
-  strengths: string[];
-  improvements: string[];
-  next_plan: string[];
-  priority_actions: string[];
-  evidence: string[];
-  risk_flags: string[];
-  recommended_drills: string[];
-  turns: { round_name: string; question: string; answer: string; score?: number | null; feedback?: string | null; evidence?: string[] }[];
-};
-
-type InterviewStateResponse = {
-  session_id: string;
-  interview_type: InterviewType;
-  status: string;
-  current_step_index: number;
-  total_steps: number;
-  current_question: InterviewQuestion | null;
-  report: InterviewReport | null;
-  balance_after?: number;
-  voucher_applied?: boolean;
-  voucher_id?: string | null;
-  detail?: string;
-  message?: string;
-};
-
-type CurrentUserResponse = {
-  email: string;
-  role: string;
-  credit_balance: number;
-  trial_voucher_count: number;
-};
-
-type InterviewHistoryItem = {
-  session_id: string;
-  interview_type: InterviewType;
-  status: string;
-  current_step_index: number;
-  total_steps: number;
-  report_total_score: number | null;
-  created_at: string;
-};
-
-type InterviewMaterialResponse = {
-  id: string;
-  interview_type: InterviewType;
-  job_title?: string | null;
-  target_school?: string | null;
-  major?: string | null;
-  research_direction?: string | null;
-  resume_text_preview?: string | null;
-  extracted_text_chars: number;
-  profile_summary: string;
-  keywords: string[];
-};
-
-type SpeechSynthesisApiResponse = {
-  audio_base64?: string;
-  mime_type?: string;
-  detail?: string;
-  message?: string;
-};
-
-type RealtimeAsrMessage = {
-  type?: string;
-  text?: string;
-  current_text?: string;
-  detail?: string;
-  message?: string;
-  provider_code?: number;
-  sample_rate?: number;
-  chunk_ms?: number;
-};
-
-type TranscriptWaiter = {
-  promise: Promise<string>;
-  resolve: (text: string) => void;
-  reject: (error: Error) => void;
-  settled: boolean;
-};
-
-type AudioRecorderSession = {
-  context: AudioContext;
-  source: MediaStreamAudioSourceNode;
-  processor: ScriptProcessorNode;
-  stream: MediaStream;
-  socket: WebSocket;
-  pendingSamples: Float32Array;
-  sampleRate: number;
-};
-
-type MicrophoneTestSession = {
-  context: AudioContext;
-  source: MediaStreamAudioSourceNode;
-  analyser: AnalyserNode;
-  stream: MediaStream;
-};
+import {
+  ANSWER_LIMIT_MS,
+  FINAL_TRANSCRIPT_TIMEOUT_MS,
+  MIN_VOICE_RMS,
+  PCM_CHUNK_SAMPLES,
+  PCM_SAMPLE_RATE,
+  RECORDING_PROGRESS_INTERVAL_MS,
+  SILENCE_AUTO_FINISH_MS,
+  SILENCE_CALIBRATION_MS,
+  appendSamples,
+  calculateRms,
+  encodePcm16,
+  formatAnswerLimit,
+  formatDuration,
+  getAnswerLimitMs,
+  isEffectiveVoice,
+  resampleAudio,
+} from "./audio";
+import type {
+  ApiPayload,
+  AudioRecorderSession,
+  CurrentUserResponse,
+  InterviewHistoryItem,
+  InterviewMaterialResponse,
+  InterviewStateResponse,
+  InterviewType,
+  MicrophoneTestSession,
+  RealtimeAsrMessage,
+  SpeechSynthesisApiResponse,
+  TranscriptWaiter,
+} from "./types";
 
 declare global {
   interface Window {
@@ -177,25 +95,8 @@ const moduleDetails: Record<
     checklist: ["日常问答", "话题卡展开", "抽象讨论", "表达替换建议"],
   },
 };
-const PCM_SAMPLE_RATE = 16000;
-const PCM_CHUNK_MS = 200;
-const PCM_CHUNK_SAMPLES = Math.floor(PCM_SAMPLE_RATE * (PCM_CHUNK_MS / 1000));
-const FINAL_TRANSCRIPT_TIMEOUT_MS = 10_000;
-const ANSWER_LIMIT_MS = 300_000;
-const SILENCE_AUTO_FINISH_MS = 3_000;
-const SILENCE_CALIBRATION_MS = 900;
-const MIN_VOICE_RMS = 0.018;
-const VOICE_MARGIN_RMS = 0.012;
-const VOICE_NOISE_RATIO = 2.3;
-const RECORDING_PROGRESS_INTERVAL_MS = 200;
 const ACCOUNT_CODE_COOLDOWN_SECONDS = 90;
 const ACCOUNT_CODE_STORAGE_PREFIX = "mianba_account_code_next:";
-
-type ApiPayload = {
-  detail?: string;
-  message?: string;
-  dev_code?: string;
-};
 
 function normalizeAccountEmail(email: string) {
   return email.trim().toLowerCase();
@@ -230,81 +131,6 @@ function createSessionId() {
 
 function moduleByType(type: InterviewType) {
   return modules.find((module) => module.type === type) ?? modules[0];
-}
-
-function resampleAudio(samples: Float32Array, inputSampleRate: number, outputSampleRate: number) {
-  if (inputSampleRate === outputSampleRate) {
-    return samples;
-  }
-  const ratio = inputSampleRate / outputSampleRate;
-  const outputLength = Math.round(samples.length / ratio);
-  const output = new Float32Array(outputLength);
-  for (let index = 0; index < outputLength; index += 1) {
-    const sourceIndex = index * ratio;
-    const before = Math.floor(sourceIndex);
-    const after = Math.min(before + 1, samples.length - 1);
-    const weight = sourceIndex - before;
-    output[index] = samples[before] * (1 - weight) + samples[after] * weight;
-  }
-  return output;
-}
-
-function appendSamples(first: Float32Array, second: Float32Array) {
-  if (first.length === 0) {
-    return second;
-  }
-  const merged = new Float32Array(first.length + second.length);
-  merged.set(first, 0);
-  merged.set(second, first.length);
-  return merged;
-}
-
-function encodePcm16(samples: Float32Array) {
-  const buffer = new ArrayBuffer(samples.length * 2);
-  const view = new DataView(buffer);
-  samples.forEach((sample, index) => {
-    const clamped = Math.max(-1, Math.min(1, sample));
-    view.setInt16(index * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
-  });
-  return buffer;
-}
-
-function getAnswerLimitMs(_interviewType?: InterviewType, _roundName?: string) {
-  return ANSWER_LIMIT_MS;
-}
-
-function formatAnswerLimit(interviewType: InterviewType, roundName?: string) {
-  const limitSeconds = Math.round(getAnswerLimitMs(interviewType, roundName) / 1000);
-  if (limitSeconds >= 300) {
-    return "最多 5 分钟";
-  }
-  if (limitSeconds >= 60) {
-    return `最多 ${Math.round(limitSeconds / 60)} 分钟`;
-  }
-  return `最多 ${limitSeconds} 秒`;
-}
-
-function formatDuration(ms: number) {
-  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
-
-function calculateRms(samples: Float32Array) {
-  if (samples.length === 0) {
-    return 0;
-  }
-  let sum = 0;
-  samples.forEach((sample) => {
-    sum += sample * sample;
-  });
-  return Math.sqrt(sum / samples.length);
-}
-
-function isEffectiveVoice(rms: number, noiseFloor: number) {
-  const threshold = Math.max(MIN_VOICE_RMS, noiseFloor + VOICE_MARGIN_RMS, noiseFloor * VOICE_NOISE_RATIO);
-  return rms > threshold;
 }
 
 function microphoneLabel(device: MediaDeviceInfo, index: number) {

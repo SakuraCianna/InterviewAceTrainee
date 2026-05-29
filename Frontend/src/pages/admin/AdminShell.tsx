@@ -1,18 +1,27 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import type { EChartsOption } from "echarts";
 import { AppIcon } from "../../components/AppIcon";
 import { BrandLogo } from "../../components/BrandLogo";
 import { CSRF_COOKIE_NAME, csrfHeaders, getApiErrorMessage, getCookie } from "../../lib/api";
-
-type EChartsModule = typeof import("echarts");
-type EChartsInstance = ReturnType<EChartsModule["init"]>;
-
-let echartsLoader: Promise<EChartsModule> | null = null;
-
-function loadECharts() {
-  echartsLoader ??= import("echarts");
-  return echartsLoader;
-}
+import { AdminChart, barDashboardOption, donutDashboardOption, lineDashboardOption } from "./dashboardCharts";
+import type {
+  AICallLogEntry,
+  AdminAuditLog,
+  AdminDashboardStats,
+  AdminInterviewHistoryItem,
+  AdminInterviewReport,
+  AdminLoginResponse,
+  AdminSectionKey,
+  AdminUserSearchItem,
+  AuthLoginLogEntry,
+  ContentSafetyLogEntry,
+  CreditLedgerEntry,
+  CurrentUser,
+  CustomerServiceNoteEntry,
+  ProviderConfig,
+  RefundCaseEntry,
+  SystemConfig,
+  VoucherIssueResponse,
+} from "./types";
 
 const ADMIN_CODE_COOLDOWN_SECONDS = 90;
 const ADMIN_CODE_STORAGE_PREFIX = "mianba_admin_code_next:";
@@ -35,229 +44,6 @@ function retryAfterSeconds(response: Response) {
   return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : ADMIN_CODE_COOLDOWN_SECONDS;
 }
 
-type CurrentUser = {
-  email: string;
-  role: string;
-};
-
-type ProviderConfig = {
-  id: string;
-  provider_type: string;
-  purpose: string;
-  provider_name: string;
-  model_name: string;
-  priority: number;
-  region: string;
-  enabled: boolean;
-  has_api_key: boolean;
-  api_key_preview?: string | null;
-};
-
-type AdminLoginResponse = {
-  access_token?: string;
-  detail?: string;
-  message?: string;
-  dev_code?: string;
-};
-
-type AdminAuditLog = {
-  id: string;
-  admin_email: string;
-  action: string;
-  target_type: string;
-  target_id: string;
-  created_at: string;
-  before_snapshot?: Record<string, unknown> | null;
-  after_snapshot?: Record<string, unknown> | null;
-};
-
-type CreditLedgerEntry = {
-  id: string;
-  user_email: string;
-  change_amount: number;
-  balance_after: number;
-  reason: string;
-  related_session_id?: string | null;
-  operator_admin_email?: string | null;
-  note?: string | null;
-  created_at: string;
-};
-
-type VoucherIssueResponse = {
-  total_recipients: number;
-  total_vouchers: number;
-  recipients: string[];
-  voucher_type: string;
-  reason: string;
-  operator_admin_email: string;
-};
-
-type AICallLogEntry = {
-  id: string;
-  session_id?: string | null;
-  provider_type: string;
-  provider_name: string;
-  model_name: string;
-  purpose: string;
-  success: boolean;
-  latency_ms?: number | null;
-  provider_request_id?: string | null;
-  input_tokens?: number | null;
-  output_tokens?: number | null;
-  audio_duration_ms?: number | null;
-  characters?: number | null;
-  estimated_cost_cents?: number | null;
-  error_message?: string | null;
-  created_at: string;
-};
-
-type ContentSafetyLogEntry = {
-  id: string;
-  user_email?: string | null;
-  session_id?: string | null;
-  source: string;
-  action: string;
-  risk_level: string;
-  categories: string[];
-  matched_terms: string[];
-  content_excerpt?: string | null;
-  message_code?: string | null;
-  created_at: string;
-};
-
-type AuthLoginLogEntry = {
-  id: string;
-  email: string;
-  auth_method: string;
-  role: string;
-  success: boolean;
-  failure_reason?: string | null;
-  ip_address?: string | null;
-  user_agent?: string | null;
-  created_at: string;
-};
-
-type CustomerServiceNoteEntry = {
-  id: string;
-  user_email: string;
-  admin_email: string;
-  category: string;
-  content: string;
-  related_session_id?: string | null;
-  created_at: string;
-};
-
-type RefundCaseEntry = {
-  id: string;
-  user_email: string;
-  status: string;
-  reason: string;
-  description: string;
-  amount_cents?: number | null;
-  currency: string;
-  credit_adjustment?: number | null;
-  related_session_id?: string | null;
-  resolution?: string | null;
-  created_by_admin_email: string;
-  updated_by_admin_email?: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type AdminUserSearchItem = {
-  email: string;
-  role: string;
-  is_active: boolean;
-  credit_balance: number;
-  total_interviews: number;
-  completed_interviews: number;
-  last_interview_at?: string | null;
-};
-
-type AdminInterviewHistoryItem = {
-  session_id: string;
-  interview_type: string;
-  status: string;
-  current_step_index: number;
-  total_steps: number;
-  report_total_score?: number | null;
-  created_at: string;
-};
-
-type AdminInterviewReport = {
-  user_email: string;
-  session_id: string;
-  interview_type: string;
-  total_score: number;
-  readiness_level: string;
-  score_explanation: string;
-  summary: string;
-  dimensions: { name: string; score: number; comment: string; level?: string | null; evidence?: string[]; action?: string | null }[];
-  strengths: string[];
-  improvements: string[];
-  next_plan: string[];
-  priority_actions: string[];
-  evidence: string[];
-  risk_flags: string[];
-  recommended_drills: string[];
-  turns: { round_name: string; question: string; answer: string; score?: number | null; feedback?: string | null; evidence?: string[] }[];
-};
-
-type SystemConfig = {
-  key: string;
-  value: boolean | number | string | Record<string, unknown> | unknown[] | null;
-  description: string;
-  updated_at?: string | null;
-};
-
-type AdminStatsPoint = {
-  label: string;
-  value: number;
-};
-
-type AdminDashboardOverview = {
-  total_users: number;
-  active_users: number;
-  disabled_users: number;
-  admin_users: number;
-  total_credit_balance: number;
-  total_credit_granted: number;
-  total_sessions: number;
-  completed_sessions: number;
-  active_sessions: number;
-  today_sessions: number;
-  total_reports: number;
-  average_report_score?: number | null;
-  ai_success_rate?: number | null;
-  failed_login_count: number;
-  open_refund_cases: number;
-};
-
-type AdminTopUserUsage = {
-  email: string;
-  total_interviews: number;
-  completed_interviews: number;
-  credit_balance: number;
-  last_interview_at?: string | null;
-};
-
-type AdminDashboardStats = {
-  database_ready: boolean;
-  generated_at: string;
-  overview: AdminDashboardOverview;
-  user_growth: AdminStatsPoint[];
-  daily_interviews: AdminStatsPoint[];
-  daily_reports: AdminStatsPoint[];
-  interview_type_distribution: AdminStatsPoint[];
-  session_status_distribution: AdminStatsPoint[];
-  ai_call_success_distribution: AdminStatsPoint[];
-  login_outcome_distribution: AdminStatsPoint[];
-  refund_status_distribution: AdminStatsPoint[];
-  top_users: AdminTopUserUsage[];
-};
-
-type AdminSectionKey = "overview" | "credits" | "users" | "ai" | "system" | "audit";
-
 const adminSectionNavItems: { key: AdminSectionKey; label: string; icon: string }[] = [
   { key: "overview", label: "概览", icon: "lucide:gauge" },
   { key: "credits", label: "次数", icon: "lucide:coins" },
@@ -279,101 +65,6 @@ const creditReasonOptions = [
 function adminSectionFromHash(hash: string): AdminSectionKey | null {
   const key = hash.replace(/^#admin-/, "") as AdminSectionKey;
   return adminSectionNavItems.some((item) => item.key === key) ? key : null;
-}
-
-const chartTextColor = "#334155";
-
-function lineDashboardOption(stats: AdminDashboardStats): EChartsOption {
-  const labels = stats.daily_interviews.map((item) => item.label);
-  return {
-    color: ["#174ea6", "#b3261e", "#0b8043"],
-    grid: { top: 36, right: 18, bottom: 28, left: 38 },
-    legend: { top: 0, textStyle: { color: chartTextColor, fontWeight: 700 } },
-    tooltip: { trigger: "axis" },
-    xAxis: { type: "category", boundaryGap: false, data: labels, axisLabel: { color: chartTextColor } },
-    yAxis: { type: "value", minInterval: 1, axisLabel: { color: chartTextColor }, splitLine: { lineStyle: { color: "rgba(15,23,42,0.08)" } } },
-    series: [
-      { name: "训练场次", type: "line", smooth: true, symbolSize: 8, lineStyle: { width: 3 }, areaStyle: { opacity: 0.1 }, data: stats.daily_interviews.map((item) => item.value) },
-      { name: "生成报告", type: "line", smooth: true, symbolSize: 8, lineStyle: { width: 3 }, areaStyle: { opacity: 0.08 }, data: stats.daily_reports.map((item) => item.value) },
-      { name: "新增用户", type: "line", smooth: true, symbolSize: 8, lineStyle: { width: 3 }, areaStyle: { opacity: 0.08 }, data: stats.user_growth.map((item) => item.value) },
-    ],
-  };
-}
-
-function donutDashboardOption(points: AdminStatsPoint[], colors: string[]): EChartsOption {
-  return {
-    color: colors,
-    tooltip: { trigger: "item" },
-    legend: { bottom: 0, textStyle: { color: chartTextColor, fontWeight: 700 } },
-    series: [
-      {
-        type: "pie",
-        radius: ["48%", "72%"],
-        center: ["50%", "42%"],
-        avoidLabelOverlap: true,
-        label: { formatter: "{b}\n{c}", color: "#0f172a", fontWeight: 900 },
-        data: points.map((item) => ({ name: item.label, value: item.value })),
-      },
-    ],
-  };
-}
-
-function barDashboardOption(points: AdminStatsPoint[], name: string, color: string): EChartsOption {
-  return {
-    color: [color],
-    grid: { top: 16, right: 18, bottom: 28, left: 38 },
-    tooltip: { trigger: "axis" },
-    xAxis: { type: "category", data: points.map((item) => item.label), axisLabel: { color: chartTextColor } },
-    yAxis: { type: "value", minInterval: 1, axisLabel: { color: chartTextColor }, splitLine: { lineStyle: { color: "rgba(15,23,42,0.08)" } } },
-    series: [
-      {
-        name,
-        type: "bar",
-        barMaxWidth: 42,
-        itemStyle: { borderRadius: [4, 4, 0, 0] },
-        data: points.map((item) => item.value),
-      },
-    ],
-  };
-}
-
-function AdminChart({ option, height = 280 }: { option: EChartsOption; height?: number }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const chartRef = useRef<EChartsInstance | null>(null);
-  const optionRef = useRef(option);
-
-  useEffect(() => {
-    optionRef.current = option;
-    chartRef.current?.setOption(option, true);
-  }, [option]);
-
-  useEffect(() => {
-    let disposed = false;
-    let resizeObserver: ResizeObserver | null = null;
-
-    void loadECharts()
-      .then((echarts) => {
-        if (disposed || !containerRef.current) {
-          return;
-        }
-        chartRef.current = echarts.init(containerRef.current);
-        chartRef.current.setOption(optionRef.current);
-        if ("ResizeObserver" in window) {
-          resizeObserver = new ResizeObserver(() => chartRef.current?.resize());
-          resizeObserver.observe(containerRef.current);
-        }
-      })
-      .catch(() => undefined);
-
-    return () => {
-      disposed = true;
-      resizeObserver?.disconnect();
-      chartRef.current?.dispose();
-      chartRef.current = null;
-    };
-  }, []);
-
-  return <div className="admin-chart" ref={containerRef} style={{ minHeight: height }} />;
 }
 
 export function AdminShell() {
