@@ -95,22 +95,25 @@ def get_email_code_store(settings=Depends(get_settings)) -> EmailCodeStore | Red
     return RedisEmailCodeStore(redis_client)
 
 
-def check_email_code_rate_limit(email: str, settings=Depends(get_settings)) -> None:
+def check_email_code_rate_limit(email: str, request: Request | None = None, settings=Depends(get_settings)) -> None:
+    rate_limit_keys = [("email", email, settings.email_code_rate_limit, settings.email_code_rate_window_seconds)]
+    if request is not None:
+        ip_address = client_ip(request)
+        if ip_address:
+            rate_limit_keys.append(("ip", ip_address, settings.email_code_ip_rate_limit, settings.email_code_ip_rate_window_seconds))
+    domain = email.rsplit("@", 1)[-1].strip().lower() if "@" in email else ""
+    if domain:
+        rate_limit_keys.append(("domain", domain, settings.email_code_domain_rate_limit, settings.email_code_domain_rate_window_seconds))
+
     redis_client = get_redis_client()
     if redis_client is None:
-        _email_code_limiter.check(
-            email,
-            limit=settings.email_code_rate_limit,
-            window_seconds=settings.email_code_rate_window_seconds,
-        )
+        for scope, key, limit, window_seconds in rate_limit_keys:
+            _email_code_limiter.check(f"{scope}:{key}", limit=limit, window_seconds=window_seconds)
         return
 
-    limiter = RedisEmailRateLimiter(
-        redis_client,
-        limit=settings.email_code_rate_limit,
-        window_seconds=settings.email_code_rate_window_seconds,
-    )
-    limiter.check(email)
+    for scope, key, limit, window_seconds in rate_limit_keys:
+        limiter = RedisEmailRateLimiter(redis_client, limit=limit, window_seconds=window_seconds)
+        limiter.check(f"{scope}:{key}")
 
 
 def auth_attempt_key(flow: str, email: str) -> str:
@@ -385,13 +388,14 @@ def change_current_user_password(
 
 @router.post("/email-code/request", response_model=EmailCodeRequestResponse, status_code=status.HTTP_202_ACCEPTED)
 def request_email_code(
+    request: Request,
     payload: EmailCodeRequest,
     settings=Depends(get_settings),
     code_store: EmailCodeStore | RedisEmailCodeStore = Depends(get_email_code_store),
 ) -> EmailCodeRequestResponse:
     email = normalize_auth_email(payload.email)
     try:
-        check_email_code_rate_limit(email, settings=settings)
+        check_email_code_rate_limit(email, request=request, settings=settings)
     except EmailCodeRateLimitError as exc:
         retry_after = max(1, exc.retry_after_seconds or settings.email_code_rate_window_seconds)
         raise HTTPException(

@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     database_url: str = Field(default="postgresql+psycopg://mianba:mianba@postgres:5432/mianba")
     redis_url: str = Field(default="redis://redis:6379/0")
+    database_fallback_enabled: bool = False
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,https://sakuracianna.icu,https://www.sakuracianna.icu"
     auth_cookie_secure: bool = False
     auth_cookie_samesite: str = "lax"
@@ -23,6 +24,10 @@ class Settings(BaseSettings):
     email_code_expire_seconds: int = 300
     email_code_rate_limit: int = 1
     email_code_rate_window_seconds: int = 90
+    email_code_ip_rate_limit: int = 10
+    email_code_ip_rate_window_seconds: int = 90
+    email_code_domain_rate_limit: int = 30
+    email_code_domain_rate_window_seconds: int = 90
     resend_api_key: str = ""
     domestic_email_provider: str = ""
     domestic_email_domains: str = "qq.com,foxmail.com,163.com,126.com,yeah.net,sina.com,sohu.com,139.com,189.cn,aliyun.com"

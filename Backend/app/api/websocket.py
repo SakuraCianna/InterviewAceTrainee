@@ -3,9 +3,11 @@ import json
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 
+from app.api.interviews import get_interview_store
 from app.core.config import Settings, get_settings
 from app.core.security import ACCESS_TOKEN_COOKIE_NAME, decode_access_token
 from app.services.auth_sessions import AuthSessionStore, get_auth_session_store
+from app.services.interview_runtime import DatabaseInterviewRuntimeStore, InMemoryInterviewRuntimeStore
 from app.services.user_credentials import UserCredentialStore, get_user_credential_store
 
 router = APIRouter(prefix="/ws", tags=["websocket"])
@@ -18,6 +20,7 @@ async def interview_socket(
     session_id: str,
     auth_session_store: AuthSessionStore = Depends(get_auth_session_store),
     user_store: UserCredentialStore = Depends(get_user_credential_store),
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
     settings: Settings = Depends(get_settings),
 ) -> None:
     if not _is_allowed_origin(websocket.headers.get("origin"), settings):
@@ -38,6 +41,9 @@ async def interview_socket(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     if not auth_session_store.is_current_session(claims["sub"], claims["session_id"]) or not user_store.is_active(claims["sub"]):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    if interview_store.get_session(claims["sub"], session_id) is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 

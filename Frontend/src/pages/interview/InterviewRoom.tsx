@@ -183,6 +183,11 @@ export function InterviewRoom() {
       setSocketState("已断开");
       return;
     }
+    if (!interviewState && !activeSession) {
+      socketRef.current?.close();
+      setSocketState("未开始");
+      return;
+    }
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const websocket = new WebSocket(`${protocol}://${window.location.host}/api/ws/interviews/${socketSessionId}`);
     socketRef.current = websocket;

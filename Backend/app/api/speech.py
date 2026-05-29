@@ -4,12 +4,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from app.api.dependencies import TokenClaims, get_current_user_claims
+from app.api.interviews import get_interview_store
 from app.api.providers import get_provider_config_store
+from app.api.session_guards import require_owned_interview_session
 from app.core.config import Settings, get_settings
 from app.schemas.interviews import InterviewType
 from app.schemas.speech import SpeechRecognitionResponse, SpeechSynthesisRequest, SpeechSynthesisResponse
 from app.services.ai_call_logs import AICallLogStore, get_ai_call_log_store
 from app.services.ai_router import AIServiceRouter, AllProvidersFailedError, NoProviderAvailableError
+from app.services.interview_runtime import DatabaseInterviewRuntimeStore, InMemoryInterviewRuntimeStore
 from app.services.provider_configs import DatabaseProviderConfigStore, InMemoryProviderConfigStore
 from app.services.tencent_speech import TencentSpeechClient
 
@@ -40,11 +43,14 @@ async def recognize_speech(
     audio_file: UploadFile = File(...),
     session_id: Annotated[str, Form(max_length=120)] = "",
     interview_type: InterviewType | None = Form(default=None),
-    _claims: TokenClaims = Depends(get_current_user_claims),
+    claims: TokenClaims = Depends(get_current_user_claims),
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
     provider_store: DatabaseProviderConfigStore | InMemoryProviderConfigStore = Depends(get_provider_config_store),
     call_log_store: AICallLogStore = Depends(get_ai_call_log_store),
     settings: Settings = Depends(get_settings),
 ) -> SpeechRecognitionResponse:
+    state = require_owned_interview_session(claims, session_id, interview_store)
+    resolved_interview_type = interview_type or state.interview_type
     _validate_audio_upload(audio_file)
     audio_bytes = await _read_audio_upload_limited(audio_file, settings.speech_audio_max_upload_bytes)
     if not audio_bytes:
@@ -63,7 +69,7 @@ async def recognize_speech(
                 content_type=audio_file.content_type or "",
                 filename=audio_file.filename,
                 session_id=session_id,
-                interview_type=interview_type,
+                interview_type=resolved_interview_type,
             ),
         )
     except NoProviderAvailableError as exc:
@@ -89,11 +95,13 @@ async def recognize_speech(
 @router.post("/tts", response_model=SpeechSynthesisResponse)
 def synthesize_speech(
     payload: SpeechSynthesisRequest,
-    _claims: TokenClaims = Depends(get_current_user_claims),
+    claims: TokenClaims = Depends(get_current_user_claims),
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
     provider_store: DatabaseProviderConfigStore | InMemoryProviderConfigStore = Depends(get_provider_config_store),
     call_log_store: AICallLogStore = Depends(get_ai_call_log_store),
     settings: Settings = Depends(get_settings),
 ) -> SpeechSynthesisResponse:
+    require_owned_interview_session(claims, payload.session_id, interview_store)
     router_service = AIServiceRouter(provider_store.list_configs())
     speech_client = TencentSpeechClient(settings)
     try:

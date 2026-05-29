@@ -1,6 +1,7 @@
 from collections.abc import Generator
 from time import monotonic
 
+from fastapi import HTTPException, status
 from sqlalchemy import create_engine
 from sqlalchemy import inspect
 from sqlalchemy.exc import SQLAlchemyError
@@ -41,6 +42,8 @@ def is_database_ready(required_tables: tuple[str, ...] = ()) -> bool:
 
 def get_optional_db_session(required_tables: tuple[str, ...]) -> Generator[Session | None, None, None]:
     if not is_database_ready(required_tables):
+        if not get_settings().database_fallback_enabled:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="database_not_ready")
         yield None
         return
 
