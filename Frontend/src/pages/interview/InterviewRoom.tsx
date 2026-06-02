@@ -1,10 +1,12 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, SafeArea } from "antd-mobile";
+import gsap from "gsap";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AccountSettingsPanel } from "./AccountSettingsPanel";
 import { AppIcon } from "../../components/AppIcon";
 import { AvatarStage } from "../../components/AvatarStage";
 import { BrandLogo } from "../../components/BrandLogo";
+import { MetricDial } from "../../components/MetricDial";
 import { useEmailCodeCooldown } from "../../hooks/useEmailCodeCooldown";
 import { CSRF_COOKIE_NAME, getApiErrorMessage, getCookie } from "../../lib/api";
 import { retryAfterSeconds } from "../../lib/emailCooldown";
@@ -66,6 +68,7 @@ export function InterviewRoom() {
   const location = useLocation();
   const navigate = useNavigate();
   const routeStage = location.pathname.endsWith("/check") ? "check" : location.pathname.endsWith("/room") ? "room" : "select";
+  const pageRef = useRef<HTMLElement | null>(null);
   const [stateIndex, setStateIndex] = useState(1);
   const [selectedModuleIndex, setSelectedModuleIndex] = useState(0);
   const [sessionId, setSessionId] = useState(createSessionId);
@@ -140,6 +143,29 @@ export function InterviewRoom() {
     : "未登录";
 
   const socketSessionId = useMemo(() => interviewState?.session_id ?? activeSession?.session_id ?? sessionId, [activeSession, interviewState, sessionId]);
+
+  useLayoutEffect(() => {
+    if (!pageRef.current || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return;
+    }
+
+    const ctx = gsap.context(() => {
+      const stageShell = pageRef.current?.querySelector<HTMLElement>(".interview-entry-layout, .interview-layout, .microphone-gate");
+      const reportItems = pageRef.current
+        ? Array.from(pageRef.current.querySelectorAll<HTMLElement>(".room-report .metric-dial, .room-report-summary-card, .room-report-insights article, .room-report-grid div"))
+        : [];
+
+      gsap.from(".workspace-header", { y: -12, duration: 0.46, ease: "power3.out" });
+      if (stageShell) {
+        gsap.from(stageShell, { y: 24, scale: 0.995, duration: 0.58, ease: "power3.out", clearProps: "transform" });
+      }
+      if (reportItems.length > 0) {
+        gsap.from(reportItems, { y: 18, duration: 0.52, stagger: 0.045, ease: "power2.out", clearProps: "transform" });
+      }
+    }, pageRef);
+
+    return () => ctx.revert();
+  }, [interviewState?.session_id, interviewState?.status, routeStage, selectedModuleIndex]);
 
   useEffect(() => {
     if (getCookie(CSRF_COOKIE_NAME)) {
@@ -1115,7 +1141,7 @@ export function InterviewRoom() {
 
   if (routeStage === "check") {
     return (
-      <main className="workspace-page interview-page">
+      <main className="workspace-page interview-page" data-stage="check" ref={pageRef}>
         <header className="workspace-header">
           <a href="/" className="brand-mark">
             <BrandLogo size={28} />
@@ -1228,7 +1254,7 @@ export function InterviewRoom() {
   }
 
   return (
-    <main className="workspace-page interview-page">
+    <main className="workspace-page interview-page" data-stage={routeStage} ref={pageRef}>
       <header className="workspace-header">
         <a href="/" className="brand-mark">
           <BrandLogo size={28} />
@@ -1566,6 +1592,18 @@ export function InterviewRoom() {
 
           {interviewState?.report && (
             <section className="room-report">
+              <div className="room-report-hero">
+                <MetricDial
+                  value={interviewState.report.total_score}
+                  label="综合评分"
+                  caption={interviewState.report.readiness_level || "综合表现"}
+                />
+                <div className="room-report-summary-copy">
+                  <span className="eyebrow">AI Report</span>
+                  <h2>{interviewState.report.readiness_level || "本次训练复盘"}</h2>
+                  <p>{interviewState.report.summary}</p>
+                </div>
+              </div>
               <div className="room-report-score">
                 <strong>{interviewState.report.total_score}</strong>
                 <span>{interviewState.report.readiness_level || "综合表现"}</span>

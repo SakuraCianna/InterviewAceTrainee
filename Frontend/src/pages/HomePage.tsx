@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { AnimatedCounter } from "../components/AnimatedCounter";
 import { AppIcon } from "../components/AppIcon";
 import { BrandLogo } from "../components/BrandLogo";
 
@@ -59,9 +60,9 @@ const trainingTracks: TrainingTrack[] = [
 ];
 
 const heroStats = [
-  ["250+", "岗位方向"],
-  ["100+", "复试专业"],
-  ["4", "训练产品"],
+  [250, "+", "岗位方向"],
+  [100, "+", "复试专业"],
+  [4, "", "训练产品"],
 ];
 
 const practiceSteps = [
@@ -214,9 +215,9 @@ export function HomePage() {
             </a>
           </div>
           <div className="mianba-hero-stats mianba-reveal">
-            {heroStats.map(([value, label]) => (
+            {heroStats.map(([value, suffix, label]) => (
               <div key={label}>
-                <strong>{value}</strong>
+                <AnimatedCounter value={Number(value)} suffix={String(suffix)} />
                 <span>{label}</span>
               </div>
             ))}
