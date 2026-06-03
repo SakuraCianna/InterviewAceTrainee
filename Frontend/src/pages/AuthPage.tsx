@@ -75,11 +75,12 @@ export function AuthPage({ mode }: AuthPageProps) {
         Boolean,
       ) as HTMLElement[];
 
+      gsap.set(fadeItems, { opacity: 0 });
       gsap.set(backRef.current, reducedMotion ? {} : { y: 12 });
       gsap.set(titleLines, reducedMotion ? {} : { y: 28 });
       gsap.set(statusCardRef.current, reducedMotion ? {} : { y: 16 });
       gsap.set(formItems, reducedMotion ? {} : { y: 10 });
-      gsap.set(authCardRef.current, reducedMotion ? {} : { x: 34, scale: 0.98 });
+      gsap.set(authCardRef.current, reducedMotion ? {} : { x: 34, scale: 0.98, filter: "blur(10px)" });
 
       if (!reducedMotion) {
         glows.forEach((glow, index) => {
@@ -98,16 +99,16 @@ export function AuthPage({ mode }: AuthPageProps) {
 
       const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
       if (reducedMotion) {
-        tl.set(fadeItems, { clearProps: "transform" });
+        tl.to(fadeItems, { opacity: 1, duration: 0.24, stagger: 0.025 });
         return;
       }
-      tl.to(backRef.current, { y: 0, duration: 0.45 })
-        .to(eyebrowRef.current, { y: 0, duration: 0.36 }, "-=0.2")
-        .to(titleLines, { y: 0, duration: 0.56, stagger: 0.08 }, "-=0.08")
-        .to(descRef.current, { y: 0, duration: 0.42 }, "-=0.22")
-        .to(statusCardRef.current, { y: 0, duration: 0.42 }, "-=0.18")
-        .to(authCardRef.current, { x: 0, scale: 1, duration: 0.64 }, "-=0.4")
-        .to(formItems, { y: 0, duration: 0.34, stagger: 0.055 }, "-=0.32");
+      tl.to(backRef.current, { opacity: 1, y: 0, duration: 0.45 })
+        .to(eyebrowRef.current, { opacity: 1, y: 0, duration: 0.36 }, "-=0.2")
+        .to(titleLines, { opacity: 1, y: 0, duration: 0.56, stagger: 0.08 }, "-=0.08")
+        .to(descRef.current, { opacity: 1, y: 0, duration: 0.42 }, "-=0.22")
+        .to(statusCardRef.current, { opacity: 1, y: 0, duration: 0.42 }, "-=0.18")
+        .to(authCardRef.current, { opacity: 1, x: 0, scale: 1, filter: "blur(0px)", duration: 0.64 }, "-=0.4")
+        .to(formItems, { opacity: 1, y: 0, duration: 0.34, stagger: 0.055 }, "-=0.32");
     }, pageRef);
 
     return () => ctx.revert();
@@ -127,8 +128,8 @@ export function AuthPage({ mode }: AuthPageProps) {
       gsap.killTweensOf(formBodyRef.current);
       gsap.fromTo(
         formBodyRef.current,
-        { y: reducedMotion ? 0 : 8 },
-        { y: 0, duration: reducedMotion ? 0.16 : 0.24, ease: "power2.out" },
+        { opacity: 0, y: reducedMotion ? 0 : 8 },
+        { opacity: 1, y: 0, duration: reducedMotion ? 0.16 : 0.24, ease: "power2.out" },
       );
     }
   }, [loginMethod, isResetMode, mode]);
