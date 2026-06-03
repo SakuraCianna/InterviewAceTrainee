@@ -186,8 +186,8 @@ const creditNotes = [
 ];
 
 const filingLinks = {
-  icpNumber: import.meta.env.VITE_ICP_NUMBER || "ICP备案号待填写",
-  policeNumber: import.meta.env.VITE_POLICE_RECORD_NUMBER || "公安备案号待填写",
+  icpNumber: import.meta.env.VITE_ICP_NUMBER || "湘ICP备2025151258号-1",
+  policeNumber: import.meta.env.VITE_POLICE_RECORD_NUMBER || "",
   icpUrl: "https://beian.miit.gov.cn/",
   policeUrl: "https://beian.mps.gov.cn/#/query/webSearch",
 };
@@ -548,9 +548,11 @@ export function HomePage() {
           <a href={filingLinks.icpUrl} target="_blank" rel="noreferrer">
             {filingLinks.icpNumber}
           </a>
-          <a href={filingLinks.policeUrl} target="_blank" rel="noreferrer">
-            {filingLinks.policeNumber}
-          </a>
+          {filingLinks.policeNumber && (
+            <a href={filingLinks.policeUrl} target="_blank" rel="noreferrer">
+              {filingLinks.policeNumber}
+            </a>
+          )}
           <span>备案信息以工信部和公安联网备案平台查询结果为准。</span>
         </div>
         <small>© 2026 面霸练习生. All rights reserved.</small>
