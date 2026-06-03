@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { AnimatedCounter } from "../components/AnimatedCounter";
@@ -16,6 +16,11 @@ type TrainingTrack = {
   drill: string;
   report: string;
   cost: string;
+  prompt: string;
+  readiness: number;
+  metrics: Array<[string, number]>;
+  evidence: string[];
+  nextStep: string;
 };
 
 type ReportCard = {
@@ -42,6 +47,15 @@ const trainingTracks: TrainingTrack[] = [
     drill: "3 轮完整体验",
     report: "岗位匹配, 项目深挖, 沟通动机",
     cost: "2 次 / 深度模拟",
+    prompt: "请用一个项目说明, 你如何在约束条件下做技术取舍?",
+    readiness: 86,
+    metrics: [
+      ["专业能力", 88],
+      ["项目深挖", 81],
+      ["岗位匹配", 84],
+    ],
+    evidence: ["业务背景清楚", "指标还缺对照", "失败复盘偏短"],
+    nextStep: "下一轮追问会继续深挖技术取舍、稳定性方案和上线后的指标复盘。",
   },
   {
     icon: "lucide:graduation-cap",
@@ -52,6 +66,15 @@ const trainingTracks: TrainingTrack[] = [
     drill: "1 次单场模拟",
     report: "专业基础, 科研潜力, 表达结构",
     cost: "1 次 / 单场模拟",
+    prompt: "请介绍你的研究兴趣, 并说明它和目标专业方向的关系。",
+    readiness: 82,
+    metrics: [
+      ["专业基础", 76],
+      ["科研潜力", 85],
+      ["表达结构", 83],
+    ],
+    evidence: ["研究方向完整", "概念定义偏松", "导师沟通可更具体"],
+    nextStep: "下一轮会追问专业概念边界、毕设方法和未来研究计划。",
   },
   {
     icon: "lucide:landmark",
@@ -62,6 +85,15 @@ const trainingTracks: TrainingTrack[] = [
     drill: "1 次结构化模拟",
     report: "审题立意, 逻辑层次, 稳定表达",
     cost: "1 次 / 单场模拟",
+    prompt: "面对公共服务资源紧张的情况, 你会如何协调优先级?",
+    readiness: 79,
+    metrics: [
+      ["审题立意", 82],
+      ["逻辑层次", 78],
+      ["现场稳定", 77],
+    ],
+    evidence: ["公共视角明确", "落地步骤略泛", "结尾升华不足"],
+    nextStep: "下一轮会压缩准备时间, 训练分层作答和应急追问下的稳定输出。",
   },
   {
     icon: "lucide:languages",
@@ -72,6 +104,15 @@ const trainingTracks: TrainingTrack[] = [
     drill: "2 次口语全流程",
     report: "Fluency, Vocabulary, Grammar",
     cost: "2 次 / 完整口语",
+    prompt: "Describe a time when you learned something difficult and explain why it mattered.",
+    readiness: 74,
+    metrics: [
+      ["Fluency", 78],
+      ["Vocabulary", 74],
+      ["Grammar", 72],
+    ],
+    evidence: ["观点能展开", "连接词重复", "Part 3 对比不足"],
+    nextStep: "下一轮会进入 Part 3 抽象讨论, 重点训练比较、原因和结果表达。",
   },
 ];
 
@@ -132,8 +173,39 @@ const commandQueue = [
   ["报告引擎", "维度评分、证据、建议"],
 ];
 
+const capabilityLayers = [
+  ["Input Layer", "资料结构化", "简历、JD、院校、专业、口语题卡进入统一画像, 先建立可追问节点。"],
+  ["Interview Layer", "追问策略", "根据回答内容切换深挖、澄清、压力追问和节奏控制。"],
+  ["Signal Layer", "语音与状态", "TTS 播题、ASR 转写、作答时长、断线恢复和训练状态同步反馈。"],
+  ["Review Layer", "证据报告", "评分不只给结论, 还保留回答证据、风险点和下一轮训练动作。"],
+];
+
+const personaJourneys = [
+  ["应届生", "项目经历很多, 但讲不出岗位相关性。", "从 JD 关键词反推项目表达, 训练 STAR、指标和技术取舍。"],
+  ["转码/转岗", "背景跨度大, 容易被追问动机和能力迁移。", "把过往经历拆成能力证据, 强化岗位匹配与稳定性表达。"],
+  ["复试考生", "自我介绍完整, 但专业追问容易散。", "用院校专业画像组织概念、毕设、科研兴趣和导师沟通。"],
+  ["口语备考", "能说, 但 Part 2/3 展开和连接不稳。", "按真实节奏练话题卡、抽象讨论、词汇替换和语法稳定。"],
+];
+
+const operatingMetrics = [
+  ["画像完成度", "92%", "材料节点已拆解"],
+  ["追问命中率", "87%", "上一轮回答驱动"],
+  ["复盘可执行", "18", "维度进入报告"],
+];
+
 export function HomePage() {
   const rootRef = useRef<HTMLElement | null>(null);
+  const [activeTrackIndex, setActiveTrackIndex] = useState(0);
+  const [sessionRound, setSessionRound] = useState(1);
+  const [isRecording, setIsRecording] = useState(false);
+
+  const activeTrack = trainingTracks[activeTrackIndex];
+  const sessionMetrics = useMemo(
+    () => activeTrack.metrics.map(([label, value], index) => [label, Math.min(96, value + sessionRound + (isRecording && index === 0 ? 2 : 0))] as [string, number]),
+    [activeTrack, isRecording, sessionRound],
+  );
+  const sessionScore = useMemo(() => Math.min(96, activeTrack.readiness + sessionRound + (isRecording ? 1 : 0)), [activeTrack, isRecording, sessionRound]);
+  const sessionStatus = isRecording ? "正在采集回答" : sessionRound === 1 ? "等待开口" : "已生成上一轮复盘";
 
   useLayoutEffect(() => {
     if (!rootRef.current || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -182,6 +254,23 @@ export function HomePage() {
     };
   }, []);
 
+  useLayoutEffect(() => {
+    if (!rootRef.current || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return;
+    }
+
+    const ctx = gsap.context(() => {
+      gsap.fromTo(
+        ".mission-live .mission-question, .mission-report-snapshot, .mission-demo-evidence li",
+        { y: 10, autoAlpha: 0.72 },
+        { y: 0, autoAlpha: 1, duration: 0.36, stagger: 0.035, ease: "power2.out", overwrite: "auto", clearProps: "transform,opacity,visibility" },
+      );
+      gsap.fromTo(".mission-agent-core > div:first-child", { scale: 0.965 }, { scale: 1, duration: 0.42, ease: "power2.out", overwrite: "auto", clearProps: "transform" });
+    }, rootRef);
+
+    return () => ctx.revert();
+  }, [activeTrackIndex, sessionRound, isRecording]);
+
   return (
     <main className="mianba-home mianba-home--mission" ref={rootRef}>
       <nav className="mission-nav" aria-label="主导航">
@@ -190,10 +279,10 @@ export function HomePage() {
           <span>面霸练习生</span>
         </a>
         <div className="mission-nav-links">
+          <a href="#system">产品系统</a>
           <a href="#matrix">训练矩阵</a>
           <a href="#protocol">训练协议</a>
           <a href="#reports">复盘报告</a>
-          <a href="#credits">开通方式</a>
         </div>
         <a className="mission-nav-action" href="/login">
           进入训练台
@@ -232,26 +321,44 @@ export function HomePage() {
           <div className="mission-orchestrator-head">
             <span>
               <AppIcon icon="lucide:activity" size={17} />
-              Live Session Deck
+              Live Practice Room
             </span>
-            <strong>第 1 / 3 轮</strong>
+            <em>点击左侧模块切换问题</em>
+            <strong>{isRecording ? "作答中" : `第 ${sessionRound} / 3 轮`}</strong>
           </div>
           <div className="mission-orchestrator-grid">
-            <aside className="mission-queue">
-              {commandQueue.map(([title, copy], index) => (
-                <div className={index === 1 ? "is-active" : ""} key={title}>
-                  <small>0{index + 1}</small>
-                  <strong>{title}</strong>
-                  <span>{copy}</span>
-                </div>
+            <aside className="mission-queue mission-training-tabs" aria-label="训练模块预览">
+              {trainingTracks.map((track, index) => (
+                <button
+                  type="button"
+                  className={index === activeTrackIndex ? "is-active" : ""}
+                  key={track.title}
+                  onClick={() => {
+                    setActiveTrackIndex(index);
+                    setSessionRound(1);
+                    setIsRecording(false);
+                  }}
+                  aria-pressed={index === activeTrackIndex}
+                >
+                  <AppIcon icon={track.icon} size={24} />
+                  <span>
+                    <strong>{track.title}</strong>
+                    <small>{track.badge}</small>
+                    <em>{track.drill}</em>
+                  </span>
+                </button>
               ))}
             </aside>
             <div className="mission-live">
-              <div className="mission-question">
-                <span>AI 面试官</span>
-                <p>请用一个项目说明, 你如何在时间、资源和稳定性约束下做技术取舍?</p>
+              <div className="mission-live-status" aria-live="polite">
+                <span>{sessionStatus}</span>
+                <b>{activeTrack.cost}</b>
               </div>
-              <div className="mission-agent-core">
+              <div className="mission-question">
+                <span>{activeTrack.title}面试官提问</span>
+                <p>{activeTrack.prompt}</p>
+              </div>
+              <div className={isRecording ? "mission-agent-core is-recording" : "mission-agent-core"}>
                 <div>
                   <AppIcon icon="lucide:audio-lines" size={56} />
                 </div>
@@ -262,11 +369,17 @@ export function HomePage() {
                 </div>
               </div>
               <div className="mission-live-actions">
-                <button type="button">
-                  <AppIcon icon="lucide:mic" size={18} />
-                  开始回答
+                <button type="button" onClick={() => setIsRecording((value) => !value)} aria-pressed={isRecording}>
+                  <AppIcon icon={isRecording ? "lucide:pause" : "lucide:mic"} size={18} />
+                  {isRecording ? "暂停回答" : "开始回答"}
                 </button>
-                <button type="button">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRecording(false);
+                    setSessionRound((round) => (round >= 3 ? 1 : round + 1));
+                  }}
+                >
                   <AppIcon icon="lucide:square" size={18} />
                   回答完毕
                 </button>
@@ -274,16 +387,19 @@ export function HomePage() {
             </div>
             <aside className="mission-report-snapshot">
               <span>Report Snapshot</span>
-              <strong>86</strong>
-              <p>项目表达清楚, 但技术取舍还需要补充指标和失败复盘。</p>
-              <div>
-                <b>岗位匹配</b>
-                <meter min="0" max="100" value="88" />
-              </div>
-              <div>
-                <b>追问稳定</b>
-                <meter min="0" max="100" value="81" />
-              </div>
+              <strong>{sessionScore}</strong>
+              <p>{activeTrack.nextStep}</p>
+              {sessionMetrics.map(([label, value]) => (
+                <div key={label}>
+                  <b>{label}</b>
+                  <meter min="0" max="100" value={value} />
+                </div>
+              ))}
+              <ul className="mission-demo-evidence">
+                {activeTrack.evidence.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
             </aside>
           </div>
         </section>
@@ -299,6 +415,54 @@ export function HomePage() {
             </div>
           </article>
         ))}
+      </section>
+
+      <section className="mission-system mission-scroll-section" id="system">
+        <div className="mission-section-head mission-motion">
+          <p className="mission-kicker">Product System</p>
+          <h2>它不是一个题库页面, 而是一套从资料到复盘的训练操作系统。</h2>
+          <p>主界面把用户最关心的三件事放到前台: 现在练什么、AI 会怎么追问、报告能给出什么下一步。</p>
+        </div>
+        <div className="mission-system-grid">
+          <article className="mission-layer-card mission-motion">
+            <div className="mission-panel-head">
+              <span>System Layers</span>
+              <AppIcon icon="lucide:layers-3" size={22} />
+            </div>
+            {capabilityLayers.map(([label, title, copy]) => (
+              <div className="mission-layer-row" key={label}>
+                <small>{label}</small>
+                <strong>{title}</strong>
+                <p>{copy}</p>
+              </div>
+            ))}
+          </article>
+
+          <article className="mission-ops-card mission-motion">
+            <div className="mission-panel-head">
+              <span>Live Readiness</span>
+              <AppIcon icon="lucide:radar" size={22} />
+            </div>
+            <div className="mission-ops-metrics">
+              {operatingMetrics.map(([label, value, copy]) => (
+                <div key={label}>
+                  <strong>{value}</strong>
+                  <span>{label}</span>
+                  <p>{copy}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mission-pipeline-list">
+              {commandQueue.map(([title, copy], index) => (
+                <div key={title}>
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <strong>{title}</strong>
+                  <p>{copy}</p>
+                </div>
+              ))}
+            </div>
+          </article>
+        </div>
       </section>
 
       <section className="mission-section mission-scroll-section" id="matrix">
@@ -332,6 +496,24 @@ export function HomePage() {
                 </div>
               </dl>
               <em>{track.cost}</em>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="mission-section mission-scroll-section" id="playbooks">
+        <div className="mission-section-head mission-motion">
+          <p className="mission-kicker">Interview Playbooks</p>
+          <h2>不同用户进入同一套产品, 看到的是不同训练路径。</h2>
+          <p>主界面需要让用户立刻找到自己的处境: 应届生、转岗、复试、口语备考, 每一种都对应不同的材料、追问和复盘侧重点。</p>
+        </div>
+        <div className="mission-persona-grid">
+          {personaJourneys.map(([label, pain, plan], index) => (
+            <article className="mission-persona-card mission-motion" key={label}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <h3>{label}</h3>
+              <p>{pain}</p>
+              <strong>{plan}</strong>
             </article>
           ))}
         </div>
