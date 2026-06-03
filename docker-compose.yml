@@ -77,6 +77,8 @@ services:
       context: ./Frontend
       args:
         VITE_ADMIN_ENTRY_PATH: /sakuracianna
+        VITE_ICP_NUMBER: ${VITE_ICP_NUMBER:-ICP备案号待填写}
+        VITE_POLICE_RECORD_NUMBER: ${VITE_POLICE_RECORD_NUMBER:-公安备案号待填写}
     container_name: mianba-frontend
     restart: unless-stopped
     expose:
