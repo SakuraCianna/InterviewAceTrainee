@@ -1141,7 +1141,7 @@ export function InterviewRoom() {
 
   if (routeStage === "check") {
     return (
-      <main className="workspace-page interview-page" data-stage="check" ref={pageRef}>
+      <main className="workspace-page interview-page interview-page--studio interview-page--mission" data-stage="check" ref={pageRef}>
         <header className="workspace-header">
           <a href="/" className="brand-mark">
             <BrandLogo size={28} />
@@ -1254,7 +1254,7 @@ export function InterviewRoom() {
   }
 
   return (
-    <main className="workspace-page interview-page" data-stage={routeStage} ref={pageRef}>
+    <main className="workspace-page interview-page interview-page--studio interview-page--mission" data-stage={routeStage} ref={pageRef}>
       <header className="workspace-header">
         <a href="/" className="brand-mark">
           <BrandLogo size={28} />
@@ -1322,6 +1322,23 @@ export function InterviewRoom() {
               <span><AppIcon icon="lucide:history" size={17} />中断后可恢复</span>
               <span><AppIcon icon="lucide:shield-check" size={17} />训练记录可追溯</span>
             </div>
+            <div className="scenario-mission-grid" aria-label="本次训练编排">
+              <article>
+                <span>训练协议</span>
+                <strong>{selectedModuleDetail.rounds}</strong>
+                <p>系统会按当前场景切换轮次、追问策略和报告结构。</p>
+              </article>
+              <article>
+                <span>材料要求</span>
+                <strong>{selectedModuleDetail.material}</strong>
+                <p>先把必要上下文补齐, 再进入设备检测和语音面试。</p>
+              </article>
+              <article>
+                <span>复盘重点</span>
+                <strong>{selectedModuleDetail.report}</strong>
+                <p>报告会按场景输出评分依据、风险提醒和下一轮建议。</p>
+              </article>
+            </div>
           </div>
         ) : (
           <AvatarStage state={state} />
@@ -1344,6 +1361,26 @@ export function InterviewRoom() {
             <AppIcon icon="lucide:radio" size={18} />
             <span>{socketMessage}</span>
           </div>
+
+          {!isSelectionStage && (
+            <div className="room-mission-brief" aria-label="实时面试状态">
+              <article>
+                <span>Round</span>
+                <strong>{progressText}</strong>
+                <p>{activeQuestion?.round_name || "等待下一轮问题"}</p>
+              </article>
+              <article>
+                <span>Agent State</span>
+                <strong>{state === "speaking" ? "提问中" : state === "listening" ? "聆听中" : state === "thinking" ? "分析中" : "待命"}</strong>
+                <p>问题播报、语音识别和报告生成会在这里形成连续状态。</p>
+              </article>
+              <article>
+                <span>Answer Window</span>
+                <strong>{formatDuration(recordingElapsedMs)}</strong>
+                <p>最长 {formatDuration(answerLimitMs)}, 可提前结束本轮回答。</p>
+              </article>
+            </div>
+          )}
 
           {(transcriptPreview || isRecording || isFinishingAnswer) && (
             <div className="transcript-card">

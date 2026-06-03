@@ -34,7 +34,7 @@ export function AdminLoginView({
   onSubmit,
 }: AdminLoginViewProps) {
   return (
-    <main className="auth-page admin-auth-page">
+    <main className="auth-page admin-auth-page admin-auth-page--mission">
       <div className="auth-ambient" aria-hidden="true">
         <span className="auth-glow auth-glow-blue" />
         <span className="auth-glow auth-glow-lime" />
@@ -68,6 +68,20 @@ export function AdminLoginView({
               <AppIcon icon="lucide:file-clock" size={18} />
               操作留痕
             </span>
+          </div>
+          <div className="admin-auth-ops-board" aria-label="后台运营入口">
+            <article>
+              <strong>Credits</strong>
+              <span>次数发放 / 流水复核 / 体验券</span>
+            </article>
+            <article>
+              <strong>AI Health</strong>
+              <span>模型、ASR、TTS 调用状态</span>
+            </article>
+            <article>
+              <strong>Risk Desk</strong>
+              <span>退款纠纷、内容安全、登录审计</span>
+            </article>
           </div>
         </div>
 

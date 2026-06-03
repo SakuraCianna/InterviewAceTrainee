@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import gsap from "gsap";
 import { AppIcon } from "../../components/AppIcon";
 import { CSRF_COOKIE_NAME, getApiErrorMessage, getCookie } from "../../lib/api";
 import { useEmailCodeCooldown } from "../../hooks/useEmailCodeCooldown";
@@ -191,6 +192,29 @@ export function AdminShell() {
   const selectedCreditReason = creditReasonOptions.find((option) => option.value === creditReason) ?? creditReasonOptions[0];
 
   const consoleLayoutRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!currentUser || !consoleLayoutRef.current || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return;
+    }
+
+    const ctx = gsap.context(() => {
+      const activeView = consoleLayoutRef.current?.querySelector<HTMLElement>(`.admin-section-view--${activeAdminSection}`);
+      const activeItems = activeView
+        ? Array.from(activeView.querySelectorAll<HTMLElement>(".admin-command-brief article, .admin-kpi-grid > article, .admin-chart-card, .admin-panel, .provider-row, .admin-user-grid > div, .admin-ops-card, .admin-report-detail"))
+        : [];
+
+      gsap.from(".admin-sidebar", { x: -18, duration: 0.48, ease: "power3.out", clearProps: "transform" });
+      if (activeView) {
+        gsap.from(activeView, { y: 18, scale: 0.995, duration: 0.5, ease: "power3.out", clearProps: "transform" });
+      }
+      if (activeItems.length > 0) {
+        gsap.from(activeItems, { y: 14, duration: 0.46, stagger: 0.035, ease: "power2.out", clearProps: "transform" });
+      }
+    }, consoleLayoutRef);
+
+    return () => ctx.revert();
+  }, [activeAdminSection, currentUser]);
 
   function selectAdminSection(section: AdminSectionKey) {
     setActiveAdminSection(section);
@@ -734,7 +758,7 @@ export function AdminShell() {
   const adminStatusMessage = message.startsWith("已进入后台") ? "后台在线，操作会记录到审计日志" : message;
 
   return (
-    <main className="workspace-page admin-page admin-page--authed" data-admin-section={activeAdminSection}>
+    <main className="workspace-page admin-page admin-page--authed admin-page--command admin-page--mission" data-admin-section={activeAdminSection}>
       <AdminSidebar
         activeSection={activeAdminSection}
         currentUser={currentUser}
@@ -757,6 +781,29 @@ export function AdminShell() {
                 <span className={dashboardStats.database_ready ? "admin-dashboard-badge" : "admin-dashboard-badge is-muted"}>
                   {dashboardStats.database_ready ? "数据库已连接" : "等待数据库迁移"}
                 </span>
+              </div>
+
+              <div className="admin-command-brief" aria-label="运营指挥中心">
+                <article className="admin-command-brief-main">
+                  <span>Command Center</span>
+                  <h3>今日需要盯住的三件事</h3>
+                  <p>训练增长、AI 调用质量和售后风险会直接影响用户体验。这里把后台最关键的判断入口提前到概览首屏。</p>
+                </article>
+                <article>
+                  <span>Usage Pulse</span>
+                  <strong>{dashboardStats.overview.today_sessions}</strong>
+                  <em>今日训练场次</em>
+                </article>
+                <article>
+                  <span>AI Health</span>
+                  <strong>{formatDashboardRate(dashboardStats.overview.ai_success_rate)}</strong>
+                  <em>模型与语音调用成功率</em>
+                </article>
+                <article>
+                  <span>Risk Queue</span>
+                  <strong>{dashboardStats.overview.open_refund_cases + dashboardStats.overview.failed_login_count}</strong>
+                  <em>售后纠纷 + 登录失败</em>
+                </article>
               </div>
 
               <div className="admin-kpi-grid">
