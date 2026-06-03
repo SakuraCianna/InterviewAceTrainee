@@ -553,7 +553,11 @@ export function HomePage() {
               {filingLinks.policeNumber}
             </a>
           )}
-          <span>备案信息以工信部和公安联网备案平台查询结果为准。</span>
+          <span>
+            {filingLinks.policeNumber
+              ? "备案信息以工信部和公安联网备案平台查询结果为准。"
+              : "ICP备案信息以工信部备案管理系统查询结果为准。"}
+          </span>
         </div>
         <small>© 2026 面霸练习生. All rights reserved.</small>
       </footer>
