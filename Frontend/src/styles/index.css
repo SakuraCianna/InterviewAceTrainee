@@ -7,7 +7,7 @@
   --ink: #13161c;
   --paper: #f5f1e9;
   --cream: #fffaf0;
-  --steel: #54606e;
+  --steel: #374151;
   --line: rgba(19, 22, 28, 0.13);
   --blue: #2864e8;
   --cyan: #25b8c4;
@@ -8852,4 +8852,196 @@ body:has(.admin-page--authed) {
     align-items: start;
     padding: 16px;
   }
+}
+
+/* High-contrast pass for the interview workspace. */
+.interview-page {
+  color: #111827;
+}
+
+.interview-page .scenario-hero-panel > p,
+.interview-page .scenario-control-panel > p,
+.interview-page .interview-panel p,
+.interview-page .scenario-facts span,
+.interview-page .scenario-proof-grid span,
+.interview-page .scenario-checklist div em,
+.interview-page .material-form label,
+.interview-page .material-actions span,
+.interview-page .material-preview,
+.interview-page .history-card > p,
+.interview-page .history-card-heading em,
+.interview-page .history-list em,
+.interview-page .resume-card span,
+.interview-page .socket-status {
+  color: #334155;
+}
+
+.interview-page .scenario-hero-panel .interview-module-list button > em,
+.interview-page .scenario-hero-panel .interview-module-list button > small,
+.interview-page .scenario-hero-panel .interview-module-list button.is-active > small {
+  color: #374151;
+}
+
+.interview-page .scenario-hero-panel .interview-module-list button > strong {
+  font-weight: 950;
+}
+
+.interview-page .scenario-control-panel .socket-status,
+.interview-page .interview-layout .socket-status {
+  border-color: #b6d2ff;
+  color: #1f3f77;
+  background: #eef6ff;
+}
+
+.interview-page .scenario-checklist {
+  border-color: #bfd7ff;
+  background: #f3f8ff;
+}
+
+.interview-page .scenario-checklist div em {
+  border-color: #c8dcff;
+  background: #ffffff;
+  font-weight: 950;
+}
+
+.interview-page .material-card,
+.interview-page .history-card,
+.interview-page .resume-card,
+.interview-page .transcript-card,
+.interview-page .recording-progress-card {
+  border-color: rgba(15, 23, 42, 0.16);
+}
+
+.interview-page .material-card-heading span,
+.interview-page .history-card-heading span,
+.interview-page .resume-card strong,
+.interview-page .history-list strong,
+.interview-page .file-picker-control,
+.interview-page .material-form input,
+.interview-page .material-form textarea {
+  color: #111827;
+}
+
+.interview-page .material-card-heading em {
+  color: #2d4f05;
+  background: #e5f3be;
+  font-weight: 950;
+}
+
+.interview-page .material-form label > span,
+.interview-page .file-picker-field > span {
+  color: #334155;
+}
+
+.interview-page .material-form input,
+.interview-page .material-form textarea,
+.interview-page .file-picker-control {
+  border-color: rgba(15, 23, 42, 0.16);
+  background: #ffffff;
+}
+
+.interview-page .material-form input::placeholder,
+.interview-page .material-form textarea::placeholder {
+  color: #6b7280;
+  opacity: 1;
+}
+
+.interview-page .file-picker-control strong {
+  color: #ffffff;
+  background: #2864e8;
+}
+
+.interview-page .file-picker-control em {
+  color: #334155;
+  font-weight: 900;
+}
+
+.interview-page .adm-button.mobile-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.interview-page .adm-button.mobile-action-button .adm-button-content,
+.interview-page .adm-button.mobile-action-button .app-icon {
+  color: inherit;
+}
+
+.interview-page .voice-controls .adm-button-fill-solid,
+.interview-page .microphone-actions .adm-button-fill-solid,
+.interview-page .material-actions .adm-button-fill-solid {
+  --background-color: #171a20;
+  --border-color: #171a20;
+  --text-color: #ffffff;
+  color: #ffffff;
+}
+
+.interview-page .scenario-control-panel .material-actions .adm-button-fill-solid {
+  --background-color: #2864e8;
+  --border-color: #2864e8;
+  --text-color: #ffffff;
+  color: #ffffff;
+}
+
+.interview-page .voice-controls .adm-button-fill-solid .adm-button-content,
+.interview-page .microphone-actions .adm-button-fill-solid .adm-button-content,
+.interview-page .material-actions .adm-button-fill-solid .adm-button-content,
+.interview-page .voice-controls .adm-button-fill-solid .app-icon,
+.interview-page .microphone-actions .adm-button-fill-solid .app-icon,
+.interview-page .material-actions .adm-button-fill-solid .app-icon {
+  color: #ffffff !important;
+}
+
+.interview-page .voice-controls .adm-button-fill-outline,
+.interview-page .microphone-actions .adm-button-fill-outline {
+  --background-color: #fffaf0;
+  --border-color: rgba(15, 23, 42, 0.18);
+  --text-color: #111827;
+  color: #111827;
+}
+
+.interview-page .voice-controls .adm-button-fill-outline .adm-button-content,
+.interview-page .microphone-actions .adm-button-fill-outline .adm-button-content,
+.interview-page .voice-controls .adm-button-fill-outline .app-icon,
+.interview-page .microphone-actions .adm-button-fill-outline .app-icon {
+  color: #111827 !important;
+}
+
+.interview-page .adm-button-disabled,
+.interview-page .adm-button:disabled {
+  --background-color: #e2e8f0;
+  --border-color: #cbd5e1;
+  --text-color: #334155;
+  color: #334155;
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.interview-page .adm-button-disabled .adm-button-content,
+.interview-page .adm-button:disabled .adm-button-content,
+.interview-page .adm-button-disabled .app-icon,
+.interview-page .adm-button:disabled .app-icon {
+  color: #334155 !important;
+}
+
+.interview-page .session-pill {
+  color: #174ea6;
+  background: #e8f0fe;
+  font-weight: 950;
+}
+
+.interview-page .credit-pill {
+  border-color: #cbdc8c;
+  color: #365314;
+  background: #edf7c6;
+}
+
+.interview-page .workspace-flow-steps span {
+  color: #374151;
+}
+
+.interview-page .workspace-flow-steps span.is-active {
+  color: #174ea6;
 }
