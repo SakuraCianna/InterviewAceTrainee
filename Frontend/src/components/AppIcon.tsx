@@ -39,6 +39,7 @@ import shieldCheck from "@iconify-icons/lucide/shield-check";
 import sparkles from "@iconify-icons/lucide/sparkles";
 import square from "@iconify-icons/lucide/square";
 import subtitles from "@iconify-icons/lucide/subtitles";
+import trash2 from "@iconify-icons/lucide/trash-2";
 import users from "@iconify-icons/lucide/users";
 import volume2 from "@iconify-icons/lucide/volume-2";
 import type { IconifyIcon } from "@iconify/types";
@@ -85,6 +86,7 @@ const icons: Record<string, IconifyIcon> = {
   "lucide:shield-check": shieldCheck,
   "lucide:sparkles": sparkles,
   "lucide:square": square,
+  "lucide:trash-2": trash2,
   "lucide:triangle-alert": alertTriangle,
   "lucide:users": users,
   "lucide:volume-2": volume2,

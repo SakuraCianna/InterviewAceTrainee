@@ -50,6 +50,14 @@ export function listInterviewHistory() {
   return requestJson<InterviewHistoryItem[]>("/api/interviews/history", credentials, []);
 }
 
+export function deleteInterviewHistoryItem(sessionId: string) {
+  return fetch(`/api/interviews/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+    credentials: "include",
+    headers: csrfHeaders(),
+  });
+}
+
 export function getActiveInterviewSession() {
   return requestJson<InterviewStateResponse>("/api/interviews/active", credentials);
 }

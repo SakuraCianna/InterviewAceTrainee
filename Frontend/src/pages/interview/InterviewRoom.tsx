@@ -28,6 +28,7 @@ import {
 } from "./audio";
 import {
   changePasswordWithEmailCode,
+  deleteInterviewHistoryItem,
   getActiveInterviewSession,
   getCurrentAccount,
   getInterviewSession,
@@ -82,6 +83,7 @@ export function InterviewRoom() {
     defaultSeconds: ACCOUNT_CODE_COOLDOWN_SECONDS,
   });
   const [historyItems, setHistoryItems] = useState<InterviewHistoryItem[]>([]);
+  const [deletingHistorySessionId, setDeletingHistorySessionId] = useState("");
   const [interviewState, setInterviewState] = useState<InterviewStateResponse | null>(null);
   const [activeSession, setActiveSession] = useState<InterviewStateResponse | null>(null);
   const [materialsByType, setMaterialsByType] = useState<Partial<Record<InterviewType, InterviewMaterialResponse>>>({});
@@ -1033,6 +1035,32 @@ export function InterviewRoom() {
     navigate("/interview/room");
   }
 
+  async function deleteHistoryItem(item: InterviewHistoryItem) {
+    if (deletingHistorySessionId) {
+      return;
+    }
+    const confirmed = window.confirm("删除后将无法在最近训练中恢复这场记录，确认删除吗？");
+    if (!confirmed) {
+      return;
+    }
+    setDeletingHistorySessionId(item.session_id);
+    const response = await deleteInterviewHistoryItem(item.session_id);
+    setDeletingHistorySessionId("");
+    if (!response.ok) {
+      setSocketMessage("删除训练记录失败，请刷新后重试。");
+      return;
+    }
+    setHistoryItems((items) => items.filter((historyItem) => historyItem.session_id !== item.session_id));
+    if (activeSession?.session_id === item.session_id) {
+      setActiveSession(null);
+    }
+    if (interviewState?.session_id === item.session_id) {
+      setInterviewState(null);
+      setSessionId(createSessionId());
+    }
+    setSocketMessage("训练记录已删除。");
+  }
+
   async function logout() {
     await logoutAccount();
     window.speechSynthesis?.cancel();
@@ -1054,6 +1082,7 @@ export function InterviewRoom() {
   }
 
   function startFresh() {
+    const isLeavingRoom = routeStage === "room";
     stopRecorder();
     asrSocketRef.current?.close();
     setTranscript("");
@@ -1068,7 +1097,7 @@ export function InterviewRoom() {
     setMicrophoneStatus("idle");
     setMicrophoneLevel(0);
     setSessionId(createSessionId());
-    setSocketMessage("已切换到新训练，选择模块后开始。");
+    setSocketMessage(isLeavingRoom ? "已退出训练，选择模块后可以重新开始。" : "已切换到新训练，选择模块后开始。");
     navigate("/interview");
   }
 
@@ -1532,40 +1561,54 @@ export function InterviewRoom() {
                 </>
               )}
               <Button type="button" className="mobile-action-button" fill="outline" shape="rounded" onClick={startFresh}>
-                <AppIcon icon="lucide:rotate-ccw" size={18} />
-                新训练
+                <AppIcon icon={routeStage === "room" ? "lucide:log-out" : "lucide:rotate-ccw"} size={18} />
+                {routeStage === "room" ? "退出训练" : "新训练"}
               </Button>
             </div>
           )}
 
-          <section className="history-card">
-            <div className="history-card-heading">
-              <span>
-                <AppIcon icon="lucide:history" size={18} />
-                最近训练
-              </span>
-              <em>{historyItems.length} 条</em>
-            </div>
-            {historyItems.length === 0 ? (
-              <p>暂无训练记录。完成第一次模拟后，这里会显示中断恢复入口和历史复盘。</p>
-            ) : (
-              <div className="history-list">
-                {historyItems.slice(0, 5).map((item) => {
-                  const module = moduleByType(item.interview_type);
-                  return (
-                    <button type="button" key={item.session_id} onClick={() => void openHistoryItem(item)}>
-                      <AppIcon icon={module.icon} size={18} />
-                      <span>
-                        <strong>{module.title}</strong>
-                        <em>{formatHistoryDate(item.created_at)} · {statusLabel(item.status)}</em>
-                      </span>
-                      <b>{item.report_total_score ?? `${item.current_step_index + 1}/${item.total_steps}`}</b>
-                    </button>
-                  );
-                })}
+          {isSelectionStage && (
+            <section className="history-card">
+              <div className="history-card-heading">
+                <span>
+                  <AppIcon icon="lucide:history" size={18} />
+                  最近训练
+                </span>
+                <em>{historyItems.length} 条</em>
               </div>
-            )}
-          </section>
+              {historyItems.length === 0 ? (
+                <p>暂无训练记录。完成第一次模拟后，这里会显示中断恢复入口和历史复盘。</p>
+              ) : (
+                <div className="history-list">
+                  {historyItems.slice(0, 5).map((item) => {
+                    const module = moduleByType(item.interview_type);
+                    return (
+                      <article className="history-list-item" key={item.session_id}>
+                        <button type="button" className="history-open-button" onClick={() => void openHistoryItem(item)}>
+                          <AppIcon icon={module.icon} size={18} />
+                          <span>
+                            <strong>{module.title}</strong>
+                            <em>{formatHistoryDate(item.created_at)} · {statusLabel(item.status)}</em>
+                          </span>
+                          <b>{item.report_total_score ?? `${item.current_step_index + 1}/${item.total_steps}`}</b>
+                        </button>
+                        <button
+                          type="button"
+                          className="history-delete-button"
+                          disabled={deletingHistorySessionId === item.session_id}
+                          onClick={() => void deleteHistoryItem(item)}
+                          aria-label={`删除${module.title}训练记录`}
+                        >
+                          <AppIcon icon="lucide:trash-2" size={16} />
+                          {deletingHistorySessionId === item.session_id ? "删除中" : "删除"}
+                        </button>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
 
           {interviewState?.report && (
             <section className="room-report">

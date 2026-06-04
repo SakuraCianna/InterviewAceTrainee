@@ -2,7 +2,7 @@ from collections.abc import Generator
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import TokenClaims, get_current_user_claims
@@ -274,6 +274,17 @@ def read_interview(
     if state is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview_session_not_found")
     return build_answer_response(state)
+
+
+@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_interview(
+    session_id: Annotated[str, Path(min_length=1, max_length=120)],
+    claims: TokenClaims = Depends(get_current_user_claims),
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_interview_store),
+) -> Response:
+    if not interview_store.delete_session(claims["sub"], session_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview_session_not_found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{session_id}/answers", response_model=InterviewAnswerResponse)

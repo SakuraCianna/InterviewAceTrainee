@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models.entities import InterviewMaterial, InterviewReport, InterviewSession, InterviewTurn
@@ -653,6 +653,13 @@ class InMemoryInterviewRuntimeStore:
         state = self.get_session(user_email, session_id)
         return None if state is None else state.report
 
+    def delete_session(self, user_email: str, session_id: str) -> bool:
+        record = self._sessions.get(session_id)
+        if record is None or record["user_email"] != user_email:
+            return False
+        del self._sessions[session_id]
+        return True
+
     def list_user_sessions(self, user_email: str, limit: int = 20) -> list[InterviewHistoryRecord]:
         records = [
             record
@@ -821,6 +828,19 @@ class DatabaseInterviewRuntimeStore:
         if report is None:
             return None
         return InterviewReportResponse.model_validate(report.report_json)
+
+    def delete_session(self, user_email: str, session_id: str) -> bool:
+        session_model = self._find_session(user_email, session_id)
+        if session_model is None:
+            return False
+        self._session.execute(delete(InterviewReport).where(InterviewReport.session_id == session_id))
+        self._session.execute(delete(InterviewTurn).where(InterviewTurn.session_id == session_id))
+        self._session.delete(session_model)
+        if self._commit_on_write:
+            self._session.commit()
+        else:
+            self._session.flush()
+        return True
 
     def list_user_sessions(self, user_email: str, limit: int = 20) -> list[InterviewHistoryRecord]:
         sessions = list(
