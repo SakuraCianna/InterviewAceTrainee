@@ -130,6 +130,7 @@ export function InterviewRoom() {
   const currentMaterial = materialsByType[selectedModule.type] ?? null;
   const selectedModuleNeedsMaterial = selectedModule.type === "job" || selectedModule.type === "postgraduate";
   const isSelectionStage = routeStage === "select";
+  const shouldShowWorkspaceHeader = routeStage !== "room";
   const activeQuestion = interviewState?.current_question ?? activeSession?.current_question ?? null;
   const progressText = interviewState
     ? `${Math.min(interviewState.current_step_index + 1, interviewState.total_steps)} / ${interviewState.total_steps}`
@@ -1097,7 +1098,7 @@ export function InterviewRoom() {
     </div>
   ) : null;
 
-  const accountSettingsPanel = currentUser && isSettingsOpen ? (
+  const accountSettingsPanel = currentUser && isSettingsOpen && shouldShowWorkspaceHeader ? (
     <AccountSettingsPanel
       email={currentUser.email}
       code={accountCode}
@@ -1116,7 +1117,7 @@ export function InterviewRoom() {
   if (routeStage === "check") {
     return (
       <main className="workspace-page interview-page">
-        <header className="workspace-header">
+        <header className="workspace-header interview-workspace-header interview-workspace-header--check">
           <a href="/" className="brand-mark">
             <BrandLogo size={28} />
             面霸练习生
@@ -1229,39 +1230,41 @@ export function InterviewRoom() {
 
   return (
     <main className="workspace-page interview-page">
-      <header className="workspace-header">
-        <a href="/" className="brand-mark">
-          <BrandLogo size={28} />
-          面霸练习生
-        </a>
-        {isSelectionStage && (
-          <div className="workspace-flow-steps" aria-label="训练流程">
-            <span className="is-active">1 选场景</span>
-            <span>2 补资料</span>
-            <span>3 设备检测</span>
-            <span>4 语音面试</span>
-          </div>
-        )}
-        <div className="workspace-header-actions">
-          <span className="session-pill">{socketState} · {isSelectionStage ? "选择场景" : progressText}</span>
-          <span className="credit-pill">
-            <AppIcon icon="lucide:coins" size={16} />
-            {accountQuotaText}
-          </span>
-          {currentUser && (
-            <>
-              <button type="button" className={`logout-button account-button${isSettingsOpen ? " is-active" : ""}`} onClick={() => setIsSettingsOpen((value) => !value)}>
-                <AppIcon icon="lucide:settings-2" size={16} />
-                设置
-              </button>
-              <button type="button" className="logout-button" onClick={() => void logout()}>
-                <AppIcon icon="lucide:log-out" size={16} />
-                退出
-              </button>
-            </>
+      {shouldShowWorkspaceHeader && (
+        <header className={`workspace-header interview-workspace-header interview-workspace-header--${routeStage}`}>
+          <a href="/" className="brand-mark">
+            <BrandLogo size={28} />
+            面霸练习生
+          </a>
+          {isSelectionStage && (
+            <div className="workspace-flow-steps" aria-label="训练流程">
+              <span className="is-active">1 选场景</span>
+              <span>2 补资料</span>
+              <span>3 设备检测</span>
+              <span>4 语音面试</span>
+            </div>
           )}
-        </div>
-      </header>
+          <div className="workspace-header-actions">
+            <span className="session-pill">{socketState} · {isSelectionStage ? "选择场景" : progressText}</span>
+            <span className="credit-pill">
+              <AppIcon icon="lucide:coins" size={16} />
+              {accountQuotaText}
+            </span>
+            {currentUser && (
+              <>
+                <button type="button" className={`logout-button account-button${isSettingsOpen ? " is-active" : ""}`} onClick={() => setIsSettingsOpen((value) => !value)}>
+                  <AppIcon icon="lucide:settings-2" size={16} />
+                  设置
+                </button>
+                <button type="button" className="logout-button" onClick={() => void logout()}>
+                  <AppIcon icon="lucide:log-out" size={16} />
+                  退出
+                </button>
+              </>
+            )}
+          </div>
+        </header>
+      )}
       {accountSettingsPanel}
 
       <section className={isSelectionStage ? "interview-entry-layout" : "interview-layout"}>

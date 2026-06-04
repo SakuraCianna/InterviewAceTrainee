@@ -5116,19 +5116,41 @@ button {
 }
 
 /* Final launchpad polish */
+.interview-workspace-header {
+  display: grid;
+  grid-template-columns: auto minmax(360px, 1fr) auto;
+  gap: clamp(12px, 2vw, 26px);
+  width: min(1780px, 100%);
+  max-width: none;
+}
+
+.interview-workspace-header .brand-mark {
+  min-width: max-content;
+}
+
+.interview-workspace-header .workspace-header-actions {
+  justify-self: end;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
 .workspace-flow-steps {
-  position: absolute;
-  left: 50%;
-  top: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
+  justify-self: center;
   gap: 6px;
+  max-width: 100%;
   padding: 5px;
+  overflow-x: auto;
   border: 1px solid rgba(218, 220, 224, 0.72);
   border-radius: 999px;
   background: rgba(241, 243, 244, 0.9);
-  transform: translate(-50%, -50%);
+  scrollbar-width: none;
+}
+
+.workspace-flow-steps::-webkit-scrollbar {
+  display: none;
 }
 
 .workspace-flow-steps span {
@@ -5368,6 +5390,17 @@ button {
 }
 
 @media (max-width: 560px) {
+  .interview-workspace-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .interview-workspace-header .workspace-header-actions {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
   .scenario-hero-panel h1 {
     font-size: clamp(40px, 15vw, 58px);
   }
