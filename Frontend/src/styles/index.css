@@ -9604,3 +9604,33 @@ body:has(.admin-page--authed) {
     align-items: stretch;
   }
 }
+
+/* Final button contrast guard: every blue action button must keep white text. */
+.interview-page .adm-button-color-primary:not(.adm-button-disabled),
+.interview-page .material-actions .adm-button-fill-solid:not(.adm-button-disabled),
+.interview-page .voice-controls .adm-button-fill-solid:not(.adm-button-disabled),
+.interview-page .microphone-actions .adm-button-fill-solid:not(.adm-button-disabled),
+.interview-page .voice-controls .adm-button:nth-child(2):not(.adm-button-disabled) {
+  --background-color: #2864e8;
+  --border-color: #2864e8;
+  --text-color: #ffffff;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff;
+}
+
+.interview-page .adm-button-color-primary:not(.adm-button-disabled) *,
+.interview-page .material-actions .adm-button-fill-solid:not(.adm-button-disabled) *,
+.interview-page .voice-controls .adm-button-fill-solid:not(.adm-button-disabled) *,
+.interview-page .microphone-actions .adm-button-fill-solid:not(.adm-button-disabled) *,
+.interview-page .voice-controls .adm-button:nth-child(2):not(.adm-button-disabled) * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff;
+}
+
+.interview-page .adm-button-color-primary:not(.adm-button-disabled) .app-icon,
+.interview-page .material-actions .adm-button-fill-solid:not(.adm-button-disabled) .app-icon,
+.interview-page .voice-controls .adm-button-fill-solid:not(.adm-button-disabled) .app-icon,
+.interview-page .microphone-actions .adm-button-fill-solid:not(.adm-button-disabled) .app-icon,
+.interview-page .voice-controls .adm-button:nth-child(2):not(.adm-button-disabled) .app-icon {
+  color: #ffffff !important;
+}
