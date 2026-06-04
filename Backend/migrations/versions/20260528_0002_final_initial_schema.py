@@ -95,6 +95,12 @@ def upgrade() -> None:
     )
     op.create_index("ix_interview_sessions_user_email", "interview_sessions", ["user_email"])
     op.create_index("ix_interview_sessions_material_id", "interview_sessions", ["material_id"])
+    op.create_index(
+        "ix_interview_sessions_user_status_created",
+        "interview_sessions",
+        ["user_email", "status", "created_at"],
+    )
+    op.create_index("ix_interview_sessions_user_created", "interview_sessions", ["user_email", "created_at"])
 
     op.create_table(
         "interview_materials",
@@ -129,6 +135,7 @@ def upgrade() -> None:
         sa.Column("answered_at", sa.DateTime(), nullable=True),
     )
     op.create_index("ix_interview_turns_session_id", "interview_turns", ["session_id"])
+    op.create_index("ix_interview_turns_session_turn", "interview_turns", ["session_id", "turn_index"])
 
     op.create_table(
         "interview_reports",
@@ -139,6 +146,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
     )
     op.create_index("ix_interview_reports_session_id", "interview_reports", ["session_id"])
+    op.create_index("ix_interview_reports_session_created", "interview_reports", ["session_id", "created_at"])
 
     op.create_table(
         "ai_provider_configs",
@@ -185,6 +193,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
     )
     op.create_index("ix_ai_call_logs_session_id", "ai_call_logs", ["session_id"])
+    op.create_index("ix_ai_call_logs_created_at", "ai_call_logs", ["created_at"])
 
     op.create_table(
         "content_safety_logs",
@@ -205,6 +214,7 @@ def upgrade() -> None:
     op.create_index("ix_content_safety_logs_source", "content_safety_logs", ["source"])
     op.create_index("ix_content_safety_logs_action", "content_safety_logs", ["action"])
     op.create_index("ix_content_safety_logs_risk_level", "content_safety_logs", ["risk_level"])
+    op.create_index("ix_content_safety_logs_created_at", "content_safety_logs", ["created_at"])
 
     op.create_table(
         "auth_login_logs",
@@ -219,6 +229,8 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
     )
     op.create_index("ix_auth_login_logs_email", "auth_login_logs", ["email"])
+    op.create_index("ix_auth_login_logs_created_at", "auth_login_logs", ["created_at"])
+    op.create_index("ix_auth_login_logs_email_created", "auth_login_logs", ["email", "created_at"])
 
     op.create_table(
         "customer_service_notes",
@@ -282,26 +294,34 @@ def downgrade() -> None:
     op.drop_index("ix_customer_service_notes_admin_email", table_name="customer_service_notes")
     op.drop_index("ix_customer_service_notes_user_email", table_name="customer_service_notes")
     op.drop_table("customer_service_notes")
+    op.drop_index("ix_auth_login_logs_email_created", table_name="auth_login_logs")
+    op.drop_index("ix_auth_login_logs_created_at", table_name="auth_login_logs")
     op.drop_index("ix_auth_login_logs_email", table_name="auth_login_logs")
     op.drop_table("auth_login_logs")
+    op.drop_index("ix_content_safety_logs_created_at", table_name="content_safety_logs")
     op.drop_index("ix_content_safety_logs_risk_level", table_name="content_safety_logs")
     op.drop_index("ix_content_safety_logs_action", table_name="content_safety_logs")
     op.drop_index("ix_content_safety_logs_source", table_name="content_safety_logs")
     op.drop_index("ix_content_safety_logs_session_id", table_name="content_safety_logs")
     op.drop_index("ix_content_safety_logs_user_email", table_name="content_safety_logs")
     op.drop_table("content_safety_logs")
+    op.drop_index("ix_ai_call_logs_created_at", table_name="ai_call_logs")
     op.drop_index("ix_ai_call_logs_session_id", table_name="ai_call_logs")
     op.drop_table("ai_call_logs")
     op.drop_table("system_configs")
     op.drop_index("ix_ai_provider_configs_provider_type", table_name="ai_provider_configs")
     op.drop_table("ai_provider_configs")
+    op.drop_index("ix_interview_reports_session_created", table_name="interview_reports")
     op.drop_index("ix_interview_reports_session_id", table_name="interview_reports")
     op.drop_table("interview_reports")
+    op.drop_index("ix_interview_turns_session_turn", table_name="interview_turns")
     op.drop_index("ix_interview_turns_session_id", table_name="interview_turns")
     op.drop_table("interview_turns")
     op.drop_index("ix_interview_materials_interview_type", table_name="interview_materials")
     op.drop_index("ix_interview_materials_user_email", table_name="interview_materials")
     op.drop_table("interview_materials")
+    op.drop_index("ix_interview_sessions_user_created", table_name="interview_sessions")
+    op.drop_index("ix_interview_sessions_user_status_created", table_name="interview_sessions")
     op.drop_index("ix_interview_sessions_material_id", table_name="interview_sessions")
     op.drop_index("ix_interview_sessions_user_email", table_name="interview_sessions")
     op.drop_table("interview_sessions")
