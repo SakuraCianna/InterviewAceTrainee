@@ -98,6 +98,7 @@ export function InterviewRoom() {
   const [isRecording, setIsRecording] = useState(false);
   const [isPreparingAnswer, setIsPreparingAnswer] = useState(false);
   const [isFinishingAnswer, setIsFinishingAnswer] = useState(false);
+  const [isQuestionSpeaking, setIsQuestionSpeaking] = useState(false);
   const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
   const [answerLimitMs, setAnswerLimitMs] = useState(ANSWER_LIMIT_MS);
   const [silenceRemainingMs, setSilenceRemainingMs] = useState(SILENCE_AUTO_FINISH_MS);
@@ -123,6 +124,9 @@ export function InterviewRoom() {
   const noiseFloorRef = useRef(0.006);
   const voiceFrameCountRef = useRef(0);
   const autoFinishingRef = useRef(false);
+  const isQuestionSpeakingRef = useRef(false);
+  const questionAudioRef = useRef<HTMLAudioElement | null>(null);
+  const questionSpeechTokenRef = useRef(0);
   const finalTranscriptWaiterRef = useRef<TranscriptWaiter | null>(null);
   const microphoneTestRef = useRef<MicrophoneTestSession | null>(null);
   const microphoneAnimationRef = useRef<number | null>(null);
@@ -141,6 +145,7 @@ export function InterviewRoom() {
   const accountQuotaText = currentUser
     ? `${currentUser.credit_balance} 次${currentUser.trial_voucher_count > 0 ? ` / 体验券 ${currentUser.trial_voucher_count} 张` : ""}`
     : "未登录";
+  const canReplayQuestion = Boolean(interviewState?.current_question) && !isQuestionSpeaking && !isRecording && !isPreparingAnswer && !isFinishingAnswer;
 
   const socketSessionId = useMemo(() => interviewState?.session_id ?? activeSession?.session_id ?? sessionId, [activeSession, interviewState, sessionId]);
 
@@ -159,6 +164,9 @@ export function InterviewRoom() {
 
   useEffect(() => {
     return () => {
+      questionSpeechTokenRef.current += 1;
+      questionAudioRef.current?.pause();
+      questionAudioRef.current = null;
       window.speechSynthesis?.cancel();
       stopRecorder();
       stopMicrophoneTest();
@@ -595,24 +603,61 @@ export function InterviewRoom() {
     setSocketMessage(data.interview_type === "job" ? "简历和岗位要求已分析，可以开始工作面试。" : "复试院校和专业信息已保存，可以开始模拟。");
   }
 
-  function speakQuestionWithBrowser(questionText: string, interviewType?: InterviewType) {
-    if (!questionText || !window.speechSynthesis) {
+  function setQuestionSpeakingState(value: boolean) {
+    isQuestionSpeakingRef.current = value;
+    setIsQuestionSpeaking(value);
+  }
+
+  function beginQuestionSpeech() {
+    questionSpeechTokenRef.current += 1;
+    const token = questionSpeechTokenRef.current;
+    questionAudioRef.current?.pause();
+    questionAudioRef.current = null;
+    window.speechSynthesis?.cancel();
+    setQuestionSpeakingState(true);
+    setStateIndex(1);
+    return token;
+  }
+
+  function finishQuestionSpeech(token: number) {
+    if (token !== questionSpeechTokenRef.current) {
       return;
     }
-    window.speechSynthesis.cancel();
+    questionAudioRef.current = null;
+    setQuestionSpeakingState(false);
+    setStateIndex(0);
+  }
+
+  function stopQuestionSpeech() {
+    questionSpeechTokenRef.current += 1;
+    questionAudioRef.current?.pause();
+    questionAudioRef.current = null;
+    window.speechSynthesis?.cancel();
+    setQuestionSpeakingState(false);
+    setStateIndex(0);
+  }
+
+  function speakQuestionWithBrowser(questionText: string, interviewType?: InterviewType, existingToken?: number) {
+    if (!questionText || !window.speechSynthesis) {
+      if (existingToken) {
+        finishQuestionSpeech(existingToken);
+      }
+      return;
+    }
+    const token = existingToken ?? beginQuestionSpeech();
     const utterance = new SpeechSynthesisUtterance(questionText);
     utterance.lang = interviewType === "ielts" ? "en-US" : "zh-CN";
     utterance.rate = interviewType === "ielts" ? 0.92 : 0.98;
-    setStateIndex(1);
-    utterance.onend = () => setStateIndex(0);
+    utterance.onend = () => finishQuestionSpeech(token);
+    utterance.onerror = () => finishQuestionSpeech(token);
     window.speechSynthesis.speak(utterance);
   }
 
   async function speakQuestion(questionText?: string, interviewType?: InterviewType, targetSessionId = socketSessionId) {
-    if (!questionText) {
+    if (!questionText || isQuestionSpeakingRef.current) {
       return;
     }
-    setStateIndex(1);
+    const token = beginQuestionSpeech();
     try {
       const { response, data } = await synthesizeQuestionSpeech({
         text: questionText,
@@ -622,17 +667,22 @@ export function InterviewRoom() {
       if (!response.ok || !data.audio_base64 || !data.mime_type) {
         throw new Error(getApiErrorMessage(data, "语音合成失败。"));
       }
-      window.speechSynthesis?.cancel();
       const audio = new Audio(`data:${data.mime_type};base64,${data.audio_base64}`);
-      audio.onended = () => setStateIndex(0);
+      questionAudioRef.current = audio;
+      audio.onended = () => finishQuestionSpeech(token);
       audio.onerror = () => {
-        setStateIndex(0);
-        speakQuestionWithBrowser(questionText, interviewType);
+        if (token === questionSpeechTokenRef.current) {
+          questionAudioRef.current = null;
+          speakQuestionWithBrowser(questionText, interviewType, token);
+        }
       };
       await audio.play();
     } catch {
+      if (token === questionSpeechTokenRef.current) {
+        questionAudioRef.current = null;
+      }
       setSocketMessage("腾讯云语音合成暂时不可用，已切换为浏览器本地播报。");
-      speakQuestionWithBrowser(questionText, interviewType);
+      speakQuestionWithBrowser(questionText, interviewType, token);
     }
   }
 
@@ -894,6 +944,10 @@ export function InterviewRoom() {
     if (isFinishingAnswer) {
       return;
     }
+    if (isQuestionSpeaking) {
+      setSocketMessage("请等面试官播报结束后再开始回答。");
+      return;
+    }
 
     const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
     if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) {
@@ -1063,7 +1117,7 @@ export function InterviewRoom() {
 
   async function logout() {
     await logoutAccount();
-    window.speechSynthesis?.cancel();
+    stopQuestionSpeech();
     stopRecorder();
     stopMicrophoneTest();
     asrSocketRef.current?.close();
@@ -1083,6 +1137,7 @@ export function InterviewRoom() {
 
   function startFresh() {
     const isLeavingRoom = routeStage === "room";
+    stopQuestionSpeech();
     stopRecorder();
     asrSocketRef.current?.close();
     setTranscript("");
@@ -1475,7 +1530,7 @@ export function InterviewRoom() {
               <div className="material-actions">
                 <Button
                   type="button"
-                  className="mobile-action-button"
+                  className="mobile-action-button action-button-primary"
                   color="primary"
                   shape="rounded"
                   loading={isPreparingMaterial}
@@ -1501,7 +1556,7 @@ export function InterviewRoom() {
               {!interviewState ? (
                 <Button
                   type="button"
-                  className="mobile-action-button"
+                  className="mobile-action-button action-button-primary"
                   color="primary"
                   shape="rounded"
                   loading={isStartingSession}
@@ -1525,11 +1580,11 @@ export function InterviewRoom() {
                 <>
                   <Button
                     type="button"
-                    className="mobile-action-button"
+                    className="mobile-action-button action-button-dark"
                     color="primary"
                     shape="rounded"
                     loading={isPreparingAnswer}
-                    disabled={isRecording || isPreparingAnswer || isFinishingAnswer}
+                    disabled={isRecording || isPreparingAnswer || isFinishingAnswer || isQuestionSpeaking}
                     onClick={() => void startAnswer()}
                   >
                     <AppIcon icon="lucide:mic" size={18} />
@@ -1537,7 +1592,7 @@ export function InterviewRoom() {
                   </Button>
                   <Button
                     type="button"
-                    className="mobile-action-button"
+                    className="mobile-action-button action-button-primary"
                     color="primary"
                     shape="rounded"
                     loading={isFinishingAnswer}
@@ -1549,18 +1604,23 @@ export function InterviewRoom() {
                   </Button>
                   <Button
                     type="button"
-                    className="mobile-action-button"
+                    className="mobile-action-button action-button-secondary"
                     fill="outline"
                     shape="rounded"
-                    disabled={isRecording || isPreparingAnswer || isFinishingAnswer}
-                    onClick={() => void speakQuestion(interviewState.current_question?.text, interviewState.interview_type, interviewState.session_id)}
+                    disabled={!canReplayQuestion}
+                    onClick={() => {
+                      if (!canReplayQuestion) {
+                        return;
+                      }
+                      void speakQuestion(interviewState.current_question?.text, interviewState.interview_type, interviewState.session_id);
+                    }}
                   >
                     <AppIcon icon="lucide:volume-2" size={18} />
-                    重播问题
+                    {isQuestionSpeaking ? "正在播报" : "重播问题"}
                   </Button>
                 </>
               )}
-              <Button type="button" className="mobile-action-button" fill="outline" shape="rounded" onClick={startFresh}>
+              <Button type="button" className="mobile-action-button action-button-dark" fill="outline" shape="rounded" onClick={startFresh}>
                 <AppIcon icon={routeStage === "room" ? "lucide:log-out" : "lucide:rotate-ccw"} size={18} />
                 {routeStage === "room" ? "退出训练" : "新训练"}
               </Button>

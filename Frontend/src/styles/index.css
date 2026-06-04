@@ -9643,3 +9643,85 @@ body:has(.admin-page--authed) {
   color: #ffffff !important;
   -webkit-text-fill-color: #ffffff;
 }
+
+/* Semantic button contrast: do not rely on button order or library defaults. */
+.interview-page .action-button-primary:not(.adm-button-disabled):not(:disabled) {
+  --background-color: #2864e8;
+  --border-color: #2864e8;
+  --text-color: #ffffff;
+  color: #ffffff !important;
+  background: #2864e8;
+  border-color: #2864e8;
+  -webkit-text-fill-color: #ffffff;
+}
+
+.interview-page .action-button-dark:not(.adm-button-disabled):not(:disabled) {
+  --background-color: #171a20;
+  --border-color: #171a20;
+  --text-color: #ffffff;
+  color: #ffffff !important;
+  background: #171a20;
+  border-color: #171a20;
+  -webkit-text-fill-color: #ffffff;
+}
+
+.interview-page .action-button-primary:not(.adm-button-disabled):not(:disabled) *,
+.interview-page .action-button-dark:not(.adm-button-disabled):not(:disabled) * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff;
+}
+
+.interview-page .action-button-secondary:not(.adm-button-disabled):not(:disabled) {
+  --background-color: #fffaf0;
+  --border-color: rgba(15, 23, 42, 0.18);
+  --text-color: #111827;
+  color: #111827 !important;
+  background: #fffaf0;
+  border-color: rgba(15, 23, 42, 0.18);
+  -webkit-text-fill-color: #111827;
+}
+
+.interview-page .action-button-secondary:not(.adm-button-disabled):not(:disabled) * {
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827;
+}
+
+.interview-page .mobile-action-button.adm-button-disabled,
+.interview-page .mobile-action-button:disabled {
+  --background-color: #e2e8f0;
+  --border-color: #cbd5e1;
+  --text-color: #334155;
+  color: #334155 !important;
+  background: #e2e8f0;
+  border-color: #cbd5e1;
+  -webkit-text-fill-color: #334155;
+  opacity: 1;
+}
+
+.interview-page .mobile-action-button.adm-button-disabled *,
+.interview-page .mobile-action-button:disabled * {
+  color: #334155 !important;
+  -webkit-text-fill-color: #334155;
+}
+
+.mianba-primary,
+.mianba-nav-action,
+.mianba-final-action,
+.auth-submit.adm-button,
+.admin-auth-submit,
+.admin-page.admin-page--authed .admin-primary-button,
+.admin-page.admin-page--authed .provider-row button.is-enabled {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff;
+}
+
+.mianba-primary *,
+.mianba-nav-action *,
+.mianba-final-action *,
+.auth-submit.adm-button *,
+.admin-auth-submit *,
+.admin-page.admin-page--authed .admin-primary-button *,
+.admin-page.admin-page--authed .provider-row button.is-enabled * {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff;
+}
