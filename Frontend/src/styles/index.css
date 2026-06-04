@@ -9634,3 +9634,12 @@ body:has(.admin-page--authed) {
 .interview-page .voice-controls .adm-button:nth-child(2):not(.adm-button-disabled) .app-icon {
   color: #ffffff !important;
 }
+
+.interview-page .material-actions .mobile-action-button:not(.adm-button-disabled),
+.interview-page .material-actions .mobile-action-button:not(.adm-button-disabled) .adm-button-content,
+.interview-page .material-actions .mobile-action-button:not(.adm-button-disabled) .app-icon,
+.interview-page .material-actions .mobile-action-button:not(.adm-button-disabled) span,
+.interview-page .material-actions .mobile-action-button:not(.adm-button-disabled) svg {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff;
+}
