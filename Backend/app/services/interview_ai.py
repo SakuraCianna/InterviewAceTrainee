@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import re
 
 from app.schemas.interviews import InterviewType
@@ -20,6 +21,31 @@ SELF_REFERENCE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 NUMBERING_PATTERN = re.compile(r"^\s*(?:[-*•]+|\d+[.、)]|[（(]?\d+[）)])\s*")
+MEANINGFUL_TOKEN_PATTERN = re.compile(r"[\u4e00-\u9fffA-Za-z0-9]+")
+ENGLISH_WORD_PATTERN = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
+FILLER_ANSWER_PATTERN = re.compile(
+    r"^(?:你?好|您好|嗯+|啊+|额+|呃+|哦+|好+|行+|谢谢|没了|不会|不知道|没有|"
+    r"hello|hi|hey|thanks|thankyou|idontknow|nothing|noidea)+$",
+    re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class AnswerQualityDecision:
+    acceptable: bool
+    reason_code: str | None = None
+    retry_question: str | None = None
+
+
+MIN_CHINESE_ANSWER_CHARS = 24
+MIN_ENGLISH_ANSWER_WORDS = 8
+
+SCENARIO_SIGNAL_KEYWORDS: dict[InterviewType, tuple[str, ...]] = {
+    InterviewType.JOB: ("项目", "岗位", "职责", "负责", "技术", "业务", "用户", "指标", "方案", "团队", "简历", "JD"),
+    InterviewType.POSTGRADUATE: ("专业", "学校", "院校", "本科", "课程", "研究", "方向", "导师", "论文", "项目", "复试", "报考"),
+    InterviewType.CIVIL_SERVICE: ("群众", "基层", "政策", "依法", "组织", "协调", "沟通", "落实", "风险", "服务", "应急"),
+    InterviewType.IELTS: ("because", "example", "usually", "prefer", "think", "feel", "reason", "experience", "sometimes"),
+}
 
 
 def build_followup_messages(
@@ -34,18 +60,22 @@ def build_followup_messages(
         InterviewType.JOB: (
             "你正在扮演一位中文工作面试官。追问要像真实技术面或 HR 面现场发问："
             "只抓上一轮回答里的一个缺口、矛盾或亮点继续问，不要讲道理，不要总结表现。"
+            "上一轮回答必须影响下一问；如果回答明显空泛，要继续围绕同一主题要求补充证据。"
         ),
         InterviewType.POSTGRADUATE: (
             "你正在扮演一位中文研究生复试面试官。追问要贴近复试现场："
             "围绕专业基础、科研兴趣、文献阅读、导师沟通或学术规范，只问一个具体问题。"
+            "上一轮回答必须影响下一问；如果回答没有回应问题，要继续围绕同一主题要求补充。"
         ),
         InterviewType.CIVIL_SERVICE: (
             "你正在扮演一位中文公务员结构化面试考官。追问要有考场感，"
             "关注审题、群众立场、依法行政、组织协调、应急处置和公共服务价值观。"
+            "上一轮回答必须影响下一问；如果回答只给口号或偏题，要继续要求落到措施。"
         ),
         InterviewType.IELTS: (
             "You are an IELTS speaking examiner in a real speaking test. Ask in English only. "
-            "Ask one short follow-up question that sounds spoken, direct and examiner-like."
+            "Ask one short follow-up question that sounds spoken, direct and examiner-like. "
+            "The candidate's last answer must affect the next question; if it is vague, ask for a concrete detail on the same topic."
         ),
     }
     tone_rule = (
@@ -97,6 +127,101 @@ def build_followup_messages(
     ]
 
 
+def assess_answer_quality(
+    interview_type: InterviewType,
+    current_question: str,
+    answer_text: str,
+    round_name: str,
+) -> AnswerQualityDecision:
+    """判断回答是否足以推进到下一轮。
+
+    这里不用 LLM, 是为了在模型不可用、限流或输出不稳定时仍能守住面试流程底线:
+    明显过短、敷衍或逃避的回答必须留在当前题继续追问。
+    """
+
+    normalized = _compact_meaningful_answer(answer_text)
+    if not normalized:
+        return _retry_decision(interview_type, current_question, answer_text, round_name, "empty")
+    if FILLER_ANSWER_PATTERN.fullmatch(normalized):
+        return _retry_decision(interview_type, current_question, answer_text, round_name, "filler")
+
+    chinese_chars = re.findall(r"[\u4e00-\u9fff]", answer_text)
+    english_words = ENGLISH_WORD_PATTERN.findall(answer_text)
+    if interview_type == InterviewType.IELTS:
+        if len(english_words) < MIN_ENGLISH_ANSWER_WORDS:
+            return _retry_decision(interview_type, current_question, answer_text, round_name, "too_short")
+        if len(english_words) < 16 and not _contains_any(answer_text, SCENARIO_SIGNAL_KEYWORDS[interview_type]):
+            return _retry_decision(interview_type, current_question, answer_text, round_name, "too_generic")
+        return AnswerQualityDecision(acceptable=True)
+
+    meaningful_chars = len(chinese_chars) + sum(len(word) for word in english_words)
+    if len(chinese_chars) < MIN_CHINESE_ANSWER_CHARS and meaningful_chars < 36:
+        return _retry_decision(interview_type, current_question, answer_text, round_name, "too_short")
+    if meaningful_chars < 70 and not _contains_any(answer_text, SCENARIO_SIGNAL_KEYWORDS[interview_type]):
+        return _retry_decision(interview_type, current_question, answer_text, round_name, "too_generic")
+    return AnswerQualityDecision(acceptable=True)
+
+
+def _retry_decision(
+    interview_type: InterviewType,
+    current_question: str,
+    answer_text: str,
+    round_name: str,
+    reason_code: str,
+) -> AnswerQualityDecision:
+    return AnswerQualityDecision(
+        acceptable=False,
+        reason_code=reason_code,
+        retry_question=build_retry_question(interview_type, current_question, answer_text, round_name, reason_code),
+    )
+
+
+def build_retry_question(
+    interview_type: InterviewType,
+    current_question: str,
+    answer_text: str,
+    round_name: str,
+    reason_code: str,
+) -> str:
+    excerpt = _answer_excerpt(answer_text)
+    if interview_type == InterviewType.IELTS:
+        if reason_code == "filler":
+            return (
+                f"Your last answer was only '{excerpt}', so I cannot assess this part yet. "
+                "Please answer the same question again with one reason and one specific detail?"
+            )
+        return "Please stay on this question and give a fuller answer with a reason, an example, and one extra detail?"
+
+    scenario_guides = {
+        InterviewType.JOB: "项目背景、你的职责、关键动作和可验证结果",
+        InterviewType.POSTGRADUATE: "专业背景、报考动机、院校或专业理解和一个能证明基础的经历",
+        InterviewType.CIVIL_SERVICE: "观点判断、群众或公共服务立场、具体措施和风险兜底",
+        InterviewType.IELTS: "",
+    }
+    if reason_code == "filler":
+        return f"你刚才只回答了「{excerpt}」，这还不足以判断本轮表现，我不会进入下一题。请继续回答这道题，补充{scenario_guides[interview_type]}？"
+    if reason_code == "too_generic":
+        return f"这轮回答还没有落到「{round_name}」需要看的信息。请围绕刚才的问题，补充{scenario_guides[interview_type]}？"
+    return f"这轮回答太短，我不会进入下一题。请重新回答刚才的问题，并补充{scenario_guides[interview_type]}？"
+
+
+def _compact_meaningful_answer(answer_text: str) -> str:
+    tokens = MEANINGFUL_TOKEN_PATTERN.findall(answer_text.lower())
+    return "".join(tokens)
+
+
+def _answer_excerpt(answer_text: str) -> str:
+    compacted = re.sub(r"\s+", " ", answer_text).strip()
+    if not compacted:
+        return "空白"
+    return compacted[:28]
+
+
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    lowered = text.lower()
+    return any(keyword.lower() in lowered for keyword in keywords)
+
+
 def clean_generated_question(
     raw_text: str | None,
     interview_type: InterviewType,
@@ -116,6 +241,23 @@ def clean_generated_question(
     if _looks_like_meta_answer(text):
         return fallback_question
     return _ensure_question_mark(text, interview_type)
+
+
+def build_contextual_fallback_question(
+    interview_type: InterviewType,
+    answer_text: str,
+    next_round_name: str,
+    next_static_question: str,
+) -> str:
+    anchor = _answer_excerpt(answer_text)
+    static_question = _trim_question_ending(next_static_question)
+    if interview_type == InterviewType.IELTS:
+        return f"You mentioned \"{anchor}\". For {next_round_name}, {static_question}?"
+    return f"你刚才提到「{anchor}」，接下来进入「{next_round_name}」，请结合这个背景回答：{static_question}？"
+
+
+def _trim_question_ending(question: str) -> str:
+    return question.strip().rstrip("。？！?!；;：:")
 
 
 def _compact_generated_text(raw_text: str | None) -> str:
@@ -188,5 +330,5 @@ def generate_next_interview_question(
                 decision=output_decision,
                 content=result.value.content,
             )
-        return next_static_question
-    return clean_generated_question(result.value.content, interview_type, next_static_question)
+        return None
+    return clean_generated_question(result.value.content, interview_type, None)

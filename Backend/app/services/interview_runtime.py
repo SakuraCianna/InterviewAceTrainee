@@ -56,6 +56,14 @@ class InterviewSessionNotFoundError(LookupError):
     """Raised when a session is not owned by the current user or does not exist."""
 
 
+def _merge_answer_attempt(existing_answer: str | None, answer_text: str, retry_requested: bool) -> str:
+    clean_answer = answer_text.strip()
+    if not existing_answer:
+        return f"需补充回答：{clean_answer}" if retry_requested else clean_answer
+    prefix = "需继续补充：" if retry_requested else "补充回答："
+    return f"{existing_answer.strip()}\n{prefix}{clean_answer}"
+
+
 def build_interview_steps(
     interview_type: InterviewType,
     material_context: InterviewMaterialContext | None = None,
@@ -625,6 +633,7 @@ class InMemoryInterviewRuntimeStore:
         session_id: str,
         answer_text: str,
         next_question_override: str | None = None,
+        retry_question_override: str | None = None,
     ) -> InterviewState:
         record = self._sessions.get(session_id)
         if record is None or record["user_email"] != user_email:
@@ -633,7 +642,11 @@ class InMemoryInterviewRuntimeStore:
             return self._to_state(record)
 
         index = record["current_step_index"]
-        record["answers"][index] = answer_text
+        record["answers"][index] = _merge_answer_attempt(record["answers"][index], answer_text, retry_question_override is not None)
+        if retry_question_override:
+            current_step = record["steps"][index]
+            record["steps"][index] = InterviewStep(current_step.round_name, retry_question_override)
+            return self._to_state(record)
         if index + 1 >= len(record["steps"]):
             record["status"] = "completed"
             record["report"] = build_report(
@@ -773,6 +786,7 @@ class DatabaseInterviewRuntimeStore:
         session_id: str,
         answer_text: str,
         next_question_override: str | None = None,
+        retry_question_override: str | None = None,
     ) -> InterviewState:
         session_model = self._find_session(user_email, session_id)
         if session_model is None:
@@ -786,9 +800,16 @@ class DatabaseInterviewRuntimeStore:
                 InterviewTurn.turn_index == session_model.current_step_index,
             )
         ).scalar_one()
-        turn.answer_text = answer_text
-        turn.status = "answered"
+        turn.answer_text = _merge_answer_attempt(turn.answer_text, answer_text, retry_question_override is not None)
+        turn.status = "needs_revision" if retry_question_override else "answered"
         turn.answered_at = utc_now()
+        if retry_question_override:
+            turn.question_text = retry_question_override
+            if self._commit_on_write:
+                self._session.commit()
+            else:
+                self._session.flush()
+            return self._to_state(session_model)
 
         if session_model.current_step_index + 1 >= session_model.total_steps:
             session_model.status = "completed"

@@ -1068,7 +1068,8 @@ export function InterviewRoom() {
       setSocketMessage("训练完成，复盘报告已生成。");
       return;
     }
-    setSocketMessage("已进入下一问，问题正在播放。");
+    const needsSupplement = data.current_step_index === interviewState.current_step_index;
+    setSocketMessage(needsSupplement ? "本轮回答信息不足，面试官要求补充后才会进入下一题。" : "已进入下一问，问题正在播放。");
     void speakQuestion(data.current_question?.text, data.interview_type, data.session_id);
   }
 

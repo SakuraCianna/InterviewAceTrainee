@@ -37,7 +37,7 @@ from app.services.interview_materials import InterviewMaterialStore, get_intervi
 from app.services.interview_materials import DatabaseInterviewMaterialStore
 from app.services.ai_router import AIServiceRouter
 from app.services.capacity_gate import acquire_capacity
-from app.services.interview_ai import generate_next_interview_question
+from app.services.interview_ai import assess_answer_quality, build_contextual_fallback_question, generate_next_interview_question
 from app.services.interview_products import get_interview_product
 from app.services.interview_presets import build_preset_prompt_context
 from app.services.interview_vouchers import DatabaseInterviewVoucherStore, InterviewVoucherStore, get_interview_voucher_store
@@ -317,6 +317,24 @@ def answer_interview_question(
             )
     next_question_override = None
     if current_state is not None and current_state.current_question is not None:
+        answer_quality = assess_answer_quality(
+            current_state.interview_type,
+            current_state.current_question.text,
+            payload.answer_text,
+            current_state.current_question.round_name,
+        )
+        if not answer_quality.acceptable:
+            try:
+                state = interview_store.answer_current_question(
+                    claims["sub"],
+                    session_id,
+                    payload.answer_text,
+                    retry_question_override=answer_quality.retry_question,
+                )
+            except InterviewSessionNotFoundError as exc:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="interview_session_not_found") from exc
+            return build_answer_response(state)
+
         try:
             next_question_override = build_next_question_override(
                 current_state=current_state,
@@ -385,7 +403,7 @@ def build_next_question_override(
                 current_state.session_id,
             )
             return None
-        return generate_next_interview_question(
+        generated_question = generate_next_interview_question(
             router=AIServiceRouter(provider_store.list_configs()),
             llm_client=OpenAICompatibleLLMClient(settings),
             interview_type=current_state.interview_type,
@@ -398,6 +416,12 @@ def build_next_question_override(
             content_safety_log_store=content_safety_log_store,
             session_id=current_state.session_id,
             user_email=user_email,
+        )
+        return generated_question or build_contextual_fallback_question(
+            current_state.interview_type,
+            answer_text,
+            next_step.round_name,
+            next_step.question_text,
         )
 
 

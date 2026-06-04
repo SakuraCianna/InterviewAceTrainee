@@ -128,15 +128,16 @@ button {
 }
 
 .mentor-orbit--outer {
-  width: 300px;
-  height: 300px;
-  border: 1px solid rgba(40, 100, 232, 0.2);
+  width: 342px;
+  height: 342px;
+  border: 1px solid rgba(40, 100, 232, 0.16);
+  box-shadow: inset 0 0 0 24px rgba(255, 255, 255, 0.34);
 }
 
 .mentor-orbit--inner {
-  width: 214px;
-  height: 214px;
-  border: 1px solid rgba(37, 184, 196, 0.24);
+  width: 238px;
+  height: 238px;
+  border: 1px solid rgba(37, 184, 196, 0.28);
   animation: pulseOrbit 2.8s ease-in-out infinite;
 }
 
@@ -144,34 +145,135 @@ button {
   position: relative;
   display: grid;
   place-items: center;
-  width: 238px;
-  height: 288px;
-  border-radius: 94px 94px 48px 48px;
+  width: 270px;
+  height: 328px;
+  padding: 22px;
+  border-radius: 34px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(235, 242, 246, 0.7)),
-    linear-gradient(120deg, rgba(40, 100, 232, 0.18), rgba(191, 220, 99, 0.1));
-  border: 1px solid rgba(19, 22, 28, 0.08);
-  box-shadow: 0 24px 70px rgba(30, 34, 42, 0.16);
+    linear-gradient(155deg, rgba(255, 255, 255, 0.92), rgba(226, 235, 245, 0.72) 48%, rgba(255, 250, 238, 0.88)),
+    radial-gradient(circle at 50% 0%, rgba(40, 100, 232, 0.2), transparent 52%);
+  border: 1px solid rgba(24, 31, 43, 0.1);
+  box-shadow: 0 30px 76px rgba(30, 34, 42, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.84);
 }
 
 .mentor-glass {
   position: relative;
-  width: 160px;
-  height: 176px;
+  display: grid;
+  place-items: center;
+  width: 206px;
+  height: 220px;
   overflow: hidden;
-  border: 1px solid rgba(40, 100, 232, 0.22);
-  border-radius: 52px;
+  border: 1px solid rgba(40, 100, 232, 0.2);
+  border-radius: 28px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(222, 235, 248, 0.54)),
-    radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.9), transparent 38%);
+    linear-gradient(180deg, rgba(19, 23, 31, 0.96), rgba(31, 42, 58, 0.92)),
+    radial-gradient(circle at 50% 22%, rgba(40, 100, 232, 0.26), transparent 42%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 -28px 80px rgba(40, 100, 232, 0.14);
 }
 
 .mentor-scanline {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, transparent 0 48%, rgba(40, 100, 232, 0.16) 50%, transparent 54%);
+  background: linear-gradient(180deg, transparent 0 48%, rgba(203, 232, 91, 0.18) 50%, transparent 54%);
   transform: translateY(-100%);
   animation: scanline 4s ease-in-out infinite;
+}
+
+.mentor-lens {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 118px;
+  height: 118px;
+  border-radius: 50%;
+  color: #dff5ff;
+  background:
+    radial-gradient(circle, rgba(203, 232, 91, 0.82) 0 5px, transparent 6px),
+    radial-gradient(circle, rgba(24, 167, 184, 0.18), transparent 62%);
+}
+
+.mentor-lens::before {
+  content: "";
+  position: absolute;
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(40, 100, 232, 0.48), rgba(24, 167, 184, 0.14) 58%, transparent 60%);
+  filter: blur(0.2px);
+}
+
+.mentor-lens svg {
+  position: relative;
+  z-index: 1;
+  filter: drop-shadow(0 0 16px rgba(40, 100, 232, 0.58));
+}
+
+.mentor-lens-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(223, 245, 255, 0.28);
+}
+
+.mentor-lens-ring--outer {
+  inset: 0;
+  border-top-color: rgba(203, 232, 91, 0.74);
+  animation: mentorRotate 8s linear infinite;
+}
+
+.mentor-lens-ring--inner {
+  inset: 18px;
+  border-right-color: rgba(24, 167, 184, 0.86);
+  animation: mentorRotate 5.2s linear infinite reverse;
+}
+
+.mentor-spectrum {
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  bottom: 22px;
+  display: grid;
+  grid-template-columns: repeat(18, minmax(0, 1fr));
+  align-items: end;
+  gap: 4px;
+  height: 44px;
+}
+
+.mentor-spectrum span {
+  display: block;
+  height: 16px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #cbe85b, #18a7b8 48%, #2468f2);
+  opacity: 0.86;
+  animation: mentorSpectrum 980ms ease-in-out infinite;
+}
+
+.mentor-spectrum span:nth-child(3n + 1) {
+  height: 24px;
+}
+
+.mentor-spectrum span:nth-child(4n + 2) {
+  height: 34px;
+}
+
+.mentor-spectrum span:nth-child(5n) {
+  height: 42px;
+}
+
+.mentor-stage--idle .mentor-spectrum span {
+  animation-duration: 1.9s;
+  opacity: 0.58;
+}
+
+.mentor-stage--listening .mentor-lens {
+  color: #e8fff5;
+}
+
+.mentor-stage--thinking .mentor-lens-ring--outer {
+  border-top-color: rgba(232, 197, 71, 0.9);
+}
+
+.mentor-stage--speaking .mentor-spectrum span {
+  animation-duration: 520ms;
 }
 
 .mentor-visor {
@@ -251,7 +353,8 @@ button {
 
 .mentor-status {
   position: absolute;
-  bottom: 22px;
+  right: 20px;
+  bottom: 18px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -260,6 +363,36 @@ button {
   border-radius: 999px;
   color: #3e4652;
   background: rgba(255, 250, 240, 0.86);
+}
+
+.mentor-console {
+  position: absolute;
+  top: 18px;
+  left: 20px;
+  right: 20px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mentor-console span {
+  min-width: 0;
+  color: #536174;
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mentor-readout {
+  position: absolute;
+  left: 22px;
+  bottom: 24px;
+  color: #151a22;
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .mentor-wave {
@@ -1495,6 +1628,19 @@ button {
 @keyframes mentorSpeak {
   50% {
     height: 34px;
+  }
+}
+
+@keyframes mentorRotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes mentorSpectrum {
+  50% {
+    transform: scaleY(0.42);
+    opacity: 0.46;
   }
 }
 
@@ -9463,6 +9609,40 @@ body:has(.admin-page--authed) {
   .interview-page .interview-layout .mentor-glass {
     width: 146px;
     height: 164px;
+  }
+
+  .mentor-lens {
+    width: 92px;
+    height: 92px;
+  }
+
+  .mentor-lens-ring--inner {
+    inset: 14px;
+  }
+
+  .mentor-spectrum {
+    left: 14px;
+    right: 14px;
+    bottom: 16px;
+    gap: 3px;
+    height: 30px;
+  }
+
+  .mentor-console {
+    top: 14px;
+    left: 16px;
+    right: 16px;
+  }
+
+  .mentor-console span,
+  .mentor-readout {
+    font-size: 9px;
+  }
+
+  .mentor-status {
+    right: 14px;
+    bottom: 13px;
+    padding: 7px 10px;
   }
 }
 
