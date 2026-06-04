@@ -1,5 +1,4 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import type { PointerEvent } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { AppIcon } from "../components/AppIcon";
@@ -202,17 +201,6 @@ export function HomePage() {
   const cockpitStatus =
     previewPhase === "recording" ? "正在回答" : previewPhase === "followup" ? "追问已生成" : "第 1 / 3 轮";
 
-  function handleSpotlightMove(event: PointerEvent<HTMLElement>) {
-    const target = (event.target as HTMLElement).closest<HTMLElement>(".mianba-spotlight");
-    if (!target) {
-      return;
-    }
-
-    const rect = target.getBoundingClientRect();
-    target.style.setProperty("--spot-x", `${event.clientX - rect.left}px`);
-    target.style.setProperty("--spot-y", `${event.clientY - rect.top}px`);
-  }
-
   useLayoutEffect(() => {
     if (!rootRef.current || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       return;
@@ -307,7 +295,7 @@ export function HomePage() {
   }, []);
 
   return (
-    <main className="mianba-home" onPointerMove={handleSpotlightMove} ref={rootRef}>
+    <main className="mianba-home" ref={rootRef}>
       <nav className="mianba-nav" aria-label="主导航">
         <a className="mianba-brand" href="/" aria-label="面霸练习生首页">
           <BrandLogo size={30} />
@@ -434,7 +422,7 @@ export function HomePage() {
 
       <section className="mianba-proof-strip mianba-scroll-section">
         {trustItems.map(([icon, title, copy]) => (
-          <article className="mianba-proof-card mianba-motion mianba-spotlight" key={title}>
+          <article className="mianba-proof-card mianba-motion" key={title}>
             <AppIcon icon={icon} size={24} />
             <div>
               <h2>{title}</h2>
@@ -452,7 +440,7 @@ export function HomePage() {
         </div>
         <div className="mianba-track-grid">
           {trainingTracks.map((track, index) => (
-            <article className="mianba-track-card mianba-motion mianba-spotlight" key={track.title}>
+            <article className="mianba-track-card mianba-motion" key={track.title}>
               <div className="mianba-card-top">
                 <AppIcon icon={track.icon} size={28} />
                 <span>0{index + 1}</span>
@@ -484,7 +472,7 @@ export function HomePage() {
           <span className="mianba-flow-beam" aria-hidden="true" />
           <div className="mianba-step-grid">
             {practiceSteps.map(([number, title, copy]) => (
-              <article className="mianba-step-card mianba-motion mianba-spotlight" key={number}>
+              <article className="mianba-step-card mianba-motion" key={number}>
                 <span>{number}</span>
                 <h3>{title}</h3>
                 <p>{copy}</p>
@@ -502,7 +490,7 @@ export function HomePage() {
         </div>
         <div className="mianba-report-grid">
           {reportCards.map((report) => (
-            <article className="mianba-report-card mianba-motion mianba-spotlight" key={report.label}>
+            <article className="mianba-report-card mianba-motion" key={report.label}>
               <div className="mianba-report-head">
                 <span>{report.label}</span>
                 <strong
