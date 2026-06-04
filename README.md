@@ -62,6 +62,14 @@ TENCENT_REALTIME_ASR_NEED_VAD=1
 TENCENT_REALTIME_ASR_MAX_SECONDS=300
 TENCENT_TTS_VOICE_TYPE=603006
 TENCENT_TTS_VOICE_TYPES=603006,502005,602005,603005,502006,603003
+DATABASE_POOL_SIZE=8
+DATABASE_MAX_OVERFLOW=4
+DATABASE_POOL_TIMEOUT_SECONDS=5
+DATABASE_POOL_RECYCLE_SECONDS=1800
+LLM_CONCURRENCY_LIMIT=24
+LLM_CAPACITY_LEASE_SECONDS=45
+REALTIME_ASR_CONCURRENCY_LIMIT=80
+REALTIME_ASR_CAPACITY_LEASE_SECONDS=420
 ```
 
 本机使用 HTTP 调试时，`AUTH_COOKIE_SECURE=false`；服务器启用 HTTPS 后改为 `true`。
@@ -203,6 +211,28 @@ https://sakuracianna.icu/
 ```
 
 `nginx/nginx.conf` 会将 80 端口跳转到 443，并把 `/api/`、`/api/ws/` 代理到后端，把其他页面代理到前端。证书和私钥文件已被 `.gitignore` 忽略，不会提交到仓库。
+
+Docker 部署默认启用以下单机容量保护：
+
+- 后端通过 `UVICORN_WORKERS` 控制 worker 数，默认 2。
+- `UVICORN_LIMIT_CONCURRENCY` 控制后端单容器最大并发连接保护，默认 800。
+- 数据库连接池通过 `DATABASE_POOL_SIZE`、`DATABASE_MAX_OVERFLOW`、`DATABASE_POOL_TIMEOUT_SECONDS`、`DATABASE_POOL_RECYCLE_SECONDS` 控制。
+- LLM 追问通过 Redis 全局容量闸门限制，达到 `LLM_CONCURRENCY_LIMIT` 后退回预设下一题，避免请求长时间阻塞。
+- 实时 ASR 通过 Redis 全局容量闸门限制，达到 `REALTIME_ASR_CONCURRENCY_LIMIT` 后返回“语音训练席位繁忙”。
+- Docker 日志已配置 `json-file` 轮转，默认单文件 100MB，保留 3 份。
+
+如果需要完全清空服务器业务数据并重建数据库，可以在服务器项目目录执行以下命令。该操作会删除 PostgreSQL、Redis 数据卷和本地备份目录，用户、次数、面试记录和日志都会被清空。
+
+服务器 Linux Shell：
+
+```bash
+docker compose down -v
+rm -rf database_backups
+docker compose build
+docker compose --profile migrate run --rm migrate
+docker compose up -d
+docker builder prune -af
+```
 
 ## 上线检查
 

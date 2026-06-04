@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text, Uuid
+from sqlalchemy import Boolean, DateTime, Index, Integer, JSON, String, Text, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -64,6 +64,10 @@ class InterviewVoucher(Base):
 
 class InterviewSession(Base):
     __tablename__ = "interview_sessions"
+    __table_args__ = (
+        Index("ix_interview_sessions_user_status_created", "user_email", "status", "created_at"),
+        Index("ix_interview_sessions_user_created", "user_email", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(String(120), primary_key=True)
     user_email: Mapped[str] = mapped_column(String(255), index=True)
@@ -101,6 +105,7 @@ class InterviewMaterial(Base):
 
 class InterviewTurn(Base):
     __tablename__ = "interview_turns"
+    __table_args__ = (Index("ix_interview_turns_session_turn", "session_id", "turn_index"),)
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_pk)
     session_id: Mapped[str] = mapped_column(String(120), index=True)
@@ -115,6 +120,7 @@ class InterviewTurn(Base):
 
 class InterviewReport(Base):
     __tablename__ = "interview_reports"
+    __table_args__ = (Index("ix_interview_reports_session_created", "session_id", "created_at"),)
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_pk)
     session_id: Mapped[str] = mapped_column(String(120), index=True)
@@ -150,6 +156,7 @@ class SystemConfigModel(Base):
 
 class AICallLog(Base):
     __tablename__ = "ai_call_logs"
+    __table_args__ = (Index("ix_ai_call_logs_created_at", "created_at"),)
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_pk)
     session_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
@@ -172,6 +179,7 @@ class AICallLog(Base):
 
 class ContentSafetyLog(Base):
     __tablename__ = "content_safety_logs"
+    __table_args__ = (Index("ix_content_safety_logs_created_at", "created_at"),)
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_pk)
     user_email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
@@ -188,6 +196,10 @@ class ContentSafetyLog(Base):
 
 class AuthLoginLog(Base):
     __tablename__ = "auth_login_logs"
+    __table_args__ = (
+        Index("ix_auth_login_logs_created_at", "created_at"),
+        Index("ix_auth_login_logs_email_created", "email", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=uuid_pk)
     email: Mapped[str] = mapped_column(String(255), index=True)

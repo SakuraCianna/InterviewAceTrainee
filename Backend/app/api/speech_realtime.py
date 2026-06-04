@@ -17,6 +17,7 @@ from app.schemas.interviews import InterviewType
 from app.services.ai_call_logs import AICallLogStore, get_ai_call_log_store
 from app.services.ai_router import AIProviderAttempt, AIServiceRouter, NoProviderAvailableError
 from app.services.auth_sessions import AuthSessionStore, get_auth_session_store
+from app.services.capacity_gate import acquire_capacity
 from app.services.interview_runtime import DatabaseInterviewRuntimeStore, InMemoryInterviewRuntimeStore
 from app.services.provider_configs import DatabaseProviderConfigStore, InMemoryProviderConfigStore
 from app.services.tencent_speech import SpeechProviderError, TencentSpeechClient
@@ -28,6 +29,7 @@ REALTIME_PCM_BYTES_PER_SECOND = 16000 * 2
 MAX_CLIENT_TEXT_CHARS = 2048
 MAX_AUDIO_CHUNK_BYTES = 64 * 1024
 TENCENT_FINAL_TIMEOUT_SECONDS = 12
+WS_TRY_AGAIN_LATER = 1013
 
 
 @router.websocket("/asr/{session_id}")
@@ -58,9 +60,27 @@ async def realtime_asr_socket(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
+    capacity_lease = acquire_capacity(
+        "asr:realtime",
+        settings.realtime_asr_concurrency_limit,
+        settings.realtime_asr_capacity_lease_seconds,
+    )
+    if not capacity_lease.acquired:
+        await websocket.accept()
+        await websocket.send_json(
+            {
+                "type": "asr_error",
+                "detail": "asr_capacity_full",
+                "retry_after_seconds": capacity_lease.retry_after_seconds,
+            }
+        )
+        await _close_safely(websocket, code=WS_TRY_AGAIN_LATER)
+        return
+
     await websocket.accept()
     start_payload = await _receive_start_payload(websocket)
     if start_payload is None:
+        capacity_lease.release()
         await _send_error_and_close(websocket, "request_validation_failed")
         return
 
@@ -68,6 +88,7 @@ async def realtime_asr_socket(
     try:
         provider = AIServiceRouter(provider_store.list_configs()).select_provider("asr", "interview")
     except NoProviderAvailableError:
+        capacity_lease.release()
         await _send_error_and_close(websocket, "asr_provider_not_available")
         return
 
@@ -76,6 +97,7 @@ async def realtime_asr_socket(
     try:
         tencent_url = speech_client.build_realtime_asr_url(provider, voice_id=voice_id, interview_type=interview_type)
     except SpeechProviderError as exc:
+        capacity_lease.release()
         await _send_error_and_close(websocket, str(exc) or "asr_provider_not_available")
         return
 
@@ -189,6 +211,7 @@ async def realtime_asr_socket(
         if not isinstance(exc, WebSocketDisconnect):
             await _send_json_safely(websocket, {"type": "asr_error", "detail": "asr_provider_failed"})
     finally:
+        capacity_lease.release()
         latency_ms = int((perf_counter() - started_at) * 1000)
         call_log_store.record_attempts(
             session_id=session_id,

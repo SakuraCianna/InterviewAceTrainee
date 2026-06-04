@@ -36,6 +36,7 @@ from app.services.interview_runtime import (
 from app.services.interview_materials import InterviewMaterialStore, get_interview_material_store
 from app.services.interview_materials import DatabaseInterviewMaterialStore
 from app.services.ai_router import AIServiceRouter
+from app.services.capacity_gate import acquire_capacity
 from app.services.interview_ai import generate_next_interview_question
 from app.services.interview_products import get_interview_product
 from app.services.interview_presets import build_preset_prompt_context
@@ -371,20 +372,33 @@ def build_next_question_override(
         current_state.material_context,
         round_name=next_step.round_name,
     )
-    return generate_next_interview_question(
-        router=AIServiceRouter(provider_store.list_configs()),
-        llm_client=OpenAICompatibleLLMClient(settings),
-        interview_type=current_state.interview_type,
-        current_question=current_state.current_question.text,
-        answer_text=answer_text,
-        next_round_name=next_step.round_name,
-        next_static_question=next_step.question_text,
-        preset_context=preset_context,
-        call_log_store=ai_call_log_store,
-        content_safety_log_store=content_safety_log_store,
-        session_id=current_state.session_id,
-        user_email=user_email,
-    )
+    with acquire_capacity(
+        "llm:interview_followup",
+        settings.llm_concurrency_limit,
+        settings.llm_capacity_lease_seconds,
+    ) as lease:
+        if not lease.acquired:
+            logger.warning(
+                "LLM follow-up capacity exhausted active_count=%s retry_after=%s session_id=%s",
+                lease.active_count,
+                lease.retry_after_seconds,
+                current_state.session_id,
+            )
+            return None
+        return generate_next_interview_question(
+            router=AIServiceRouter(provider_store.list_configs()),
+            llm_client=OpenAICompatibleLLMClient(settings),
+            interview_type=current_state.interview_type,
+            current_question=current_state.current_question.text,
+            answer_text=answer_text,
+            next_round_name=next_step.round_name,
+            next_static_question=next_step.question_text,
+            preset_context=preset_context,
+            call_log_store=ai_call_log_store,
+            content_safety_log_store=content_safety_log_store,
+            session_id=current_state.session_id,
+            user_email=user_email,
+        )
 
 
 def build_interview_steps_for_state(current_state: InterviewState):

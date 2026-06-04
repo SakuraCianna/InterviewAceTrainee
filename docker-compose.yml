@@ -1,5 +1,11 @@
 name: mianba
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "100m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:18
@@ -12,6 +18,7 @@ services:
       PGDATA: /var/lib/postgresql/data
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    logging: *default-logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mianba -d mianba"]
       interval: 10s
@@ -25,6 +32,7 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -42,6 +50,16 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://mianba:mianba@postgres:5432/mianba
       REDIS_URL: redis://redis:6379/0
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
+      UVICORN_LIMIT_CONCURRENCY: ${UVICORN_LIMIT_CONCURRENCY:-800}
+      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-8}
+      DATABASE_MAX_OVERFLOW: ${DATABASE_MAX_OVERFLOW:-4}
+      DATABASE_POOL_TIMEOUT_SECONDS: ${DATABASE_POOL_TIMEOUT_SECONDS:-5}
+      DATABASE_POOL_RECYCLE_SECONDS: ${DATABASE_POOL_RECYCLE_SECONDS:-1800}
+      LLM_CONCURRENCY_LIMIT: ${LLM_CONCURRENCY_LIMIT:-24}
+      LLM_CAPACITY_LEASE_SECONDS: ${LLM_CAPACITY_LEASE_SECONDS:-45}
+      REALTIME_ASR_CONCURRENCY_LIMIT: ${REALTIME_ASR_CONCURRENCY_LIMIT:-80}
+      REALTIME_ASR_CAPACITY_LEASE_SECONDS: ${REALTIME_ASR_CAPACITY_LEASE_SECONDS:-420}
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,6 +67,7 @@ services:
         condition: service_healthy
     volumes:
       - ./database_backups:/app/database_backups
+    logging: *default-logging
     expose:
       - "8000"
 
@@ -70,6 +89,7 @@ services:
         condition: service_healthy
     volumes:
       - ./database_backups:/app/database_backups
+    logging: *default-logging
     command: ["uv", "run", "python", "-m", "app.cli.safe_migrate"]
 
   frontend:
@@ -81,6 +101,7 @@ services:
         VITE_POLICE_RECORD_NUMBER: ${VITE_POLICE_RECORD_NUMBER:-}
     container_name: mianba-frontend
     restart: unless-stopped
+    logging: *default-logging
     expose:
       - "80"
 
@@ -95,9 +116,11 @@ services:
       - "80:80"
       - "443:443"
     volumes:
+      - ./nginx/main.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/sakuracianna.icu_bundle.pem:/etc/nginx/certs/sakuracianna.icu_bundle.pem:ro
       - ./nginx/sakuracianna.icu.key:/etc/nginx/certs/sakuracianna.icu.key:ro
+    logging: *default-logging
 
 volumes:
   postgres-data:

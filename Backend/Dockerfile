@@ -18,4 +18,4 @@ COPY alembic.ini ./alembic.ini
 COPY migrations ./migrations
 
 EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-2} --proxy-headers --forwarded-allow-ips='*' --limit-concurrency ${UVICORN_LIMIT_CONCURRENCY:-800} --timeout-keep-alive ${UVICORN_TIMEOUT_KEEP_ALIVE:-5}"]

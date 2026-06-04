@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     interview_material_max_upload_bytes: int = 5 * 1024 * 1024
     speech_audio_max_upload_bytes: int = 30 * 1024 * 1024
     resume_ocr_provider: str = "none"
+    database_pool_size: int = 8
+    database_max_overflow: int = 4
+    database_pool_timeout_seconds: float = 5.0
+    database_pool_recycle_seconds: int = 1800
+    capacity_key_prefix: str = "mianba:capacity"
+    llm_concurrency_limit: int = 24
+    llm_capacity_lease_seconds: int = 45
+    realtime_asr_concurrency_limit: int = 80
+    realtime_asr_capacity_lease_seconds: int = 420
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

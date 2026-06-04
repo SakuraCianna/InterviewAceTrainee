@@ -13,6 +13,7 @@ const API_ERROR_MESSAGES: Record<string, string> = {
   admin_role_required: "当前账号不是管理员账号，请联系管理员确认权限。",
   asr_provider_failed: "语音识别服务调用失败，请稍后重试。",
   asr_provider_not_available: "语音识别服务暂时不可用，请联系管理员检查配置。",
+  asr_capacity_full: "当前语音训练席位繁忙，请稍等片刻后重新开始回答。",
   audio_file_empty: "没有收到有效录音，请重新录制后提交。",
   audio_duration_too_long: "当前音频超过短音频识别限制，请使用实时语音通道完成长回答。",
   audio_file_too_large: "录音文件过大，请缩短回答时长后重试。",
