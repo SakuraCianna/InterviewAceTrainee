@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
+import type { PointerEvent } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { AppIcon } from "../components/AppIcon";
@@ -108,9 +109,9 @@ const trainingTracks: TrainingTrack[] = [
 ];
 
 const heroStats = [
-  ["250+", "岗位方向"],
-  ["100+", "复试专业"],
-  ["4", "训练产品"],
+  ["250", "+", "岗位方向"],
+  ["100", "+", "复试专业"],
+  ["4", "", "训练产品"],
 ];
 
 const practiceSteps = [
@@ -201,6 +202,17 @@ export function HomePage() {
   const cockpitStatus =
     previewPhase === "recording" ? "正在回答" : previewPhase === "followup" ? "追问已生成" : "第 1 / 3 轮";
 
+  function handleSpotlightMove(event: PointerEvent<HTMLElement>) {
+    const target = (event.target as HTMLElement).closest<HTMLElement>(".mianba-spotlight");
+    if (!target) {
+      return;
+    }
+
+    const rect = target.getBoundingClientRect();
+    target.style.setProperty("--spot-x", `${event.clientX - rect.left}px`);
+    target.style.setProperty("--spot-y", `${event.clientY - rect.top}px`);
+  }
+
   useLayoutEffect(() => {
     if (!rootRef.current || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       return;
@@ -228,6 +240,39 @@ export function HomePage() {
         stagger: 0.06,
         repeat: -1,
         yoyo: true,
+      });
+      gsap.utils.toArray<HTMLElement>(".mianba-ticker").forEach((ticker) => {
+        const targetValue = Number(ticker.dataset.value || "0");
+        const suffix = ticker.dataset.suffix || "";
+        const decimals = Number(ticker.dataset.decimals || "0");
+        const state = { value: targetValue };
+
+        gsap.fromTo(state, {
+          value: 0,
+        }, {
+          value: targetValue,
+          duration: 1.35,
+          ease: "power3.out",
+          immediateRender: false,
+          scrollTrigger: {
+            trigger: ticker,
+            start: "top 88%",
+            once: true,
+          },
+          onUpdate: () => {
+            ticker.textContent = `${state.value.toFixed(decimals)}${suffix}`;
+          },
+        });
+      });
+      gsap.to(".mianba-flow-beam", {
+        scaleX: 1,
+        duration: 1.4,
+        ease: "power3.out",
+        scrollTrigger: {
+          trigger: ".mianba-workflow",
+          start: "top 72%",
+          once: true,
+        },
       });
       gsap.utils.toArray<HTMLElement>(".mianba-scroll-section").forEach((section) => {
         const items = Array.from(section.querySelectorAll<HTMLElement>(".mianba-motion"));
@@ -262,7 +307,7 @@ export function HomePage() {
   }, []);
 
   return (
-    <main className="mianba-home" ref={rootRef}>
+    <main className="mianba-home" onPointerMove={handleSpotlightMove} ref={rootRef}>
       <nav className="mianba-nav" aria-label="主导航">
         <a className="mianba-brand" href="/" aria-label="面霸练习生首页">
           <BrandLogo size={30} />
@@ -298,16 +343,19 @@ export function HomePage() {
             </a>
           </div>
           <div className="mianba-hero-stats mianba-reveal">
-            {heroStats.map(([value, label]) => (
+            {heroStats.map(([value, suffix, label]) => (
               <div key={label}>
-                <strong>{value}</strong>
+                <strong className="mianba-ticker" data-suffix={suffix} data-value={value}>
+                  {value}
+                  {suffix}
+                </strong>
                 <span>{label}</span>
               </div>
             ))}
           </div>
         </section>
 
-        <section className="mianba-cockpit" aria-label="语音面试训练台预览">
+        <section className={`mianba-cockpit is-${previewPhase}`} aria-label="语音面试训练台预览">
           <div className="mianba-cockpit-head">
             <span>
               <AppIcon icon="lucide:radio" size={17} />
@@ -340,6 +388,8 @@ export function HomePage() {
               </div>
               <div className="mianba-voice-core">
                 <div className="mianba-core-ring">
+                  <span className="mianba-core-pulse" />
+                  <span className="mianba-core-orbit" />
                   <AppIcon icon="lucide:audio-lines" size={58} />
                 </div>
                 <div className="mianba-wave" aria-hidden="true">
@@ -384,7 +434,7 @@ export function HomePage() {
 
       <section className="mianba-proof-strip mianba-scroll-section">
         {trustItems.map(([icon, title, copy]) => (
-          <article className="mianba-proof-card mianba-motion" key={title}>
+          <article className="mianba-proof-card mianba-motion mianba-spotlight" key={title}>
             <AppIcon icon={icon} size={24} />
             <div>
               <h2>{title}</h2>
@@ -402,7 +452,7 @@ export function HomePage() {
         </div>
         <div className="mianba-track-grid">
           {trainingTracks.map((track, index) => (
-            <article className="mianba-track-card mianba-motion" key={track.title}>
+            <article className="mianba-track-card mianba-motion mianba-spotlight" key={track.title}>
               <div className="mianba-card-top">
                 <AppIcon icon={track.icon} size={28} />
                 <span>0{index + 1}</span>
@@ -430,14 +480,17 @@ export function HomePage() {
           <h2>流程像真实面试, 但每一步都可复盘。</h2>
           <p>从选择目标到拿到报告, 页面只保留必要控制, 把注意力留给听题和表达。</p>
         </div>
-        <div className="mianba-step-grid">
-          {practiceSteps.map(([number, title, copy]) => (
-            <article className="mianba-step-card mianba-motion" key={number}>
-              <span>{number}</span>
-              <h3>{title}</h3>
-              <p>{copy}</p>
-            </article>
-          ))}
+        <div className="mianba-flow-shell">
+          <span className="mianba-flow-beam" aria-hidden="true" />
+          <div className="mianba-step-grid">
+            {practiceSteps.map(([number, title, copy]) => (
+              <article className="mianba-step-card mianba-motion mianba-spotlight" key={number}>
+                <span>{number}</span>
+                <h3>{title}</h3>
+                <p>{copy}</p>
+              </article>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -449,10 +502,16 @@ export function HomePage() {
         </div>
         <div className="mianba-report-grid">
           {reportCards.map((report) => (
-            <article className="mianba-report-card mianba-motion" key={report.label}>
+            <article className="mianba-report-card mianba-motion mianba-spotlight" key={report.label}>
               <div className="mianba-report-head">
                 <span>{report.label}</span>
-                <strong>{report.score}</strong>
+                <strong
+                  className="mianba-ticker"
+                  data-decimals={report.score.includes(".") ? "1" : "0"}
+                  data-value={report.score}
+                >
+                  {report.score}
+                </strong>
               </div>
               <h3>{report.title}</h3>
               <div className="mianba-report-metrics">

@@ -6871,6 +6871,34 @@ body:has(.admin-page--authed) {
   margin-top: 0;
 }
 
+.mianba-spotlight {
+  --spot-x: 50%;
+  --spot-y: 50%;
+  position: relative;
+  overflow: hidden;
+}
+
+.mianba-spotlight::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(circle at var(--spot-x) var(--spot-y), rgba(36, 104, 242, 0.18), transparent 34%),
+    radial-gradient(circle at var(--spot-x) var(--spot-y), rgba(203, 232, 91, 0.14), transparent 46%);
+  transition: opacity 180ms ease;
+}
+
+.mianba-spotlight:hover::after {
+  opacity: 1;
+}
+
+.mianba-spotlight > * {
+  position: relative;
+  z-index: 1;
+}
+
 .mianba-nav {
   position: sticky;
   top: 16px;
@@ -6944,6 +6972,8 @@ body:has(.admin-page--authed) {
 .mianba-primary,
 .mianba-secondary,
 .mianba-final-action {
+  position: relative;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6953,6 +6983,31 @@ body:has(.admin-page--authed) {
   font-weight: 950;
   line-height: 1;
   text-align: center;
+}
+
+.mianba-nav-action::after,
+.mianba-primary::after,
+.mianba-secondary::after,
+.mianba-final-action::after {
+  content: "";
+  position: absolute;
+  inset: -2px auto -2px -44%;
+  width: 34%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.44), transparent);
+  transform: skewX(-18deg) translateX(-120%);
+  transition: transform 520ms ease;
+}
+
+.mianba-nav-action:hover::after,
+.mianba-primary:hover::after,
+.mianba-secondary:hover::after,
+.mianba-final-action:hover::after {
+  transform: skewX(-18deg) translateX(420%);
+}
+
+.mianba-secondary::after {
+  background: linear-gradient(90deg, transparent, rgba(36, 104, 242, 0.16), transparent);
 }
 
 .mianba-nav-action {
@@ -7040,6 +7095,8 @@ body:has(.admin-page--authed) {
 }
 
 .mianba-hero-stats div {
+  position: relative;
+  overflow: hidden;
   min-height: 86px;
   padding: 14px;
   border: 1px solid var(--mb-line);
@@ -7047,11 +7104,30 @@ body:has(.admin-page--authed) {
   background: rgba(255, 253, 247, 0.74);
 }
 
+.mianba-hero-stats div::after {
+  content: "";
+  position: absolute;
+  inset: auto 12px 10px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--mb-blue), var(--mb-cyan), transparent);
+  opacity: 0.48;
+  transform: scaleX(0.34);
+  transform-origin: left;
+  transition: transform 260ms ease, opacity 260ms ease;
+}
+
+.mianba-hero-stats div:hover::after {
+  opacity: 0.9;
+  transform: scaleX(1);
+}
+
 .mianba-hero-stats strong {
   display: block;
   color: var(--mb-blue);
   font-size: 32px;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .mianba-hero-stats span {
@@ -7063,11 +7139,30 @@ body:has(.admin-page--authed) {
 }
 
 .mianba-cockpit {
+  position: relative;
   overflow: hidden;
   border: 1px solid rgba(20, 24, 32, 0.15);
   border-radius: 8px;
   background: var(--mb-panel);
   box-shadow: var(--mb-shadow);
+}
+
+.mianba-cockpit::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.62;
+  background:
+    linear-gradient(115deg, transparent 0 30%, rgba(255, 255, 255, 0.58) 42%, transparent 54%),
+    radial-gradient(circle at 70% 20%, rgba(203, 232, 91, 0.14), transparent 34%);
+  background-size: 220% 100%, auto;
+  animation: mianbaSurfaceSweep 8s ease-in-out infinite;
+}
+
+.mianba-cockpit > * {
+  position: relative;
+  z-index: 1;
 }
 
 .mianba-cockpit-head {
@@ -7193,6 +7288,7 @@ body:has(.admin-page--authed) {
 }
 
 .mianba-core-ring {
+  position: relative;
   display: grid;
   place-items: center;
   width: 190px;
@@ -7205,9 +7301,62 @@ body:has(.admin-page--authed) {
     linear-gradient(135deg, rgba(24, 167, 184, 0.08), rgba(203, 232, 91, 0.12)),
     #ffffff;
   box-shadow: inset 0 0 0 26px rgba(24, 167, 184, 0.06);
+  transition: border-color 260ms ease, box-shadow 260ms ease, transform 260ms ease;
+}
+
+.mianba-core-ring svg {
+  position: relative;
+  z-index: 3;
+}
+
+.mianba-core-pulse,
+.mianba-core-orbit {
+  position: absolute;
+  inset: 18px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.mianba-core-pulse {
+  z-index: 1;
+  border: 1px solid rgba(24, 167, 184, 0.2);
+  animation: mianbaVoicePulse 2.4s ease-out infinite;
+}
+
+.mianba-core-orbit {
+  z-index: 2;
+  border: 1px dashed rgba(36, 104, 242, 0.18);
+  animation: mianbaOrbit 12s linear infinite;
+}
+
+.mianba-core-orbit::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--mb-cyan);
+  box-shadow: 0 0 18px rgba(24, 167, 184, 0.72);
+}
+
+.mianba-cockpit.is-recording .mianba-core-ring,
+.mianba-cockpit.is-followup .mianba-core-ring {
+  border-color: rgba(36, 104, 242, 0.28);
+  box-shadow:
+    inset 0 0 0 26px rgba(36, 104, 242, 0.06),
+    0 0 0 10px rgba(24, 167, 184, 0.06);
+  transform: translateY(-2px);
+}
+
+.mianba-cockpit.is-followup .mianba-question-card {
+  border-color: rgba(21, 115, 71, 0.2);
+  background: rgba(21, 115, 71, 0.07);
 }
 
 .mianba-wave {
+  position: relative;
   display: flex;
   align-items: end;
   justify-content: center;
@@ -7219,7 +7368,19 @@ body:has(.admin-page--authed) {
   background: var(--mb-dark);
 }
 
+.mianba-wave::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+  transform: translateX(-100%);
+  animation: mianbaWaveScan 2.6s ease-in-out infinite;
+}
+
 .mianba-wave span {
+  position: relative;
+  z-index: 1;
   width: 7px;
   border-radius: 999px;
   background: linear-gradient(180deg, var(--mb-lime), var(--mb-cyan), var(--mb-blue));
@@ -7388,6 +7549,7 @@ body:has(.admin-page--authed) {
   border-radius: 8px;
   background: var(--mb-panel);
   box-shadow: 0 22px 56px rgba(20, 24, 32, 0.09);
+  transition: border-color 220ms ease, box-shadow 220ms ease, transform 220ms ease;
 }
 
 .mianba-track-card::before {
@@ -7408,6 +7570,12 @@ body:has(.admin-page--authed) {
 
 .mianba-track-card:nth-child(4)::before {
   background: var(--mb-coral);
+}
+
+.mianba-track-card:hover {
+  border-color: rgba(36, 104, 242, 0.18);
+  box-shadow: 0 28px 68px rgba(20, 24, 32, 0.13);
+  transform: translateY(-4px);
 }
 
 .mianba-card-top {
@@ -7498,6 +7666,24 @@ body:has(.admin-page--authed) {
   background-size: 44px 44px, 44px 44px, auto;
 }
 
+.mianba-flow-shell {
+  position: relative;
+}
+
+.mianba-flow-beam {
+  position: absolute;
+  top: 46px;
+  left: 26px;
+  right: 26px;
+  z-index: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--mb-lime), var(--mb-cyan), transparent);
+  box-shadow: 0 0 28px rgba(203, 232, 91, 0.34);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
 .mianba-section-head-dark .mianba-kicker {
   border-color: rgba(203, 232, 91, 0.28);
   color: var(--mb-lime);
@@ -7514,12 +7700,15 @@ body:has(.admin-page--authed) {
 }
 
 .mianba-step-grid {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 
 .mianba-step-card {
+  position: relative;
   display: grid;
   grid-template-rows: auto 1fr auto;
   min-height: 310px;
@@ -7527,6 +7716,26 @@ body:has(.admin-page--authed) {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.07);
+  transition: border-color 220ms ease, background 220ms ease, transform 220ms ease;
+}
+
+.mianba-step-card::before {
+  content: "";
+  position: absolute;
+  top: 44px;
+  left: 22px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--mb-lime);
+  border-radius: 50%;
+  background: #151820;
+  box-shadow: 0 0 22px rgba(203, 232, 91, 0.46);
+}
+
+.mianba-step-card:hover {
+  border-color: rgba(203, 232, 91, 0.28);
+  background: rgba(255, 255, 255, 0.09);
+  transform: translateY(-4px);
 }
 
 .mianba-step-card span {
@@ -7557,6 +7766,7 @@ body:has(.admin-page--authed) {
 }
 
 .mianba-report-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 760px;
@@ -7565,6 +7775,13 @@ body:has(.admin-page--authed) {
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 22px 56px rgba(20, 24, 32, 0.09);
+  transition: border-color 220ms ease, box-shadow 220ms ease, transform 220ms ease;
+}
+
+.mianba-report-card:hover {
+  border-color: rgba(36, 104, 242, 0.22);
+  box-shadow: 0 28px 68px rgba(20, 24, 32, 0.13);
+  transform: translateY(-4px);
 }
 
 .mianba-report-head {
@@ -7598,6 +7815,7 @@ body:has(.admin-page--authed) {
   color: #ffffff;
   background: var(--mb-dark);
   font-size: 22px;
+  font-variant-numeric: tabular-nums;
 }
 
 .mianba-report-card h3 {
@@ -7809,6 +8027,12 @@ body:has(.admin-page--authed) {
   width: min(820px, 100%);
   margin-bottom: 0;
   color: #ffffff;
+  background: linear-gradient(90deg, #ffffff 0%, #ffffff 38%, var(--mb-lime) 50%, #ffffff 62%, #ffffff 100%);
+  background-clip: text;
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: mianbaTextShine 7s ease-in-out infinite;
 }
 
 .mianba-final-logo {
@@ -7899,6 +8123,60 @@ body:has(.admin-page--authed) {
   color: rgba(255, 255, 255, 0.46);
 }
 
+@keyframes mianbaSurfaceSweep {
+  0%,
+  66%,
+  100% {
+    background-position: -120% 0, 0 0;
+  }
+
+  82% {
+    background-position: 180% 0, 0 0;
+  }
+}
+
+@keyframes mianbaVoicePulse {
+  0% {
+    opacity: 0.62;
+    transform: scale(0.82);
+  }
+
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.46);
+  }
+}
+
+@keyframes mianbaOrbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes mianbaWaveScan {
+  0%,
+  52% {
+    transform: translateX(-110%);
+  }
+
+  100% {
+    transform: translateX(110%);
+  }
+}
+
+@keyframes mianbaTextShine {
+  0%,
+  62%,
+  100% {
+    background-position: 120% 0;
+  }
+
+  82% {
+    background-position: -40% 0;
+  }
+}
+
 @media (max-width: 1180px) {
   .mianba-hero,
   .mianba-credit-band {
@@ -7986,6 +8264,10 @@ body:has(.admin-page--authed) {
     grid-template-columns: 1fr;
   }
 
+  .mianba-flow-beam {
+    display: none;
+  }
+
   .mianba-report-grid .mianba-report-card:first-child {
     grid-column: auto;
   }
@@ -8016,6 +8298,23 @@ body:has(.admin-page--authed) {
   .mianba-filing-links {
     align-items: center;
     flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mianba-cockpit::after,
+  .mianba-core-pulse,
+  .mianba-core-orbit,
+  .mianba-wave::after,
+  .mianba-final h2 {
+    animation: none;
+  }
+
+  .mianba-nav-action::after,
+  .mianba-primary::after,
+  .mianba-secondary::after,
+  .mianba-final-action::after {
+    display: none;
   }
 }
 
