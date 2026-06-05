@@ -383,12 +383,18 @@ def build_next_question_override(
 ) -> str | None:
     if current_state.current_step_index + 1 >= current_state.total_steps:
         return None
-    steps = build_interview_steps_for_state(current_state)
-    next_step = steps[current_state.current_step_index + 1]
+    if current_state.next_question is not None:
+        next_round_name = current_state.next_question.round_name
+        next_static_question = current_state.next_question.text
+    else:
+        steps = build_interview_steps_for_state(current_state)
+        next_step = steps[current_state.current_step_index + 1]
+        next_round_name = next_step.round_name
+        next_static_question = next_step.question_text
     preset_context = build_preset_prompt_context(
         current_state.interview_type,
         current_state.material_context,
-        round_name=next_step.round_name,
+        round_name=next_round_name,
     )
     with acquire_capacity(
         "llm:interview_followup",
@@ -409,8 +415,8 @@ def build_next_question_override(
             interview_type=current_state.interview_type,
             current_question=current_state.current_question.text,
             answer_text=answer_text,
-            next_round_name=next_step.round_name,
-            next_static_question=next_step.question_text,
+            next_round_name=next_round_name,
+            next_static_question=next_static_question,
             preset_context=preset_context,
             call_log_store=ai_call_log_store,
             content_safety_log_store=content_safety_log_store,
@@ -420,8 +426,8 @@ def build_next_question_override(
         return generated_question or build_contextual_fallback_question(
             current_state.interview_type,
             answer_text,
-            next_step.round_name,
-            next_step.question_text,
+            next_round_name,
+            next_static_question,
         )
 
 

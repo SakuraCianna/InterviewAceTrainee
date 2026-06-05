@@ -11,7 +11,7 @@ from typing import Any
 
 from app.schemas.interviews import InterviewType
 from app.services.interview_material_context import InterviewMaterialContext
-from app.services.interview_presets import best_preset_hint
+from app.services.interview_presets import best_preset_hint, load_interview_presets
 
 
 PRESET_ROOT = Path(__file__).resolve().parents[1] / "interview_presets"
@@ -62,9 +62,13 @@ def question_bank_inventory() -> dict[str, dict[str, Any]]:
         keywords=["计算机", "大模型", "教育"],
         created_at=datetime(2026, 6, 5),
     )
+    job_inventory = _inventory_from_banks(_job_banks(None))
+    job_inventory["role_bank_count"] = _preset_bank_count(InterviewType.JOB)
+    postgraduate_inventory = _inventory_from_banks(_postgraduate_banks(sample_postgraduate_context))
+    postgraduate_inventory["major_bank_count"] = _preset_bank_count(InterviewType.POSTGRADUATE)
     return {
-        "job": _inventory_from_banks(_job_banks(None)),
-        "postgraduate": _inventory_from_banks(_postgraduate_banks(sample_postgraduate_context)),
+        "job": job_inventory,
+        "postgraduate": postgraduate_inventory,
         "civil_service": _inventory_from_banks(_civil_service_banks()),
         "ielts": _ielts_inventory(),
     }
@@ -112,8 +116,12 @@ def _job_banks(material_context: InterviewMaterialContext | None) -> list[Questi
     material_keywords = "、".join((material_context.keywords or [])[:4]) if material_context else ""
     preset_title, question_angles, _ = best_preset_hint(InterviewType.JOB, material_context, "专业一面")
     role_label = preset_title or job_title or "目标岗位"
-    angle_hint = "、".join(question_angles[:4]) if question_angles else material_keywords or _compact_hint(job_requirements, "岗位匹配度、项目证据和问题定位")
+    material_hint = material_keywords or _compact_hint(job_requirements, "岗位匹配度、项目证据和问题定位")
+    angle_hint = "、".join(question_angles[:4]) if question_angles else material_hint
+    if material_hint and material_hint not in angle_hint:
+        angle_hint = f"{angle_hint}、{material_hint}"
     title = job_title or role_label
+    project_hint = _project_context_hint(material_context)
     banks = [
         (
             "岗位理解",
@@ -212,7 +220,11 @@ def _job_banks(material_context: InterviewMaterialContext | None) -> list[Questi
             ],
         ),
     ]
-    return _extend_job_banks(banks, title, role_label)
+    banks = _extend_job_banks(banks, title, role_label)
+    banks = _extend_role_specific_job_banks(banks, title, role_label, angle_hint)
+    if project_hint:
+        banks = _anchor_job_project_banks(banks, title, role_label, angle_hint, project_hint)
+    return _contextualize_job_banks(banks, role_label, angle_hint)
 
 
 def _postgraduate_banks(material_context: InterviewMaterialContext | None) -> list[QuestionRoundBank]:
@@ -224,7 +236,8 @@ def _postgraduate_banks(material_context: InterviewMaterialContext | None) -> li
     angle_hint = "、".join(question_angles[:4]) if question_angles else direction
     tier = postgraduate_school_tier(target_school)
     tier_label = _postgraduate_tier_label(tier)
-    return _postgraduate_banks_by_tier(tier, tier_label, target_school, major_label, direction, angle_hint)
+    discipline_focus = _postgraduate_discipline_focus(major, direction, major_label, angle_hint)
+    return _postgraduate_banks_by_tier(tier, tier_label, target_school, major_label, direction, angle_hint, discipline_focus)
 
 
 def _postgraduate_banks_by_tier(
@@ -234,6 +247,7 @@ def _postgraduate_banks_by_tier(
     major_label: str,
     direction: str,
     angle_hint: str,
+    discipline_focus: str,
 ) -> list[QuestionRoundBank]:
     pressure = {
         "elite": "问题意识、方法边界、文献差异和可验证研究假设",
@@ -315,7 +329,9 @@ def _postgraduate_banks_by_tier(
             ],
         ),
     ]
-    return _extend_postgraduate_banks(banks, tier_label, target_school, major_label, direction)
+    banks = _extend_postgraduate_banks(banks, tier_label, target_school, major_label, direction)
+    banks = _extend_postgraduate_discipline_banks(banks, major_label, direction, discipline_focus)
+    return _contextualize_postgraduate_banks(banks, major_label, discipline_focus)
 
 
 def _civil_service_banks() -> list[QuestionRoundBank]:
@@ -438,6 +454,137 @@ def _extend_job_banks(banks: list[QuestionRoundBank], title: str, role_label: st
     return _append_questions(banks, extras)
 
 
+def _extend_role_specific_job_banks(
+    banks: list[QuestionRoundBank],
+    title: str,
+    role_label: str,
+    angle_hint: str,
+) -> list[QuestionRoundBank]:
+    role_focus = _compact_hint(angle_hint, "岗位核心能力、真实交付证据和业务结果", max_chars=110)
+    extras = {
+        "岗位理解": [
+            f"请按「{role_label}」面试标准说明这个岗位的关键交付物是什么，并把交付物和{role_focus}逐项对应。",
+            f"如果你入职「{title}」第一周就要接手真实任务，你会先确认哪些业务边界、技术边界或协作边界？",
+            f"请选出「{role_label}」最容易被简历包装掩盖的一项能力，说明面试官应该如何验证。",
+            f"请从初级、独立负责、核心骨干三个层级说明「{title}」能力要求的差异。",
+        ],
+        "项目证据": [
+            f"请用一个真实项目证明你具备「{role_label}」能力，回答必须落到{role_focus}中的具体动作和结果。",
+            f"围绕「{title}」岗位，请说明你做过的项目里哪一段最能经得起专业追问，为什么？",
+            f"请把一个项目拆成「{role_label}」视角下的输入、处理、输出、验收标准和复盘结论。",
+            f"如果面试官只追问{role_focus}，你准备用哪个项目作为主证据？请先讲清项目边界。",
+        ],
+        "方案取舍": [
+            f"围绕{role_focus}，请讲一次你做方案取舍的经历：比较项、决策依据、放弃项和后果分别是什么？",
+            f"如果「{role_label}」场景下短期上线和长期质量冲突，你会如何定优先级并向团队解释？",
+            f"请说明一次你为了「{title}」相关目标调整方案的经历，重点讲验证方法而不是只讲结论。",
+            f"如果面试官要求你现场重做方案，请按{role_focus}给出一个更稳的备选路径。",
+        ],
+        "指标复盘": [
+            f"请说明「{role_label}」项目里哪些指标最能证明真实贡献，并解释这些指标为什么不是虚荣指标。",
+            f"围绕{role_focus}，请讲一次你如何设计验收指标、观察结果并推动下一轮改进。",
+            f"如果你负责的「{title}」任务没有直接增长数据，你会用哪些质量、效率或风险指标证明价值？",
+            f"请说明一次你通过复盘发现「{role_label}」能力短板的经历，以及下一次如何修正。",
+        ],
+        "根因定位": [
+            f"请讲一次和{role_focus}相关的复杂问题定位：现象、假设、验证、证据链和最终修复分别是什么？",
+            f"如果「{title}」场景里的问题跨越业务、技术和协作边界，你会如何拆分责任和排查路径？",
+            f"请说明一次你没有停在表面现象，而是找到「{role_label}」深层原因的经历。",
+            f"如果面试官质疑你只是执行别人安排，请用一次根因定位过程证明你的独立判断。",
+        ],
+        "压力追问": [
+            f"如果面试官指出你的经历和「{role_label}」核心要求不完全匹配，你会用哪条证据补齐？",
+            f"如果对方围绕{role_focus}连续追问细节，你最可能被问倒的一点是什么，你准备如何回答？",
+            f"如果你的项目成果主要依赖团队资源，你如何证明自己在「{title}」能力上不可替代？",
+            f"如果入职后第一个月就遇到「{role_label}」高压交付，你会如何控制风险并同步预期？",
+        ],
+        "协作与动机": [
+            f"请说明你为什么选择「{title}」而不是相邻岗位，回答要落到{role_focus}和长期成长路径。",
+            f"请讲一次你在「{role_label}」相关任务里和非同专业同事协作的经历，说明如何减少误解。",
+            f"如果团队对{role_focus}的判断与你不同，你会如何提出证据、推进讨论并接受结果？",
+            f"请说明你希望在「{title}」岗位前 90 天拿到什么可验证结果。",
+        ],
+        "终面收束": [
+            f"请用 2 分钟总结你和「{role_label}」的匹配度：岗位理解、项目证据、{role_focus}和风险补齐。",
+            f"如果终面官只记住一个「{title}」相关证据，你希望是哪一个，为什么它足够可信？",
+            f"请说明你相对同岗位候选人的差异化，不讲性格标签，只讲{role_focus}里的证据。",
+            f"如果这次面试失败，你认为「{role_label}」哪项能力最需要补，下一周会怎么练？",
+        ],
+    }
+    return _append_questions(banks, extras)
+
+
+def _anchor_job_project_banks(
+    banks: list[QuestionRoundBank],
+    title: str,
+    role_label: str,
+    angle_hint: str,
+    project_hint: str,
+) -> list[QuestionRoundBank]:
+    role_focus = _compact_hint(angle_hint, "岗位核心能力、业务结果和专业细节", max_chars=96)
+    project_questions = {
+        "项目证据": [
+            f"你的材料里提到「{project_hint}」。请按背景、目标、你的职责、关键动作、结果指标讲清楚这个项目。",
+            f"请围绕「{project_hint}」说明你个人最核心的贡献，不要讲团队概述，要讲你亲自做了什么。",
+            f"如果面试官要验证「{project_hint}」是否真实，请你先给出项目时间线、上下游角色和验收标准。",
+            f"请把「{project_hint}」拆成业务问题、技术或专业方案、协作对象和最终结果四部分。",
+            f"围绕「{title}」岗位，请说明「{project_hint}」中最能证明{role_focus}的一段经历。",
+            f"如果删掉你在「{project_hint}」里的工作，项目会在哪些环节受影响？请给出可验证细节。",
+            f"请讲「{project_hint}」里一个你曾经判断失误或返工的点，以及你后面如何修正。",
+            f"请说明「{project_hint}」里你掌握得最扎实、也最愿意被追问的三个细节。",
+            f"如果面试官只给 90 秒，请用「问题-行动-结果」讲完「{project_hint}」。",
+            f"请把「{project_hint}」和「{role_label}」岗位要求逐项对应，指出最强证据和最弱证据。",
+        ],
+        "方案取舍": [
+            f"在「{project_hint}」里，你做过哪一个关键取舍？请说明备选方案、选择理由、风险和结果。",
+            f"请围绕「{project_hint}」讲一次你没有选择更复杂方案的经历，为什么它对「{title}」更合适？",
+            f"如果重新做「{project_hint}」，你会保留什么、重做什么、先验证什么？",
+            f"请说明「{project_hint}」中一次需求、成本、进度或质量之间的冲突，你如何权衡。",
+            f"面试官如果质疑「{project_hint}」方案不够专业，你会用哪些证据解释当时的约束？",
+            f"围绕{role_focus}，请说明「{project_hint}」里最难的一次方案比较。",
+            f"如果「{project_hint}」要放大到更高并发、更大用户量或更复杂业务，你会先改哪部分？",
+            f"请讲「{project_hint}」里你和团队意见不一致的一次技术或业务选择，最后如何达成一致。",
+            f"如果「{project_hint}」里有一次临时变更，你如何判断是否接受变更并保护核心质量？",
+            f"请把「{project_hint}」的一个方案选择讲给非专业同事听，你会如何表达取舍逻辑？",
+        ],
+        "指标复盘": [
+            f"请说明「{project_hint}」最终用哪些指标验收，例如质量、效率、延迟、转化、准确率或用户反馈。",
+            f"如果「{project_hint}」结果看起来变好了，你如何排除偶然因素并证明是你的方案产生作用？",
+            f"请讲「{project_hint}」上线或交付后的复盘：数据怎么看，问题怎么定位，下一版怎么改。",
+            f"围绕「{role_label}」能力，请说明「{project_hint}」里最能证明你贡献的一个量化结果。",
+            f"如果「{project_hint}」没有明确指标，你会如何补设计一套复盘指标？",
+            f"请说明「{project_hint}」里一个结果不符合预期的指标，以及你如何解释原因。",
+            f"如果面试官追问「{project_hint}」的投入产出比，你会如何用事实回答？",
+            f"请说明你如何从「{project_hint}」里沉淀出可复用方法，而不是只完成一次交付。",
+            f"围绕{role_focus}，请说明「{project_hint}」的过程指标和结果指标分别是什么。",
+            f"如果要把「{project_hint}」写进简历，你会保留哪三个最可信的指标？",
+        ],
+        "根因定位": [
+            f"请讲「{project_hint}」里一次真实问题定位过程：现象、假设、排查顺序、证据链和修复结果。",
+            f"如果「{project_hint}」出现偶发问题，你会如何设计复现路径并避免误判根因？",
+            f"请说明「{project_hint}」中最容易被忽视的风险点，你当时如何发现或补救。",
+            f"如果面试官认为「{project_hint}」的问题只是执行细节，你如何说明背后的系统性原因？",
+            f"请围绕{role_focus}，讲一次你在「{project_hint}」里从数据、日志、访谈或实验中找到证据。",
+            f"如果「{project_hint}」的根因涉及跨团队协作，你如何拿到信息并推动闭环？",
+            f"请讲一次「{project_hint}」里你最初判断错误的排查方向，以及后来如何纠正。",
+            f"如果「{project_hint}」上线后用户反馈异常，你会如何先止损、再定位、最后复盘？",
+            f"请说明「{project_hint}」里一个你现在仍然觉得可以优化的风险点。",
+            f"如果让你指导新人接手「{project_hint}」的问题排查，你会给出怎样的检查清单？",
+        ],
+    }
+    return _replace_questions(banks, project_questions)
+
+
+def _contextualize_job_banks(
+    banks: list[QuestionRoundBank],
+    role_label: str,
+    angle_hint: str,
+) -> list[QuestionRoundBank]:
+    role_focus = _compact_hint(angle_hint, "岗位核心能力、项目证据和业务结果", max_chars=120)
+    suffix = f"回答时请按「{role_label}」真实面试口径展开，至少落到{role_focus}中的一个具体点。"
+    return _append_suffix_to_questions(banks, suffix)
+
+
 def _extend_postgraduate_banks(
     banks: list[QuestionRoundBank],
     tier_label: str,
@@ -486,6 +633,78 @@ def _extend_postgraduate_banks(
     return _append_questions(banks, extras)
 
 
+def _extend_postgraduate_discipline_banks(
+    banks: list[QuestionRoundBank],
+    major_label: str,
+    direction: str,
+    discipline_focus: str,
+) -> list[QuestionRoundBank]:
+    extras = {
+        "复试开场": [
+            f"请用「{major_label}」专业语言重写自我介绍，说明你过去准备和{discipline_focus}之间的关系。",
+            f"如果老师要求你证明不是跨专业泛泛报考，请用课程、项目或阅读经历连接{discipline_focus}。",
+            f"请说明你对「{direction}」的兴趣来自哪个具体问题，并解释它和{discipline_focus}的关系。",
+            f"请用一段复试开场说明你目前最扎实和最薄弱的专业模块，专业模块必须落到{discipline_focus}。",
+        ],
+        "专业基础": [
+            f"请围绕{discipline_focus}选择一个基础概念，讲清定义、边界、典型应用和常见误区。",
+            f"如果老师从{discipline_focus}里抽一个口头推导或案例分析题，你会如何分层作答？",
+            f"请把「{major_label}」的一门核心课和「{direction}」连接起来，说明能支撑哪类研究问题。",
+            f"请说明{discipline_focus}中你最容易答浅的一块，并给出入学前补基础的计划。",
+            f"如果老师要求你用例子解释{discipline_focus}，请给出一个你真实准备过的例子。",
+            f"请从「概念、方法、评价」三个层次说明{discipline_focus}为什么是「{major_label}」复试重点。",
+        ],
+        "项目与科研潜力": [
+            f"请把一个项目或课程作业改写成「{major_label}」研究问题，必须包含{discipline_focus}里的方法或变量。",
+            f"围绕「{direction}」，请提出一个小课题，并说明如何用{discipline_focus}设计验证路径。",
+            f"如果老师质疑你的项目只是应用实现，请从{discipline_focus}角度说明其中的研究价值。",
+            f"请说明一个项目结果的可信度如何判断，回答要覆盖{discipline_focus}里的数据、方法或评价标准。",
+            f"如果你的项目要继续做成研究生课题，请说明下一步最该补的实验、案例、样本或理论分析。",
+            f"请讲一次你围绕{discipline_focus}查资料、做实验或分析案例后改变原判断的经历。",
+        ],
+        "文献与英文": [
+            f"请说明你会如何围绕{discipline_focus}建立文献清单：检索词、筛选标准和阅读顺序是什么？",
+            f"如果两篇文献都研究「{direction}」，请从问题定义、方法路径、评价标准和局限性比较。",
+            f"请用「{major_label}」视角说明你读英文文献时最先看什么，如何判断它是否服务{discipline_focus}。",
+            f"如果老师让你现场概括一篇相关英文论文，请用问题、方法、结果、局限四段式回答。",
+            f"请说明你如何避免只背文献结论，而是把文献差异转化成自己的研究切入点。",
+            f"如果文献结论和你的项目经验冲突，你会如何从数据、样本、方法或案例边界分析原因？",
+        ],
+        "导师方向适配": [
+            f"请把「{direction}」和导师可能关注的{discipline_focus}连接起来，提出第一学期可验证的小计划。",
+            f"如果导师方向偏离你原先准备，请说明你如何用{discipline_focus}建立最低可用知识框架。",
+            f"请说明你调研目标院校时看过哪些和「{major_label}」培养、平台或课题组直接相关的信息。",
+            f"如果老师追问你为什么适合这个课题组，请用{discipline_focus}、项目经历和学习计划作答。",
+            f"请提出一个你想向导师确认的问题，并说明它为什么会影响「{direction}」的研究路线。",
+            f"如果导师要求你承担基础性工作，你会如何把它和{discipline_focus}训练结合起来？",
+        ],
+        "学术规范与压力": [
+            f"如果围绕{discipline_focus}得到的结果和预期相反，你会如何记录、复核并向导师汇报？",
+            f"如果老师质疑你对{discipline_focus}的理解只停留在名词层面，你会如何补充推理过程？",
+            f"请说明「{major_label}」研究中哪些数据、案例、引用或实验记录最容易出现规范风险。",
+            f"如果同学建议只展示有利结果，你会如何坚持学术规范并说明负结果的价值？",
+            f"如果复试现场被追问到{discipline_focus}中不会的细节，你会如何承认边界并给出学习路径？",
+            f"请说明你如何判断一个「{direction}」研究计划是否过大、过空或不可验证。",
+        ],
+    }
+    return _append_questions(banks, extras)
+
+
+def _contextualize_postgraduate_banks(
+    banks: list[QuestionRoundBank],
+    major_label: str,
+    discipline_focus: str,
+) -> list[QuestionRoundBank]:
+    suffix = f"回答时请按「{major_label}」正式复试标准展开，专业边界至少落到{discipline_focus}。"
+    contextualized: list[QuestionRoundBank] = []
+    for round_name, difficulty, questions in banks:
+        round_suffix = suffix
+        if round_name == "文献与英文":
+            round_suffix = f"{suffix} 同时必须说明文献差异、贡献和局限。"
+        contextualized.append((round_name, difficulty, [f"{question.strip()} {round_suffix}" for question in questions]))
+    return contextualized
+
+
 def _extend_civil_service_banks(banks: list[QuestionRoundBank]) -> list[QuestionRoundBank]:
     extras = {
         "岗位认知": [
@@ -527,6 +746,126 @@ def _append_questions(banks: list[QuestionRoundBank], extras: dict[str, list[str
         (round_name, difficulty, [*questions, *extras.get(round_name, [])])
         for round_name, difficulty, questions in banks
     ]
+
+
+def _replace_questions(banks: list[QuestionRoundBank], replacements: dict[str, list[str]]) -> list[QuestionRoundBank]:
+    return [
+        (round_name, difficulty, replacements.get(round_name, questions))
+        for round_name, difficulty, questions in banks
+    ]
+
+
+def _append_suffix_to_questions(banks: list[QuestionRoundBank], suffix: str) -> list[QuestionRoundBank]:
+    return [
+        (
+            round_name,
+            difficulty,
+            [f"{question.strip()} {suffix}" for question in questions],
+        )
+        for round_name, difficulty, questions in banks
+    ]
+
+
+def _project_context_hint(material_context: InterviewMaterialContext | None) -> str:
+    if material_context is None:
+        return ""
+    text_blocks = [
+        material_context.resume_text or "",
+        material_context.profile_summary or "",
+        " ".join(material_context.keywords or []),
+    ]
+    combined = "\n".join(block for block in text_blocks if block.strip())
+    if not combined.strip():
+        return ""
+    project_markers = (
+        "项目",
+        "系统",
+        "平台",
+        "小程序",
+        "网站",
+        "app",
+        "应用",
+        "服务",
+        "模型",
+        "实验",
+        "论文",
+        "课题",
+        "毕业设计",
+        "竞赛",
+        "作品",
+    )
+    for candidate in re.split(r"[。！？!?；;\r\n]+", combined):
+        candidate = candidate.strip(" ：:，,")
+        if len(candidate) < 8:
+            continue
+        if _text_matches_any(candidate, project_markers):
+            return _compact_hint(candidate, "", max_chars=120)
+    return ""
+
+
+def _postgraduate_discipline_focus(
+    major: str,
+    direction: str,
+    major_label: str,
+    angle_hint: str,
+) -> str:
+    query = f"{major} {direction} {major_label} {angle_hint}".lower()
+    focus_rules: tuple[tuple[tuple[str, ...], str], ...] = (
+        (
+            ("计算机", "软件", "人工智能", "大模型", "机器学习", "算法", "数据科学", "网络空间", "信息安全"),
+            "数据结构与算法复杂度、系统边界、模型评估、数据集偏差",
+        ),
+        (
+            ("法学", "法律", "法硕", "民商法", "刑法", "行政法", "知识产权"),
+            "法条体系、法律适用、案例争点、价值衡量",
+        ),
+        (
+            ("医学", "临床", "护理", "公共卫生", "药学", "口腔", "中医"),
+            "循证证据、临床路径、伦理边界、样本与指南",
+        ),
+        (
+            ("教育", "心理", "学科教学", "应用心理", "课程与教学"),
+            "教育测量、课堂观察、干预设计、研究伦理",
+        ),
+        (
+            ("经济", "金融", "管理", "会计", "工商", "公共管理", "mpa", "mba"),
+            "变量识别、因果推断、组织决策、数据解释",
+        ),
+        (
+            ("新闻", "传播", "中文", "文学", "外语", "翻译", "历史", "哲学", "马克思"),
+            "文本细读、理论脉络、语料或史料证据、问题意识",
+        ),
+        (
+            ("数学", "统计", "物理", "化学", "生物", "地理", "资源环境"),
+            "模型假设、实验或样本设计、误差分析、结果解释",
+        ),
+        (
+            ("机械", "控制", "电子", "通信", "土木", "材料", "电气", "交通", "能源"),
+            "工程建模、实验验证、误差控制、工艺或系统安全",
+        ),
+        (
+            ("设计", "艺术", "美术", "视觉", "工业设计", "音乐", "戏剧"),
+            "作品集逻辑、设计研究、视觉叙事、用户或场域验证",
+        ),
+        (
+            ("农业", "林学", "生态", "食品", "环境"),
+            "样本采集、生态或生产场景、实验设计、应用转化",
+        ),
+    )
+    for keywords, focus in focus_rules:
+        if _text_matches_any(query, keywords):
+            return focus
+    compacted_angles = _compact_hint(angle_hint, "专业基础、研究问题、方法路径、文献边界", max_chars=72)
+    return f"{compacted_angles}、研究问题、方法路径"
+
+
+def _preset_bank_count(interview_type: InterviewType) -> int:
+    return sum(1 for preset in load_interview_presets() if preset.interview_type == interview_type)
+
+
+def _text_matches_any(text: str, keywords: tuple[str, ...]) -> bool:
+    lowered = text.lower()
+    return any(keyword.lower() in lowered for keyword in keywords)
 
 
 IELTS_THEME_SETS = [

@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime
 
-from app.api.interviews import answer_interview_question
+from app.api.interviews import answer_interview_question, build_next_question_override
 from app.core.config import Settings
 from app.schemas.interviews import InterviewAnswerRequest, InterviewType
 from app.services.ai_call_logs import InMemoryAICallLogStore
@@ -30,9 +30,32 @@ class InterviewFlowTests(unittest.TestCase):
             ]
         )
 
-    def postgraduate_context(self, target_school: str) -> InterviewMaterialContext:
+    def job_context(self, job_title: str, job_requirements: str, resume_text: str, keywords: list[str]) -> InterviewMaterialContext:
         return InterviewMaterialContext(
-            id=f"material-{target_school}",
+            id=f"material-{job_title}",
+            user_email="candidate@example.com",
+            interview_type=InterviewType.JOB,
+            resume_filename="resume.pdf",
+            resume_content_type="application/pdf",
+            resume_text=resume_text,
+            job_title=job_title,
+            job_requirements=job_requirements,
+            target_school=None,
+            major=None,
+            research_direction=None,
+            profile_summary=resume_text,
+            keywords=keywords,
+            created_at=datetime(2026, 6, 5),
+        )
+
+    def postgraduate_context(
+        self,
+        target_school: str,
+        major: str = "计算机科学与技术",
+        research_direction: str = "大模型教育应用",
+    ) -> InterviewMaterialContext:
+        return InterviewMaterialContext(
+            id=f"material-{target_school}-{major}",
             user_email="student@example.com",
             interview_type=InterviewType.POSTGRADUATE,
             resume_filename=None,
@@ -41,10 +64,10 @@ class InterviewFlowTests(unittest.TestCase):
             job_title=None,
             job_requirements=None,
             target_school=target_school,
-            major="计算机科学与技术",
-            research_direction="大模型教育应用",
+            major=major,
+            research_direction=research_direction,
             profile_summary="目标院校与报考专业已填写。",
-            keywords=["计算机", "大模型", "教育"],
+            keywords=[major, research_direction],
             created_at=datetime(2026, 6, 5),
         )
 
@@ -132,6 +155,96 @@ class InterviewFlowTests(unittest.TestCase):
                     28,
                     f"{scenario} question bank contains rough short questions",
                 )
+
+    def test_question_bank_tracks_independent_role_and_major_banks(self) -> None:
+        inventory = question_bank_inventory()
+
+        self.assertGreaterEqual(inventory["job"]["role_bank_count"], 200)
+        self.assertGreaterEqual(inventory["postgraduate"]["major_bank_count"], 100)
+
+    def test_job_questions_are_specialized_by_career_and_user_project(self) -> None:
+        backend_context = self.job_context(
+            job_title="Python 后端工程师",
+            job_requirements="负责 FastAPI 服务、PostgreSQL 建模、Redis 缓存、RAG 检索链路和接口稳定性。",
+            resume_text="智能客服 RAG 项目：我负责检索链路、向量库召回、Redis 缓存和接口延迟优化。",
+            keywords=["FastAPI", "Redis", "RAG", "向量库"],
+        )
+        design_context = self.job_context(
+            job_title="UI/UX 设计师",
+            job_requirements="负责用户旅程、交互逻辑、设计系统、可用性验证和高保真原型。",
+            resume_text="招聘后台体验改版项目：我负责用户旅程梳理、组件规范和可用性测试。",
+            keywords=["用户旅程", "设计系统", "可用性验证"],
+        )
+
+        backend_questions = " ".join(
+            step.question_text
+            for step in build_interview_steps(InterviewType.JOB, backend_context, session_id="backend-project-case")
+        )
+        design_questions = " ".join(
+            step.question_text
+            for step in build_interview_steps(InterviewType.JOB, design_context, session_id="designer-project-case")
+        )
+
+        self.assertIn("智能客服 RAG 项目", backend_questions)
+        self.assertIn("接口延迟", backend_questions)
+        self.assertIn("FastAPI", backend_questions)
+        self.assertIn("用户旅程", design_questions)
+        self.assertIn("设计系统", design_questions)
+        self.assertNotIn("Redis 缓存", design_questions)
+
+    def test_postgraduate_questions_are_specialized_by_major(self) -> None:
+        computer_questions = " ".join(
+            step.question_text
+            for step in build_interview_steps(
+                InterviewType.POSTGRADUATE,
+                self.postgraduate_context("清华大学", major="计算机科学与技术", research_direction="大模型教育应用"),
+                session_id="postgraduate-computer-case",
+            )
+        )
+        law_questions = " ".join(
+            step.question_text
+            for step in build_interview_steps(
+                InterviewType.POSTGRADUATE,
+                self.postgraduate_context("清华大学", major="法学", research_direction="民商法案例研究"),
+                session_id="postgraduate-law-case",
+            )
+        )
+
+        self.assertIn("数据结构与算法复杂度", computer_questions)
+        self.assertIn("模型评估", computer_questions)
+        self.assertIn("法条体系", law_questions)
+        self.assertIn("法律适用", law_questions)
+        self.assertNotEqual(computer_questions, law_questions)
+
+    def test_adaptive_followup_uses_seeded_next_question_from_session(self) -> None:
+        store = InMemoryInterviewRuntimeStore()
+        material_context = self.job_context(
+            job_title="Python 后端工程师",
+            job_requirements="负责 FastAPI 服务、PostgreSQL 建模、Redis 缓存和接口稳定性。",
+            resume_text="智能客服 RAG 项目：我负责检索链路、向量库召回、Redis 缓存和接口延迟优化。",
+            keywords=["FastAPI", "Redis", "RAG"],
+        )
+        state = store.create_session(
+            "candidate@example.com",
+            "seeded-followup-session",
+            InterviewType.JOB,
+            material_context,
+        )
+        expected_next_question = state.next_question
+
+        followup_question = build_next_question_override(
+            current_state=state,
+            answer_text="我负责智能客服 RAG 项目的 FastAPI 接口、Redis 缓存和向量库召回优化，主要目标是降低接口延迟并提升回答命中率。",
+            provider_store=self.disabled_provider_store(),
+            ai_call_log_store=InMemoryAICallLogStore(),
+            content_safety_log_store=InMemoryContentSafetyLogStore(),
+            settings=Settings(),
+            user_email="candidate@example.com",
+        )
+
+        self.assertIsNotNone(expected_next_question)
+        self.assertIsNotNone(followup_question)
+        self.assertIn(expected_next_question.text[:36], followup_question or "")
 
     def test_answer_api_requires_supplement_before_advancing(self) -> None:
         store = InMemoryInterviewRuntimeStore()

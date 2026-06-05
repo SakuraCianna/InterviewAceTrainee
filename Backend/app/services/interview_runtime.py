@@ -39,6 +39,7 @@ class InterviewState:
     current_step_index: int
     total_steps: int
     current_question: InterviewQuestion | None
+    next_question: InterviewQuestion | None = None
     report: InterviewReportResponse | None = None
     material_context: InterviewMaterialContext | None = None
 
@@ -732,9 +733,17 @@ class InMemoryInterviewRuntimeStore:
     def _to_state(self, record: dict[str, Any]) -> InterviewState:
         index = record["current_step_index"]
         current_question = None
+        next_question = None
         if record["status"] != "completed":
             step = record["steps"][index]
             current_question = InterviewQuestion(turn_index=index, round_name=step.round_name, text=step.question_text)
+            if index + 1 < len(record["steps"]):
+                next_step = record["steps"][index + 1]
+                next_question = InterviewQuestion(
+                    turn_index=index + 1,
+                    round_name=next_step.round_name,
+                    text=next_step.question_text,
+                )
         return InterviewState(
             session_id=record["session_id"],
             user_email=record["user_email"],
@@ -743,6 +752,7 @@ class InMemoryInterviewRuntimeStore:
             current_step_index=index,
             total_steps=len(record["steps"]),
             current_question=current_question,
+            next_question=next_question,
             report=record["report"],
             material_context=record.get("material_context"),
         )
@@ -967,6 +977,7 @@ class DatabaseInterviewRuntimeStore:
 
     def _to_state(self, session_model: InterviewSession) -> InterviewState:
         current_question = None
+        next_question = None
         if session_model.status != "completed":
             turn = self._session.execute(
                 select(InterviewTurn).where(
@@ -979,6 +990,19 @@ class DatabaseInterviewRuntimeStore:
                 round_name=turn.round_name,
                 text=turn.question_text,
             )
+            if session_model.current_step_index + 1 < session_model.total_steps:
+                next_turn = self._session.execute(
+                    select(InterviewTurn).where(
+                        InterviewTurn.session_id == session_model.id,
+                        InterviewTurn.turn_index == session_model.current_step_index + 1,
+                    )
+                ).scalar_one_or_none()
+                if next_turn is not None:
+                    next_question = InterviewQuestion(
+                        turn_index=next_turn.turn_index,
+                        round_name=next_turn.round_name,
+                        text=next_turn.question_text,
+                    )
 
         return InterviewState(
             session_id=session_model.id,
@@ -988,6 +1012,7 @@ class DatabaseInterviewRuntimeStore:
             current_step_index=session_model.current_step_index,
             total_steps=session_model.total_steps,
             current_question=current_question,
+            next_question=next_question,
             report=self.get_report(session_model.user_email, session_model.id) if session_model.status == "completed" else None,
             material_context=self._material_context(session_model.material_id),
         )
