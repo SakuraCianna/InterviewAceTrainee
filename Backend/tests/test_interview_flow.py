@@ -9,6 +9,7 @@ from app.services.ai_router import AIProviderConfig
 from app.services.content_safety_logs import InMemoryContentSafetyLogStore
 from app.services.interview_material_context import InterviewMaterialContext
 from app.services.interview_ai import assess_answer_quality
+from app.services.interview_question_bank import question_bank_inventory, postgraduate_school_tier
 from app.services.interview_runtime import InMemoryInterviewRuntimeStore, build_interview_steps
 from app.services.provider_configs import InMemoryProviderConfigStore
 
@@ -96,6 +97,35 @@ class InterviewFlowTests(unittest.TestCase):
         self.assertIn("文献差异", elite_steps[3].question_text)
         self.assertIn("基础复试", standard_steps[0].question_text)
         self.assertNotEqual(elite_steps[1].question_text, standard_steps[1].question_text)
+
+    def test_postgraduate_school_tier_uses_formal_school_config(self) -> None:
+        self.assertEqual(postgraduate_school_tier("北京大学"), "elite")
+        self.assertEqual(postgraduate_school_tier("华南理工大学"), "high")
+        self.assertEqual(postgraduate_school_tier("湖南师范大学"), "advanced")
+        self.assertEqual(postgraduate_school_tier("普通地方学院"), "standard")
+
+    def test_question_bank_is_rich_and_ordered_by_difficulty(self) -> None:
+        inventory = question_bank_inventory()
+        expected_min_choices = {
+            "job": 6,
+            "postgraduate": 6,
+            "civil_service": 6,
+            "ielts": 6,
+        }
+
+        for scenario, min_choices in expected_min_choices.items():
+            self.assertIn(scenario, inventory)
+            for round_info in inventory[scenario]["rounds"]:
+                self.assertGreaterEqual(
+                    round_info["choice_count"],
+                    min_choices,
+                    f"{scenario} {round_info['round_name']} choices are too thin",
+                )
+            self.assertEqual(
+                inventory[scenario]["difficulty_scores"],
+                sorted(inventory[scenario]["difficulty_scores"]),
+                f"{scenario} questions must progress from easier to harder",
+            )
 
     def test_answer_api_requires_supplement_before_advancing(self) -> None:
         store = InMemoryInterviewRuntimeStore()
