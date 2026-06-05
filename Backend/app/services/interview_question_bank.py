@@ -117,9 +117,7 @@ def _job_banks(material_context: InterviewMaterialContext | None) -> list[Questi
     preset_title, question_angles, _ = best_preset_hint(InterviewType.JOB, material_context, "专业一面")
     role_label = preset_title or job_title or "目标岗位"
     material_hint = material_keywords or _compact_hint(job_requirements, "岗位匹配度、项目证据和问题定位")
-    angle_hint = "、".join(question_angles[:4]) if question_angles else material_hint
-    if material_hint and material_hint not in angle_hint:
-        angle_hint = f"{angle_hint}、{material_hint}"
+    angle_hint = _merge_focus_terms("、".join(question_angles[:4]), material_hint, fallback=material_hint)
     title = job_title or role_label
     project_hint = _project_context_hint(material_context)
     banks = [
@@ -224,6 +222,7 @@ def _job_banks(material_context: InterviewMaterialContext | None) -> list[Questi
     banks = _extend_role_specific_job_banks(banks, title, role_label, angle_hint)
     if project_hint:
         banks = _anchor_job_project_banks(banks, title, role_label, angle_hint, project_hint)
+    banks = _apply_job_domain_language(banks, title, role_label, angle_hint)
     return _contextualize_job_banks(banks, role_label, angle_hint)
 
 
@@ -331,6 +330,7 @@ def _postgraduate_banks_by_tier(
     ]
     banks = _extend_postgraduate_banks(banks, tier_label, target_school, major_label, direction)
     banks = _extend_postgraduate_discipline_banks(banks, major_label, direction, discipline_focus)
+    banks = _apply_postgraduate_discipline_language(banks, discipline_focus)
     return _contextualize_postgraduate_banks(banks, major_label, discipline_focus)
 
 
@@ -806,6 +806,120 @@ def _append_suffix_to_questions(banks: list[QuestionRoundBank], suffix: str) -> 
         )
         for round_name, difficulty, questions in banks
     ]
+
+
+def _apply_job_domain_language(
+    banks: list[QuestionRoundBank],
+    title: str,
+    role_label: str,
+    angle_hint: str,
+) -> list[QuestionRoundBank]:
+    query = f"{title} {role_label} {angle_hint}"
+    replacements: dict[str, str] = {}
+    if _text_matches_any(query, ("护士", "护理", "临床", "医嘱", "患者")):
+        replacements.update(
+            {
+                "用户、业务和团队": "患者、护理质量和团队协作",
+                "业务目标": "护理质量目标",
+                "业务理解": "患者需求理解",
+                "新业务": "新护理流程",
+                "关键技术或业务取舍": "关键护理处置或风险控制取舍",
+                "技术或业务取舍": "护理处置或风险控制取舍",
+                "可维护性和上线节奏": "安全性、规范性和执行节奏",
+                "业务方": "科室或患者家属",
+                "上线后用户反馈": "执行后患者反馈",
+                "用户反馈": "患者反馈",
+                "业务数据": "护理记录",
+                "业务问题、技术或专业方案": "护理问题、专业处置方案",
+                "更高并发、更大用户量或更复杂业务": "更高患者量、更复杂病情或更严格质控",
+                "数据、日志、访谈或实验": "护理记录、医嘱、患者反馈或风险事件复盘",
+                "高压交付": "高压护理任务",
+                "公司业务链路": "医疗护理服务链路",
+                "交付价值": "保障护理质量",
+                "产品或业务事实": "护理规范或患者安全事实",
+                "短期上线和长期质量冲突": "短期处理效率和长期护理质量冲突",
+            }
+        )
+    if _text_matches_any(query, ("ui/ux", "ui ux", "用户体验", "交互设计", "设计系统", "可用性", "视觉设计")):
+        replacements.update(
+            {
+                "用户、业务和团队": "用户体验、产品目标和协作团队",
+                "业务目标": "产品体验目标",
+                "业务理解": "用户场景理解",
+                "业务方": "产品方或需求方",
+                "关键技术或业务取舍": "关键交互方案或产品目标取舍",
+                "技术或业务取舍": "交互方案或产品目标取舍",
+                "数据、实验或小范围验证": "用户反馈、可用性测试或小范围验证",
+                "产品或业务事实": "产品场景或用户研究证据",
+                "公司业务链路": "产品体验链路",
+                "交付价值": "提升用户体验和产品效率",
+            }
+        )
+    if not replacements:
+        return banks
+    return _replace_question_text(banks, replacements)
+
+
+def _apply_postgraduate_discipline_language(
+    banks: list[QuestionRoundBank],
+    discipline_focus: str,
+) -> list[QuestionRoundBank]:
+    non_engineering_markers = (
+        "法条体系",
+        "文本细读",
+        "教育测量",
+        "变量识别",
+        "作品集逻辑",
+    )
+    if not _text_matches_any(discipline_focus, non_engineering_markers):
+        return banks
+    replacements = {
+        "研究价值、技术路线、实验验证和不足": "研究价值、方法路径、材料证据和不足",
+        "技术路线": "方法路径",
+        "实验验证": "证据验证",
+        "工程实现": "应用整理",
+        "实验、对照组、误差分析或消融分析": "案例材料、样本边界、方法比较或理论分析",
+        "技术或实验瓶颈": "材料、方法或论证瓶颈",
+        "实验论文": "实证论文",
+        "实验部分": "方法部分",
+        "实验结果": "研究结果",
+        "复现实验": "复核材料",
+        "重复实验": "复核材料",
+        "做实验或分析案例": "查资料或分析案例",
+        "实验记录": "研究记录",
+    }
+    return _replace_question_text(banks, replacements)
+
+
+def _replace_question_text(banks: list[QuestionRoundBank], replacements: dict[str, str]) -> list[QuestionRoundBank]:
+    replaced_banks: list[QuestionRoundBank] = []
+    for round_name, difficulty, questions in banks:
+        replaced_questions = []
+        for question in questions:
+            next_question = question
+            for source, target in replacements.items():
+                next_question = next_question.replace(source, target)
+            replaced_questions.append(next_question)
+        replaced_banks.append((round_name, difficulty, replaced_questions))
+    return replaced_banks
+
+
+def _merge_focus_terms(*hints: str | None, fallback: str) -> str:
+    terms: list[str] = []
+    seen: set[str] = set()
+    for hint in hints:
+        if not hint:
+            continue
+        for term in re.split(r"[、，,；;\s]+", hint):
+            compacted = term.strip()
+            if not compacted:
+                continue
+            normalized = compacted.lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            terms.append(compacted)
+    return "、".join(terms) or fallback
 
 
 def _project_context_hint(material_context: InterviewMaterialContext | None) -> str:

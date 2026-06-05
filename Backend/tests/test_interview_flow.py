@@ -243,6 +243,53 @@ class InterviewFlowTests(unittest.TestCase):
         self.assertIn("用户旅程", design_questions)
         self.assertIn("设计系统", design_questions)
         self.assertNotIn("Redis 缓存", design_questions)
+        self.assertNotIn("招聘专员", design_questions)
+        self.assertNotIn("岗位画像", design_questions)
+        self.assertNotIn("保密合规", design_questions)
+        self.assertNotIn("用户、业务和团队", design_questions)
+        self.assertNotIn("用户旅程、交互逻辑、设计系统、可用性验证、用户旅程", design_questions)
+
+    def test_job_preset_matching_prioritizes_target_title_over_resume_domain(self) -> None:
+        design_context = self.job_context(
+            job_title="UI/UX 设计师",
+            job_requirements="负责用户旅程、交互逻辑、设计系统、可用性验证和高保真原型。",
+            resume_text="招聘后台体验改版项目：我负责用户旅程梳理、组件规范和可用性测试。",
+            keywords=["用户旅程", "设计系统", "可用性验证"],
+        )
+
+        questions = " ".join(
+            step.question_text
+            for step in build_interview_steps(InterviewType.JOB, design_context, session_id="designer-priority-case")
+        )
+
+        self.assertIn("UI/UX 设计师", questions)
+        self.assertIn("用户旅程", questions)
+        self.assertIn("设计系统", questions)
+        self.assertNotIn("招聘专员", questions)
+        self.assertNotIn("岗位画像", questions)
+        self.assertNotIn("保密合规", questions)
+        self.assertNotIn("用户、业务和团队", questions)
+        self.assertNotIn("用户旅程、交互逻辑、设计系统、可用性验证、用户旅程", questions)
+
+    def test_healthcare_job_questions_use_patient_care_language(self) -> None:
+        nurse_context = self.job_context(
+            job_title="临床护士",
+            job_requirements="负责病区护理、医嘱执行、患者沟通、护理文书和风险预警。",
+            resume_text="三甲医院实习：我负责生命体征记录、患者宣教和护理交接。",
+            keywords=["护理", "医嘱", "患者沟通", "风险预警"],
+        )
+
+        questions = " ".join(
+            step.question_text
+            for step in build_interview_steps(InterviewType.JOB, nurse_context, session_id="job-nurse-audit")
+        )
+
+        self.assertIn("患者", questions)
+        self.assertIn("护理", questions)
+        self.assertIn("医嘱", questions)
+        self.assertNotIn("用户、业务和团队", questions)
+        self.assertNotIn("技术或业务取舍", questions)
+        self.assertNotIn("业务方", questions)
 
     def test_postgraduate_questions_are_specialized_by_major(self) -> None:
         computer_questions = " ".join(
@@ -266,7 +313,25 @@ class InterviewFlowTests(unittest.TestCase):
         self.assertIn("模型评估", computer_questions)
         self.assertIn("法条体系", law_questions)
         self.assertIn("法律适用", law_questions)
+        self.assertNotIn("技术路线、实验验证", law_questions)
+        self.assertNotIn("工程实现", law_questions)
         self.assertNotEqual(computer_questions, law_questions)
+
+    def test_postgraduate_humanities_questions_avoid_engineering_experiment_frame(self) -> None:
+        law_questions = " ".join(
+            step.question_text
+            for step in build_interview_steps(
+                InterviewType.POSTGRADUATE,
+                self.postgraduate_context("浙江大学", major="法学", research_direction="民商法案例研究"),
+                session_id="pg-law-audit",
+            )
+        )
+
+        self.assertIn("法条体系", law_questions)
+        self.assertIn("案例争点", law_questions)
+        self.assertNotIn("技术路线", law_questions)
+        self.assertNotIn("实验验证", law_questions)
+        self.assertNotIn("工程实现", law_questions)
 
     def test_adaptive_followup_uses_seeded_next_question_from_session(self) -> None:
         store = InMemoryInterviewRuntimeStore()

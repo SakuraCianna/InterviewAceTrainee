@@ -152,6 +152,7 @@ def _query_text(
 
 def _preset_score(preset: InterviewPreset, query: str, round_name: str | None) -> int:
     round_score = _round_score(preset, round_name)
+    title_score = _title_score(preset.title, query)
     alias_score = 0
     angle_score = 0
     query_tokens = set(query.split())
@@ -169,9 +170,22 @@ def _preset_score(preset: InterviewPreset, query: str, round_name: str | None) -
         for token in _meaningful_tokens(angle):
             if token in query:
                 angle_score += 4
-    if alias_score <= 0:
+    if title_score <= 0 and alias_score <= 0:
         return round_score
-    return round_score + alias_score + min(angle_score, 24)
+    return round_score + title_score + alias_score + min(angle_score, 24)
+
+
+def _title_score(title: str, query: str) -> int:
+    normalized_title = normalize_match_text(title)
+    if not normalized_title:
+        return 0
+    query_tokens = set(query.split())
+    if _alias_matches_query(normalized_title, query, query_tokens):
+        return 220 + min(len(normalized_title), 48)
+    title_tokens = [token for token in _meaningful_tokens(title) if token not in {"工程师", "设计师", "专员", "经理"}]
+    if title_tokens and all(_token_matches_query(token, query, query_tokens) for token in title_tokens):
+        return 140 + len(title_tokens) * 8
+    return 0
 
 
 def _round_score(preset: InterviewPreset, round_name: str | None) -> int:
