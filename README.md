@@ -234,6 +234,23 @@ Docker 部署默认启用以下单机容量保护：
 
 `TENCENT_TTS_VOICE_TYPES` 支持配置多个腾讯云 TTS `VoiceType`，后端会根据 `session_id` 为每场面试固定选择一个音色；同一场训练内的开场、追问和重播不会切换声音。
 
+## 面试质量门禁
+
+为了让“面试官问题问错概率”和“流程出错概率”不只停留在主观感觉，后端提供离线质量门禁：
+
+```powershell
+cd Backend
+uv run python -m app.cli.interview_quality_gate
+```
+
+该命令会验证四类场景的正式轮次、题库候选数量、岗位/专业强区分、项目经历锚定、跨场景串题、低质量回答拦截，并输出：
+
+- `wrong_question_risk_rate`：离线样例中的错问风险率，当前门槛为不超过 0.01。
+- `flow_error_risk_rate`：离线样例中的流程错误风险率，当前门槛为不超过 0.02。
+- `scenario_metrics`：四个场景各自的流程、题库匹配和回答质量检查结果。
+
+离线门禁不能替代真实线上标注集和用户反馈，但它是上线前必须跑的最低质量保护，防止题库、流程或回答质量校验发生回退。
+
 如果需要完全清空服务器业务数据并重建数据库，可以在服务器项目目录执行以下命令。该操作会删除 PostgreSQL、Redis 数据卷和本地备份目录，用户、次数、面试记录和日志都会被清空。
 
 服务器 Linux Shell：
@@ -256,3 +273,4 @@ docker builder prune -af
 - Resend 或其他邮件服务的发信域名完成 DNS 验证。
 - 管理员账号需要在后台或数据库中拥有 `admin` 角色，并使用密码 + 邮箱验证码登录后台。
 - 首次上线前执行 `uv run python -m app.cli.safe_migrate`，Docker 环境执行 `docker compose --profile migrate run --rm migrate`。
+- 每次调整面试题库、追问逻辑或回答质量校验后，执行 `uv run python -m app.cli.interview_quality_gate`，确保离线质量门禁通过。
