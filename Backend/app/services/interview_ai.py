@@ -47,6 +47,29 @@ SCENARIO_SIGNAL_KEYWORDS: dict[InterviewType, tuple[str, ...]] = {
     InterviewType.IELTS: ("because", "example", "usually", "prefer", "think", "feel", "reason", "experience", "sometimes"),
 }
 
+CIVIL_SERVICE_EXECUTION_KEYWORDS = (
+    "对象",
+    "流程",
+    "步骤",
+    "分工",
+    "核实",
+    "上报",
+    "安抚",
+    "分类",
+    "依据",
+    "依法",
+    "政策",
+    "预案",
+    "现场",
+    "记录",
+    "反馈",
+    "复盘",
+    "风险",
+    "兜底",
+    "时限",
+    "台账",
+)
+
 ANSWER_SIGNAL_KEYWORDS: dict[InterviewType, dict[str, tuple[str, ...]]] = {
     InterviewType.JOB: {
         "岗位匹配": ("岗位", "JD", "职责", "业务", "目标", "匹配"),
@@ -193,6 +216,8 @@ def assess_answer_quality(
     if len(chinese_chars) < MIN_CHINESE_ANSWER_CHARS and meaningful_chars < 36:
         return _retry_decision(interview_type, current_question, answer_text, round_name, "too_short")
     signal_count = _answer_signal_count(interview_type, answer_text)
+    if interview_type == InterviewType.CIVIL_SERVICE and _civil_service_lacks_concrete_execution(answer_text):
+        return _retry_decision(interview_type, current_question, answer_text, round_name, "too_generic")
     if signal_count < 2 and meaningful_chars < 140:
         return _retry_decision(interview_type, current_question, answer_text, round_name, "too_generic")
     if meaningful_chars < 70 and signal_count < 2 and not _contains_any(answer_text, SCENARIO_SIGNAL_KEYWORDS[interview_type]):
@@ -236,6 +261,8 @@ def build_retry_question(
         InterviewType.CIVIL_SERVICE: "观点判断、群众或公共服务立场、具体措施和风险兜底",
         InterviewType.IELTS: "",
     }
+    if interview_type == InterviewType.CIVIL_SERVICE and reason_code == "too_generic":
+        return "这轮回答还停留在态度或口号层面。请围绕刚才的问题，补充具体措施、政策依据、执行步骤和风险兜底？"
     if reason_code == "filler":
         return f"你刚才只回答了「{excerpt}」，这还不足以判断本轮表现，我不会进入下一题。请继续回答这道题，补充{scenario_guides[interview_type]}？"
     if reason_code == "too_generic":
@@ -271,6 +298,15 @@ def _rubric_prompt(interview_type: InterviewType) -> str:
 
 def _answer_signal_count(interview_type: InterviewType, answer_text: str) -> int:
     return len(covered_answer_signals(interview_type, answer_text))
+
+
+def _civil_service_lacks_concrete_execution(answer_text: str) -> bool:
+    meaningful_chars = len(re.findall(r"[\u4e00-\u9fff]", answer_text))
+    if meaningful_chars >= 150:
+        return False
+    execution_hits = sum(1 for keyword in CIVIL_SERVICE_EXECUTION_KEYWORDS if keyword in answer_text)
+    structure_hits = sum(1 for keyword in ("首先", "其次", "最后", "第一", "第二", "第三", "一方面", "另一方面") if keyword in answer_text)
+    return execution_hits < 2 and structure_hits < 2
 
 
 def covered_answer_signals(interview_type: InterviewType, answer_text: str) -> list[str]:

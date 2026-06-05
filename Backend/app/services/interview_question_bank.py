@@ -396,6 +396,26 @@ def _civil_service_banks() -> list[QuestionRoundBank]:
                 "如果舆情已经在网上发酵，而事实还未完全核实，你会如何把握回应节奏、上报流程和后续处置？",
             ],
         ),
+        (
+            "现场追问收束",
+            "expert",
+            [
+                "追问：如果考官认为你的措施太笼统，请你用对象、流程、责任人、时限和反馈闭环重新收束这道题。",
+                "追问：如果现场条件突然变化，你会保留哪些底线步骤，哪些安排可以调整，为什么？",
+                "追问：请用 60 秒总结这道题的核心判断、政策依据、群众立场和最终落地路径。",
+                "追问：如果群众仍不理解甚至继续投诉，你会如何在依法依规和情绪疏导之间把握尺度？",
+                "追问：如果领导问你这件事最大的风险点是什么，你会如何回答并提出兜底方案？",
+                "追问：如果同事认为你的处理方式增加工作量，你会如何解释必要性并争取协同？",
+                "追问：请指出你刚才方案中最容易被忽视的一个群体，并说明如何补救。",
+                "追问：如果媒体或群众要求马上给结论，但事实还没核清，你会如何回应才稳妥？",
+                "追问：请把你的回答压缩成考场版三句话，分别对应怎么看、怎么办、如何防止复发。",
+                "追问：如果要形成书面复盘，你会记录哪些证据、节点、责任和后续改进事项？",
+                "追问：如果政策本身存在理解门槛，你会如何把专业口径转成群众听得懂的话？",
+                "追问：如果这件事牵涉多个部门，你会如何确认牵头单位、协同机制和闭环标准？",
+                "追问：请说明你的方案如何体现公平性，避免只解决现场最激烈的诉求。",
+                "追问：如果考官最后只看执行可行性，你认为你方案里最可信的一步是什么？",
+            ],
+        ),
     ]
     return _extend_civil_service_banks(banks)
 
@@ -645,6 +665,8 @@ def _extend_postgraduate_discipline_banks(
             f"如果老师要求你证明不是跨专业泛泛报考，请用课程、项目或阅读经历连接{discipline_focus}。",
             f"请说明你对「{direction}」的兴趣来自哪个具体问题，并解释它和{discipline_focus}的关系。",
             f"请用一段复试开场说明你目前最扎实和最薄弱的专业模块，专业模块必须落到{discipline_focus}。",
+            f"如果老师要求你说明本科训练和「{major_label}」研究生学习之间的连续性，你会如何用{discipline_focus}证明？",
+            f"请把你的复试开场改成「事实证据-专业判断-后续计划」三段，并让每段都能对应{discipline_focus}。",
         ],
         "专业基础": [
             f"请围绕{discipline_focus}选择一个基础概念，讲清定义、边界、典型应用和常见误区。",
@@ -712,30 +734,50 @@ def _extend_civil_service_banks(banks: list[QuestionRoundBank]) -> list[Question
             "如果岗位长期需要处理细碎但关系群众切身利益的事务，你会如何保证工作标准不下降？",
             "请谈谈你如何理解组织纪律和主动服务之间的关系，避免只讲服从或只讲热情。",
             "如果你发现群众诉求合理但暂时不符合办理条件，你会如何解释、引导并记录后续可能性？",
+            "如果你被安排到窗口一线岗位，请说明如何在办事效率、材料规范和群众体验之间取得平衡。",
+            "请结合一个政策落地场景，说明基层干部为什么既要懂政策，也要会用群众听得懂的话表达。",
+            "如果长期面对重复性工作，你会如何通过台账、复盘和流程优化保持责任心和稳定性？",
+            "请说明你如何理解“权责边界”，在热情服务群众时不突破政策和纪律红线。",
         ],
         "综合分析": [
             "某地推行一网通办后，部分群众仍然习惯线下窗口。请从便利化、包容性和服务质量谈谈看法。",
             "有人认为基层干部应该多进社区少坐办公室，也有人担心影响正常业务办理。你怎么看？",
             "针对公共服务中的形式主义问题，请从制度设计、执行监督和群众评价三个角度分析。",
             "对于基层治理中使用人工智能工具辅助办理业务，你认为机会、风险和边界分别是什么？",
+            "某地为提升办事效率取消部分纸质材料，但基层工作人员担心核验风险上升。你怎么看？",
+            "有人说政务服务要追求速度，也有人说规范程序更重要。请结合依法行政谈谈你的理解。",
+            "针对社区治理中居民参与度不高的问题，请从利益关联、表达渠道和反馈机制分析原因。",
+            "某地开展文明城市创建时出现突击整治争议，请从长效治理、群众感受和考核导向谈看法。",
         ],
         "计划组织": [
             "如果让你组织一次面向新就业群体的政策服务活动，你会如何确定需求、场地、宣传和后续跟进？",
             "单位要开展一次矛盾纠纷风险排查，你会如何设计摸排范围、信息记录、协同部门和保密要求？",
             "如果你负责一次政务服务流程优化调研，请说明你如何收集群众意见并推动结果落地。",
             "领导安排你组织跨部门联席会议解决群众反映的高频问题，你会如何准备议题和推动闭环？",
+            "如果让你组织一次老旧小区安全隐患排查，请说明人员分工、入户沟通、数据汇总和整改跟踪。",
+            "单位要开展青年干部廉政教育活动，你会如何设计主题、案例、互动环节和效果评估？",
+            "如果要做一次线上政策问答直播，请说明前期问题收集、口径审核、现场控场和后续答疑。",
+            "领导让你牵头建立群众诉求办理台账，你会如何设置分类、时限、责任人和回访机制？",
         ],
         "人际沟通": [
             "如果群众坚持要求特殊办理，但政策规定不能突破，你会如何表达同理心并守住原则？",
             "如果同事认为你推进流程优化是在增加工作量，你会如何沟通共同目标和实际收益？",
             "如果上级部门和本单位对同一事项口径不同，你会如何核实、请示并避免给群众错误承诺？",
             "如果群众投诉你的沟通态度，但你认为自己按流程办理，你会如何复盘并改进表达？",
+            "如果老同志认为你提出的新办法不切实际，你会如何请教经验、解释依据并小范围验证？",
+            "如果群众在大厅情绪激动并打断你解释政策，你会如何先稳情绪再讲清办理路径？",
+            "如果协作部门回复不及时影响群众事项办理，你会如何催办、留痕并同步风险？",
+            "如果领导临时调整任务优先级导致原计划受影响，你会如何汇报取舍并争取资源支持？",
         ],
         "应急处置": [
             "如果政务系统故障期间有人急需办理限时事项，你会如何分类处理、上报协调并保留记录？",
             "如果活动现场出现人员身体不适，同时群众秩序开始混乱，你会如何分工处置？",
             "如果突发舆情中出现不实信息，你会如何在核实事实、依法回应和情绪疏导之间安排步骤？",
             "如果群众集中反映同一政策理解偏差，你会如何先稳现场，再推动后续统一解释和流程优化？",
+            "如果办事大厅突然停电且排队群众较多，你会如何保障秩序、解释安排、分流办理并记录情况？",
+            "如果政策窗口出现材料遗失争议，群众情绪激烈，你会如何核查证据、安抚群众并启动补救？",
+            "如果线上预约系统被大量重复提交影响正常业务，你会如何先恢复服务，再排查原因和防范复发？",
+            "如果突发暴雨导致服务活动无法继续，但现场仍有老人等待，你会如何调整地点、通知家属和做好安全保障？",
         ],
     }
     return _append_questions(banks, extras)
@@ -989,6 +1031,71 @@ IELTS_THEME_SETS = [
             "How can people balance careful planning with the ability to adapt?",
         ],
     },
+    {
+        "part1": [
+            "Let's talk about work and study. What kind of task do you usually enjoy doing?",
+            "Let's talk about teamwork. Do you prefer working with a team or by yourself?",
+            "What makes a person easy to work with?",
+        ],
+        "part2": "Describe a project or assignment that you completed successfully. You should say what it was, what your role was, what difficulties you had, and explain why it was successful.",
+        "part2_followup": "You described a project. What part of it would you improve if you did it again?",
+        "part3": [
+            "Why do some teams perform better than others?",
+            "How can schools or companies teach people to cooperate more effectively?",
+        ],
+    },
+    {
+        "part1": [
+            "Let's talk about technology. What device do you use most often?",
+            "Let's talk about online services. Do you prefer doing things online or in person?",
+            "Do you think people rely too much on technology now?",
+        ],
+        "part2": "Describe an app or website that you find useful. You should say what it is, how often you use it, what you use it for, and explain why it is useful.",
+        "part2_followup": "You described an app or website. Would you recommend it to older people?",
+        "part3": [
+            "What are the advantages and disadvantages of moving public services online?",
+            "How can technology companies make their products more inclusive?",
+        ],
+    },
+    {
+        "part1": [
+            "Let's talk about celebrations. What events do people usually celebrate in your family?",
+            "Let's talk about gifts. Do you like choosing gifts for other people?",
+            "Are traditional celebrations still important to young people?",
+        ],
+        "part2": "Describe a celebration that you enjoyed. You should say what the celebration was, who was there, what happened, and explain why you enjoyed it.",
+        "part2_followup": "You described a celebration. Would you like to experience it again?",
+        "part3": [
+            "Why do societies keep traditional celebrations?",
+            "How have modern lifestyles changed the way people celebrate important events?",
+        ],
+    },
+    {
+        "part1": [
+            "Let's talk about the environment. Do you often notice environmental problems around you?",
+            "Let's talk about saving resources. What do you do to save water or electricity?",
+            "Do you think young people care more about the environment than older people?",
+        ],
+        "part2": "Describe an environmental problem that you noticed. You should say what it was, where you saw it, what caused it, and explain what could be done about it.",
+        "part2_followup": "You described an environmental problem. Has it changed your daily habits?",
+        "part3": [
+            "Who should take more responsibility for environmental protection, individuals or governments?",
+            "How can cities balance economic development with environmental protection?",
+        ],
+    },
+    {
+        "part1": [
+            "Let's talk about decisions. Do you usually make decisions quickly?",
+            "Let's talk about advice. Who do you ask for advice when you have an important choice?",
+            "Do you think young people should make big decisions by themselves?",
+        ],
+        "part2": "Describe an important decision you made. You should say what the decision was, why you had to make it, who helped you, and explain whether it was a good decision.",
+        "part2_followup": "You described an important decision. Would you make the same choice today?",
+        "part3": [
+            "Why do some people find it difficult to make decisions?",
+            "How can education help young people make more responsible decisions?",
+        ],
+    },
 ]
 
 
@@ -999,6 +1106,7 @@ def _ielts_steps(seed: str) -> list[QuestionBankStep]:
         QuestionBankStep("Part 1", theme["part1"][1]),
         QuestionBankStep("Part 1 Follow-up", theme["part1"][2]),
         QuestionBankStep("Part 2", theme["part2"]),
+        QuestionBankStep("Part 2 Follow-up", theme.get("part2_followup", "You described something in Part 2. What made this experience important to you?")),
         QuestionBankStep("Part 3", theme["part3"][0]),
         QuestionBankStep("Part 3 Follow-up", theme["part3"][1]),
     ]
@@ -1034,6 +1142,7 @@ def _ielts_inventory() -> dict[str, Any]:
         {"round_name": "Part 1", "difficulty": "easy", "choice_count": len(IELTS_THEME_SETS)},
         {"round_name": "Part 1 Follow-up", "difficulty": "easy", "choice_count": len(IELTS_THEME_SETS)},
         {"round_name": "Part 2", "difficulty": "medium", "choice_count": len(IELTS_THEME_SETS)},
+        {"round_name": "Part 2 Follow-up", "difficulty": "medium", "choice_count": len(IELTS_THEME_SETS)},
         {"round_name": "Part 3", "difficulty": "hard", "choice_count": len(IELTS_THEME_SETS)},
         {"round_name": "Part 3 Follow-up", "difficulty": "hard", "choice_count": len(IELTS_THEME_SETS)},
     ]
@@ -1044,7 +1153,12 @@ def _ielts_inventory() -> dict[str, Any]:
             (
                 len(question)
                 for theme in IELTS_THEME_SETS
-                for question in [*theme["part1"], theme["part2"], *theme["part3"]]
+                for question in [
+                    *theme["part1"],
+                    theme["part2"],
+                    theme.get("part2_followup", "You described something in Part 2. What made this experience important to you?"),
+                    *theme["part3"],
+                ]
             ),
             default=0,
         ),

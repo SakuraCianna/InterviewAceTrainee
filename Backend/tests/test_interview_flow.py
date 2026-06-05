@@ -130,10 +130,10 @@ class InterviewFlowTests(unittest.TestCase):
     def test_question_bank_is_rich_and_ordered_by_difficulty(self) -> None:
         inventory = question_bank_inventory()
         expected_min_choices = {
-            "job": 10,
-            "postgraduate": 10,
-            "civil_service": 10,
-            "ielts": 10,
+            "job": 14,
+            "postgraduate": 16,
+            "civil_service": 14,
+            "ielts": 15,
         }
 
         for scenario, min_choices in expected_min_choices.items():
@@ -155,6 +155,58 @@ class InterviewFlowTests(unittest.TestCase):
                     28,
                     f"{scenario} question bank contains rough short questions",
                 )
+
+    def test_four_scenario_flow_uses_distinct_formal_stage_logic(self) -> None:
+        job_steps = build_interview_steps(
+            InterviewType.JOB,
+            self.job_context(
+                job_title="Python 后端工程师",
+                job_requirements="负责 FastAPI、PostgreSQL、Redis 和线上稳定性。",
+                resume_text="智能客服 RAG 项目：我负责 FastAPI 接口、Redis 缓存和接口延迟优化。",
+                keywords=["FastAPI", "Redis", "线上稳定性"],
+            ),
+            session_id="job-formal-flow",
+        )
+        postgraduate_steps = build_interview_steps(
+            InterviewType.POSTGRADUATE,
+            self.postgraduate_context("浙江大学", major="法学", research_direction="民商法案例研究"),
+            session_id="postgraduate-formal-flow",
+        )
+        civil_steps = build_interview_steps(InterviewType.CIVIL_SERVICE, session_id="civil-formal-flow")
+        ielts_steps = build_interview_steps(InterviewType.IELTS, session_id="ielts-formal-flow")
+
+        self.assertEqual(
+            [step.round_name for step in job_steps],
+            ["岗位理解", "项目证据", "方案取舍", "指标复盘", "根因定位", "压力追问", "协作与动机", "终面收束"],
+        )
+        self.assertEqual(
+            [step.round_name for step in postgraduate_steps],
+            ["复试开场", "专业基础", "项目与科研潜力", "文献与英文", "导师方向适配", "学术规范与压力"],
+        )
+        self.assertEqual(
+            [step.round_name for step in civil_steps],
+            ["岗位认知", "综合分析", "计划组织", "人际沟通", "应急处置", "现场追问收束"],
+        )
+        self.assertEqual(
+            [step.round_name for step in ielts_steps],
+            ["Part 1", "Part 1", "Part 1 Follow-up", "Part 2", "Part 2 Follow-up", "Part 3", "Part 3 Follow-up"],
+        )
+        self.assertIn("智能客服 RAG 项目", " ".join(step.question_text for step in job_steps))
+        self.assertIn("法条体系", " ".join(step.question_text for step in postgraduate_steps))
+        self.assertIn("追问", civil_steps[-1].question_text)
+        self.assertIn("you described", ielts_steps[4].question_text.lower())
+
+    def test_civil_service_slogan_answer_requires_concrete_execution(self) -> None:
+        decision = assess_answer_quality(
+            InterviewType.CIVIL_SERVICE,
+            "某地群众对新政策理解不一致并出现情绪波动，你会如何处理？",
+            "我会坚持为人民服务，保持耐心，听从领导安排，积极沟通协调，把工作做好，维护群众利益。",
+            "应急处置",
+        )
+
+        self.assertFalse(decision.acceptable)
+        self.assertEqual(decision.reason_code, "too_generic")
+        self.assertIn("具体措施", decision.retry_question or "")
 
     def test_question_bank_tracks_independent_role_and_major_banks(self) -> None:
         inventory = question_bank_inventory()
