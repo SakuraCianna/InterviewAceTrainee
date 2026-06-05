@@ -107,10 +107,10 @@ class InterviewFlowTests(unittest.TestCase):
     def test_question_bank_is_rich_and_ordered_by_difficulty(self) -> None:
         inventory = question_bank_inventory()
         expected_min_choices = {
-            "job": 6,
-            "postgraduate": 6,
-            "civil_service": 6,
-            "ielts": 6,
+            "job": 10,
+            "postgraduate": 10,
+            "civil_service": 10,
+            "ielts": 10,
         }
 
         for scenario, min_choices in expected_min_choices.items():
@@ -126,6 +126,12 @@ class InterviewFlowTests(unittest.TestCase):
                 sorted(inventory[scenario]["difficulty_scores"]),
                 f"{scenario} questions must progress from easier to harder",
             )
+            if scenario != "ielts":
+                self.assertGreaterEqual(
+                    inventory[scenario]["min_question_chars"],
+                    28,
+                    f"{scenario} question bank contains rough short questions",
+                )
 
     def test_answer_api_requires_supplement_before_advancing(self) -> None:
         store = InMemoryInterviewRuntimeStore()

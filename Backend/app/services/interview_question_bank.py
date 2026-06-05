@@ -114,7 +114,7 @@ def _job_banks(material_context: InterviewMaterialContext | None) -> list[Questi
     role_label = preset_title or job_title or "目标岗位"
     angle_hint = "、".join(question_angles[:4]) if question_angles else material_keywords or _compact_hint(job_requirements, "岗位匹配度、项目证据和问题定位")
     title = job_title or role_label
-    return [
+    banks = [
         (
             "岗位理解",
             "easy",
@@ -212,6 +212,7 @@ def _job_banks(material_context: InterviewMaterialContext | None) -> list[Questi
             ],
         ),
     ]
+    return _extend_job_banks(banks, title, role_label)
 
 
 def _postgraduate_banks(material_context: InterviewMaterialContext | None) -> list[QuestionRoundBank]:
@@ -240,7 +241,7 @@ def _postgraduate_banks_by_tier(
         "advanced": "课程基础、项目经历、方向理解和表达稳定性",
         "standard": "基础概念、报考动机、学习计划和项目表达",
     }.get(tier, "基础概念、报考动机、学习计划和项目表达")
-    return [
+    banks = [
         (
             "复试开场",
             "easy",
@@ -314,10 +315,11 @@ def _postgraduate_banks_by_tier(
             ],
         ),
     ]
+    return _extend_postgraduate_banks(banks, tier_label, target_school, major_label, direction)
 
 
 def _civil_service_banks() -> list[QuestionRoundBank]:
-    return [
+    banks = [
         (
             "岗位认知",
             "easy",
@@ -378,6 +380,152 @@ def _civil_service_banks() -> list[QuestionRoundBank]:
                 "如果舆情已经在网上发酵，而事实还未完全核实，你会如何把握回应节奏、上报流程和后续处置？",
             ],
         ),
+    ]
+    return _extend_civil_service_banks(banks)
+
+
+def _extend_job_banks(banks: list[QuestionRoundBank], title: str, role_label: str) -> list[QuestionRoundBank]:
+    extras = {
+        "岗位理解": [
+            f"请说明「{title}」岗位在公司业务链路里的位置：它向谁交付价值，依赖谁协作，关键风险在哪里？",
+            f"如果面试官问你对「{title}」的理解是否来自真实岗位而不是招聘文案，你会如何用 JD、产品或业务事实回答？",
+            f"请把「{role_label}」拆成入门、合格、优秀三个层级，并说明你现在大概处在哪一层、证据是什么。",
+            f"请说明「{title}」岗位最容易被新人误判的一项工作内容，以及你会如何提前适应。",
+        ],
+        "项目证据": [
+            "请讲一个你从需求不清晰到结果交付的完整经历，重点说明你如何确认目标、拆解任务和收敛范围。",
+            "请选择一个能体现学习速度的项目，说明你原本不会什么、如何补齐、最终交付是否经得起验证。",
+            "请讲一个你处理多方需求冲突的项目，说明你如何识别真正优先级并推动相关方达成一致。",
+            "请选一个你最愿意被深入追问的项目，先说明项目背景，再说明你准备接受追问的三个关键细节。",
+        ],
+        "方案取舍": [
+            "请讲一次你在短期收益和长期可维护性之间做选择的经历，说明你如何评估代价。",
+            "如果你的方案需要牺牲一部分体验、成本或进度，请说明你如何向团队解释取舍并设置止损线。",
+            "请回忆一次你主动否定自己原方案的经历，说明证据是什么、你如何调整并复盘。",
+            "如果面试官要求你把方案讲给非技术或非专业同事听，你会如何解释核心逻辑和风险？",
+        ],
+        "指标复盘": [
+            "请讲一次你在项目开始前就设定评估指标的经历，说明指标为什么能反映真实价值。",
+            "如果项目结果看起来不错，但样本量很小或周期很短，你会如何判断结论是否可靠？",
+            "请说明你如何区分过程指标、结果指标和风险指标，并用一个真实经历举例。",
+            "如果复盘发现最大问题不是技术能力而是协作流程，你会如何提出改进并验证有效性？",
+        ],
+        "根因定位": [
+            "请讲一次你通过日志、数据、访谈或复现实验定位问题的经历，说明每一步排除了什么假设。",
+            "如果问题只能在特定用户、特定时间或特定环境出现，你会如何设计最小复现路径？",
+            "请说明一次你发现根因不在自己负责模块的经历，你如何继续推动问题闭环而不是停止在甩锅阶段。",
+            "如果业务方只看到表面现象并要求立刻修复，你会如何在速度和根因分析之间取得平衡？",
+        ],
+        "压力追问": [
+            "如果面试官指出你的回答缺少业务结果，你会如何立刻补充可验证证据？",
+            "如果面试官认为你的项目难度不够，你会如何说明真正的复杂性来自哪里？",
+            "如果面试官连续追问你没有准备过的细节，你会如何承认边界并保持回答可信？",
+            "如果你发现自己前一轮回答有遗漏或表述不准，你会如何在后续回答中修正而不显得慌乱？",
+        ],
+        "协作与动机": [
+            "请讲一次你主动承担灰色地带工作的经历，说明你如何避免越界并推动事情完成。",
+            "如果团队节奏很快且反馈直接，你会如何保持稳定输出并主动校准预期？",
+            f"请说明你选择「{title}」的长期动机，除了兴趣之外，还要讲清你愿意承受的成本。",
+            "请讲一次你接受负面反馈后的调整过程，说明你具体改了什么、结果有没有变好。",
+        ],
+        "终面收束": [
+            "请用 2 分钟完成一次终面总结：你能解决什么问题、凭什么相信你、入职后如何快速产生价值。",
+            "如果面试官最后只问你还有什么要补充，你会补哪一个最能提升录用信心的证据？",
+            "请说明你希望面试官在候选人评审会上如何概括你，并给出支撑这个概括的证据。",
+            "如果你没有拿到这次机会，你认为最可能的原因是什么，你会如何改进下一场面试？",
+        ],
+    }
+    return _append_questions(banks, extras)
+
+
+def _extend_postgraduate_banks(
+    banks: list[QuestionRoundBank],
+    tier_label: str,
+    target_school: str,
+    major_label: str,
+    direction: str,
+) -> list[QuestionRoundBank]:
+    extras = {
+        "复试开场": [
+            f"请用一段更正式的复试开场说明你为什么选择「{target_school}」{tier_label}，并把动机落到课程、项目或文献准备上。",
+            f"如果「{target_school}」{tier_label}老师追问你报考「{major_label}」是不是临时决定，你会如何用过去经历证明这是连续选择？",
+            f"请把你的本科经历筛选成 3 个和「{target_school}」{tier_label}最相关的证据，并说明每个证据对应哪项能力。",
+            f"请用 90 秒说明你对「{direction}」的理解，不讲空泛兴趣，并对齐「{target_school}」{tier_label}需要的准备深度。",
+        ],
+        "专业基础": [
+            f"请从「{major_label}」选择一个你最熟悉的基础知识点，分别用定义、应用场景和局限性解释。",
+            "如果老师要求你现场推导或口头解释一个本科核心概念，你会如何组织语言避免只背书？",
+            f"请说明「{major_label}」中一个你曾经理解错误的概念，以及你后来如何纠正。",
+            "如果复试老师把基础题和项目经历连起来追问，你会如何从理论、实现和结果三层回答？",
+        ],
+        "项目与科研潜力": [
+            "请把你的一个项目拆成研究价值、技术路线、实验验证和不足四部分进行说明。",
+            "如果老师问这个项目是否只是工程实现，你会如何说明其中的分析、假设或可研究问题？",
+            "请提出一个和你现有项目相关但更适合研究生阶段深入的问题，并说明为什么值得做。",
+            "如果你的项目没有论文或竞赛奖项，你会如何证明它仍然能体现科研潜力？",
+        ],
+        "文献与英文": [
+            f"围绕「{direction}」，请说明你会如何建立一个 10 篇文献的阅读清单，并按主题归类。",
+            "如果老师让你比较综述论文和实验论文的价值，你会如何判断各自对研究计划的帮助？",
+            "请讲一篇你真正读过的英文资料，说明你抓住了什么问题、方法和不足。",
+            "如果英文论文里的方法看懂了但实验细节不清楚，你会如何继续查证而不是模糊带过？",
+        ],
+        "导师方向适配": [
+            f"请说明你对「{target_school}」相关培养平台或导师方向做过哪些调研，哪些信息影响了你的选择。",
+            f"如果导师问你为什么适合当前课题组，请用「{major_label}」基础、项目经验和学习计划回答。",
+            "如果入学后导师安排的方向与你原计划不同，你会如何判断是否接受并制定补课计划？",
+            "请给出一个第一学期可以完成的阶段性成果设想，并说明它如何服务后续研究。",
+        ],
+        "学术规范与压力": [
+            "如果复试老师指出你项目数据来源不够严谨，你会如何补充说明并承认边界？",
+            "如果你在研究中发现已有假设不成立，你会如何记录过程、调整问题并向导师汇报？",
+            "请说明你如何看待负结果、重复实验和数据留痕，它们为什么也是科研训练的一部分？",
+            "如果复试现场被追问到完全不会的问题，请给出一个可信的回应框架，而不是直接沉默或乱猜。",
+        ],
+    }
+    return _append_questions(banks, extras)
+
+
+def _extend_civil_service_banks(banks: list[QuestionRoundBank]) -> list[QuestionRoundBank]:
+    extras = {
+        "岗位认知": [
+            "请结合依法行政和群众路线，说明你认为基层公务员最重要的三项能力是什么。",
+            "如果岗位长期需要处理细碎但关系群众切身利益的事务，你会如何保证工作标准不下降？",
+            "请谈谈你如何理解组织纪律和主动服务之间的关系，避免只讲服从或只讲热情。",
+            "如果你发现群众诉求合理但暂时不符合办理条件，你会如何解释、引导并记录后续可能性？",
+        ],
+        "综合分析": [
+            "某地推行一网通办后，部分群众仍然习惯线下窗口。请从便利化、包容性和服务质量谈谈看法。",
+            "有人认为基层干部应该多进社区少坐办公室，也有人担心影响正常业务办理。你怎么看？",
+            "针对公共服务中的形式主义问题，请从制度设计、执行监督和群众评价三个角度分析。",
+            "对于基层治理中使用人工智能工具辅助办理业务，你认为机会、风险和边界分别是什么？",
+        ],
+        "计划组织": [
+            "如果让你组织一次面向新就业群体的政策服务活动，你会如何确定需求、场地、宣传和后续跟进？",
+            "单位要开展一次矛盾纠纷风险排查，你会如何设计摸排范围、信息记录、协同部门和保密要求？",
+            "如果你负责一次政务服务流程优化调研，请说明你如何收集群众意见并推动结果落地。",
+            "领导安排你组织跨部门联席会议解决群众反映的高频问题，你会如何准备议题和推动闭环？",
+        ],
+        "人际沟通": [
+            "如果群众坚持要求特殊办理，但政策规定不能突破，你会如何表达同理心并守住原则？",
+            "如果同事认为你推进流程优化是在增加工作量，你会如何沟通共同目标和实际收益？",
+            "如果上级部门和本单位对同一事项口径不同，你会如何核实、请示并避免给群众错误承诺？",
+            "如果群众投诉你的沟通态度，但你认为自己按流程办理，你会如何复盘并改进表达？",
+        ],
+        "应急处置": [
+            "如果政务系统故障期间有人急需办理限时事项，你会如何分类处理、上报协调并保留记录？",
+            "如果活动现场出现人员身体不适，同时群众秩序开始混乱，你会如何分工处置？",
+            "如果突发舆情中出现不实信息，你会如何在核实事实、依法回应和情绪疏导之间安排步骤？",
+            "如果群众集中反映同一政策理解偏差，你会如何先稳现场，再推动后续统一解释和流程优化？",
+        ],
+    }
+    return _append_questions(banks, extras)
+
+
+def _append_questions(banks: list[QuestionRoundBank], extras: dict[str, list[str]]) -> list[QuestionRoundBank]:
+    return [
+        (round_name, difficulty, [*questions, *extras.get(round_name, [])])
+        for round_name, difficulty, questions in banks
     ]
 
 
@@ -454,6 +602,54 @@ IELTS_THEME_SETS = [
             "How can schools help students develop a long-term reading habit?",
         ],
     },
+    {
+        "part1": [
+            "Let's talk about transport. How do you usually travel around your city?",
+            "Let's talk about walking. Do you like walking for short trips?",
+            "Do you think public transport is convenient where you live?",
+        ],
+        "part2": "Describe a journey that took longer than expected. You should say where you were going, what caused the delay, what you did during the journey, and explain how you felt about it.",
+        "part3": [
+            "What are the main transport problems in large cities?",
+            "How can governments encourage people to use public transport more often?",
+        ],
+    },
+    {
+        "part1": [
+            "Let's talk about your home. Which room do you spend the most time in?",
+            "Let's talk about decoration. Do you like changing things in your room?",
+            "What makes a place comfortable to live in?",
+        ],
+        "part2": "Describe a home or apartment you would like to live in. You should say where it would be, what it would look like, who you would live with, and explain why you would like it.",
+        "part3": [
+            "Why do housing preferences change as people get older?",
+            "What should cities do to make housing more affordable and comfortable?",
+        ],
+    },
+    {
+        "part1": [
+            "Let's talk about sports. Do you prefer watching sports or playing sports?",
+            "Let's talk about exercise. How often do you exercise?",
+            "Do you think schools should give students more time for physical activities?",
+        ],
+        "part2": "Describe a sport or physical activity you tried for the first time. You should say what it was, where you tried it, who you were with, and explain whether you would do it again.",
+        "part3": [
+            "Why do some adults stop exercising after they start working?",
+            "How can communities make it easier for people to stay active?",
+        ],
+    },
+    {
+        "part1": [
+            "Let's talk about plans. Do you like making plans for your week?",
+            "Let's talk about changes. How do you feel when plans suddenly change?",
+            "Do you think it is better to plan everything or leave some things flexible?",
+        ],
+        "part2": "Describe a plan you made that changed later. You should say what the plan was, why it changed, what you did instead, and explain what you learned from the experience.",
+        "part3": [
+            "Why do organisations sometimes need to change their plans quickly?",
+            "How can people balance careful planning with the ability to adapt?",
+        ],
+    },
 ]
 
 
@@ -477,6 +673,7 @@ def _select_steps(banks: list[QuestionRoundBank], seed: str) -> list[QuestionBan
 
 
 def _inventory_from_banks(banks: list[QuestionRoundBank]) -> dict[str, Any]:
+    all_questions = [question for _round_name, _difficulty, questions in banks for question in questions]
     rounds = [
         {
             "round_name": round_name,
@@ -488,6 +685,7 @@ def _inventory_from_banks(banks: list[QuestionRoundBank]) -> dict[str, Any]:
     return {
         "rounds": rounds,
         "difficulty_scores": [DIFFICULTY_SCORES[item["difficulty"]] for item in rounds],
+        "min_question_chars": min((len(question) for question in all_questions), default=0),
     }
 
 
@@ -503,6 +701,14 @@ def _ielts_inventory() -> dict[str, Any]:
     return {
         "rounds": rounds,
         "difficulty_scores": [DIFFICULTY_SCORES[item["difficulty"]] for item in rounds],
+        "min_question_chars": min(
+            (
+                len(question)
+                for theme in IELTS_THEME_SETS
+                for question in [*theme["part1"], theme["part2"], *theme["part3"]]
+            ),
+            default=0,
+        ),
     }
 
 
