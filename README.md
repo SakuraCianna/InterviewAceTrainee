@@ -251,6 +251,15 @@ uv run python -m app.cli.interview_quality_gate
 
 离线门禁不能替代真实线上标注集和用户反馈，但它是上线前必须跑的最低质量保护，防止题库、流程或回答质量校验发生回退。
 
+上线后可以用真实面试记录继续观测指标：
+
+```powershell
+cd Backend
+uv run python -m app.cli.interview_quality_observe --limit 200 --min-samples 30
+```
+
+该命令会读取最近的真实面试会话和问题记录，计算线上样本里的 `wrong_question_risk_rate` 和 `flow_error_risk_rate`。如果真实样本数量不足，会返回 `sample_status=insufficient`，不能把它当成线上指标已经达标。
+
 如果需要完全清空服务器业务数据并重建数据库，可以在服务器项目目录执行以下命令。该操作会删除 PostgreSQL、Redis 数据卷和本地备份目录，用户、次数、面试记录和日志都会被清空。
 
 服务器 Linux Shell：
@@ -274,3 +283,4 @@ docker builder prune -af
 - 管理员账号需要在后台或数据库中拥有 `admin` 角色，并使用密码 + 邮箱验证码登录后台。
 - 首次上线前执行 `uv run python -m app.cli.safe_migrate`，Docker 环境执行 `docker compose --profile migrate run --rm migrate`。
 - 每次调整面试题库、追问逻辑或回答质量校验后，执行 `uv run python -m app.cli.interview_quality_gate`，确保离线质量门禁通过。
+- 上线后定期执行 `uv run python -m app.cli.interview_quality_observe --limit 200 --min-samples 30`，用真实记录观察错问风险率和流程错误风险率。
