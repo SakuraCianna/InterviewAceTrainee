@@ -17,6 +17,7 @@ from app.services.interview_products import get_interview_product
 from app.services.interview_material_context import InterviewMaterialContext
 from app.services.interview_ai import covered_answer_signals, missing_answer_signals
 from app.services.interview_presets import best_preset_hint
+from app.services.interview_question_bank import build_question_bank_steps
 
 
 def utc_now() -> datetime:
@@ -68,7 +69,12 @@ def _merge_answer_attempt(existing_answer: str | None, answer_text: str, retry_r
 def build_interview_steps(
     interview_type: InterviewType,
     material_context: InterviewMaterialContext | None = None,
+    session_id: str | None = None,
 ) -> list[InterviewStep]:
+    bank_steps = build_question_bank_steps(interview_type, material_context, session_id)
+    if bank_steps:
+        return [InterviewStep(step.round_name, step.question_text) for step in bank_steps]
+
     material_keywords = "、".join(material_context.keywords[:4]) if material_context else ""
     plans: dict[InterviewType, list[InterviewStep]] = {
         InterviewType.JOB: [
@@ -631,7 +637,7 @@ class InMemoryInterviewRuntimeStore:
         material_context: InterviewMaterialContext | None = None,
         admin_unlimited_usage: bool = False,
     ) -> InterviewState:
-        steps = build_interview_steps(interview_type, material_context)
+        steps = build_interview_steps(interview_type, material_context, session_id=session_id)
         record = {
             "session_id": session_id,
             "user_email": user_email,
@@ -772,7 +778,7 @@ class DatabaseInterviewRuntimeStore:
         material_context: InterviewMaterialContext | None = None,
         admin_unlimited_usage: bool = False,
     ) -> InterviewState:
-        steps = build_interview_steps(interview_type, material_context)
+        steps = build_interview_steps(interview_type, material_context, session_id=session_id)
         session_model = InterviewSession(
             id=session_id,
             user_email=user_email,

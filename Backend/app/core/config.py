@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     tencent_realtime_asr_need_vad: int = 1
     tencent_realtime_asr_max_seconds: int = 300
     tencent_tts_voice_type: int = 603006
-    tencent_tts_voice_types: str = "603006,502005,602005,603005,502006,603003"
+    tencent_tts_voice_types: str = "603006,603005,603003,603004,603007,602004,602005,502005,502006,502003,502001"
     provider_secret_encryption_key: str = ""
     interview_material_max_upload_bytes: int = 5 * 1024 * 1024
     speech_audio_max_upload_bytes: int = 30 * 1024 * 1024

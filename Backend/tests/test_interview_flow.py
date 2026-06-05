@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 
 from app.api.interviews import answer_interview_question
 from app.core.config import Settings
@@ -6,8 +7,9 @@ from app.schemas.interviews import InterviewAnswerRequest, InterviewType
 from app.services.ai_call_logs import InMemoryAICallLogStore
 from app.services.ai_router import AIProviderConfig
 from app.services.content_safety_logs import InMemoryContentSafetyLogStore
+from app.services.interview_material_context import InterviewMaterialContext
 from app.services.interview_ai import assess_answer_quality
-from app.services.interview_runtime import InMemoryInterviewRuntimeStore
+from app.services.interview_runtime import InMemoryInterviewRuntimeStore, build_interview_steps
 from app.services.provider_configs import InMemoryProviderConfigStore
 
 
@@ -25,6 +27,24 @@ class InterviewFlowTests(unittest.TestCase):
                     model_name="deepseek-v4-flash",
                 )
             ]
+        )
+
+    def postgraduate_context(self, target_school: str) -> InterviewMaterialContext:
+        return InterviewMaterialContext(
+            id=f"material-{target_school}",
+            user_email="student@example.com",
+            interview_type=InterviewType.POSTGRADUATE,
+            resume_filename=None,
+            resume_content_type=None,
+            resume_text=None,
+            job_title=None,
+            job_requirements=None,
+            target_school=target_school,
+            major="计算机科学与技术",
+            research_direction="大模型教育应用",
+            profile_summary="目标院校与报考专业已填写。",
+            keywords=["计算机", "大模型", "教育"],
+            created_at=datetime(2026, 6, 5),
         )
 
     def test_filler_answer_stays_on_current_question(self) -> None:
@@ -50,6 +70,32 @@ class InterviewFlowTests(unittest.TestCase):
         self.assertFalse(decision.acceptable)
         self.assertEqual(decision.reason_code, "too_generic")
         self.assertIn("岗位匹配", decision.retry_question or "")
+
+    def test_preset_question_bank_separates_exam_scenarios(self) -> None:
+        civil_steps = build_interview_steps(InterviewType.CIVIL_SERVICE, session_id="civil-bank-case")
+        ielts_steps = build_interview_steps(InterviewType.IELTS, session_id="ielts-bank-case")
+
+        self.assertIn("基层", civil_steps[0].question_text)
+        self.assertIn("群众", civil_steps[0].question_text)
+        self.assertTrue(ielts_steps[0].question_text.startswith("Let's talk"))
+        self.assertNotEqual(civil_steps[0].question_text, ielts_steps[0].question_text)
+
+    def test_postgraduate_question_difficulty_follows_school_tier(self) -> None:
+        elite_steps = build_interview_steps(
+            InterviewType.POSTGRADUATE,
+            self.postgraduate_context("清华大学"),
+            session_id="postgraduate-elite-case",
+        )
+        standard_steps = build_interview_steps(
+            InterviewType.POSTGRADUATE,
+            self.postgraduate_context("普通地方学院"),
+            session_id="postgraduate-standard-case",
+        )
+
+        self.assertIn("顶尖院校复试", elite_steps[0].question_text)
+        self.assertIn("文献差异", elite_steps[3].question_text)
+        self.assertIn("基础复试", standard_steps[0].question_text)
+        self.assertNotEqual(elite_steps[1].question_text, standard_steps[1].question_text)
 
     def test_answer_api_requires_supplement_before_advancing(self) -> None:
         store = InMemoryInterviewRuntimeStore()

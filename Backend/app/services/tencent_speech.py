@@ -244,7 +244,8 @@ class TencentSpeechClient:
             return self._settings.tencent_tts_voice_type
         if len(voice_types) == 1:
             return voice_types[0]
-        seed = f"{session_id}:{text[:120]}".encode("utf-8")
+        # 一场面试固定一个音色, 避免连续追问时声音来回切换。
+        seed = (session_id or "default-tts-session").encode("utf-8")
         digest = hashlib.sha256(seed).hexdigest()
         return voice_types[int(digest[:8], 16) % len(voice_types)]
 
