@@ -39,6 +39,18 @@ class InterviewFlowTests(unittest.TestCase):
         self.assertEqual(decision.reason_code, "filler")
         self.assertIn("不会进入下一题", decision.retry_question or "")
 
+    def test_generic_job_answer_requires_structured_signals(self) -> None:
+        decision = assess_answer_quality(
+            InterviewType.JOB,
+            "请介绍一个最能证明你能胜任这个岗位的项目。",
+            "我之前参加过一个项目，整体过程比较顺利，我也比较努力，和团队配合得还可以，最后大家觉得效果不错。",
+            "专业一面",
+        )
+
+        self.assertFalse(decision.acceptable)
+        self.assertEqual(decision.reason_code, "too_generic")
+        self.assertIn("岗位匹配", decision.retry_question or "")
+
     def test_answer_api_requires_supplement_before_advancing(self) -> None:
         store = InMemoryInterviewRuntimeStore()
         store.create_session("student@example.com", "retry-session", InterviewType.POSTGRADUATE)

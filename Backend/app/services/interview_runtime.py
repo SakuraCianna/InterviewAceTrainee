@@ -15,6 +15,7 @@ from app.schemas.interviews import (
 )
 from app.services.interview_products import get_interview_product
 from app.services.interview_material_context import InterviewMaterialContext
+from app.services.interview_ai import covered_answer_signals, missing_answer_signals
 from app.services.interview_presets import best_preset_hint
 
 
@@ -214,9 +215,10 @@ def _base_report_score(answer_text: str, average_length: float, answered_turns: 
 
 def _dimension_score(interview_type: InterviewType, name: str, answer_text: str, base_score: int, index: int) -> int:
     signal_keywords = _dimension_signal_keywords(interview_type).get(name, [])
-    signal_bonus = min(sum(1 for keyword in signal_keywords if keyword.lower() in answer_text.lower()) * 3, 12)
+    keyword_bonus = min(sum(1 for keyword in signal_keywords if keyword.lower() in answer_text.lower()) * 3, 12)
+    interview_signal_bonus = min(len(covered_answer_signals(interview_type, answer_text)) * 2, 10)
     offset = ((index * 5) % 9) - 4
-    return max(55, min(base_score + signal_bonus + offset, 95))
+    return max(55, min(base_score + keyword_bonus + interview_signal_bonus + offset, 95))
 
 
 def _score_level(score: int, interview_type: InterviewType) -> str:
@@ -274,11 +276,17 @@ def _score_explanation(
 def _dimension_evidence(interview_type: InterviewType, name: str, answer_text: str, average_length: float) -> list[str]:
     keywords = _dimension_signal_keywords(interview_type).get(name, [])
     hits = [keyword for keyword in keywords if keyword.lower() in answer_text.lower()]
+    covered_signals = covered_answer_signals(interview_type, answer_text)
+    missing_signals = missing_answer_signals(interview_type, answer_text)
     evidence: list[str] = []
     if hits:
         evidence.append(f"回答里提到了：{' / '.join(hits[:4])}")
     else:
         evidence.append("这一维度还缺少直接材料")
+    if covered_signals:
+        evidence.append(f"已覆盖信号：{' / '.join(covered_signals[:3])}")
+    elif missing_signals:
+        evidence.append(f"待补信号：{' / '.join(missing_signals[:3])}")
     evidence.append(f"单轮平均约 {round(average_length)} 字符")
     if _contains_any(answer_text, ["%", "提升", "降低", "指标", "量化", "result", "reduced", "increased"]):
         evidence.append("回答里出现了结果或数字")
@@ -300,7 +308,7 @@ def _dimension_action(interview_type: InterviewType, name: str, score: int) -> s
 def _turn_report(interview_type: InterviewType, round_name: str, question: str, answer: str) -> InterviewReportTurn:
     answer_length = len(answer.strip())
     score = _turn_score(interview_type, answer)
-    evidence = _turn_evidence(answer)
+    evidence = _turn_evidence(interview_type, answer)
     return InterviewReportTurn(
         round_name=round_name,
         question=question,
@@ -316,16 +324,23 @@ def _turn_score(interview_type: InterviewType, answer: str) -> int:
     length_bonus = min(answer_length // 18, 16)
     structure_bonus = 6 if _contains_any(answer, ["首先", "其次", "最后", "第一", "第二", "第三", "first", "second", "finally"]) else 0
     evidence_bonus = 8 if _contains_any(answer, ["数据", "指标", "量化", "%", "提升", "降低", "for example", "result", "reduced"]) else 0
+    signal_bonus = min(len(covered_answer_signals(interview_type, answer)) * 3, 12)
     scenario_bonus = 4 if interview_type != InterviewType.IELTS else 0
-    return max(55, min(60 + length_bonus + structure_bonus + evidence_bonus + scenario_bonus, 95))
+    return max(55, min(58 + length_bonus + structure_bonus + evidence_bonus + signal_bonus + scenario_bonus, 95))
 
 
-def _turn_evidence(answer: str) -> list[str]:
+def _turn_evidence(interview_type: InterviewType, answer: str) -> list[str]:
     evidence: list[str] = []
+    covered_signals = covered_answer_signals(interview_type, answer)
+    missing_signals = missing_answer_signals(interview_type, answer)
     if _contains_any(answer, ["首先", "其次", "最后", "第一", "第二", "第三", "first", "second", "finally"]):
         evidence.append("能听到分层表达")
     if _contains_any(answer, ["数据", "指标", "量化", "%", "提升", "降低", "for example", "result", "reduced"]):
         evidence.append("带了结果或例子")
+    if covered_signals:
+        evidence.append(f"覆盖：{' / '.join(covered_signals[:3])}")
+    if missing_signals:
+        evidence.append(f"待补：{' / '.join(missing_signals[:2])}")
     if len(answer.strip()) >= 120:
         evidence.append("展开长度够用")
     if not evidence:
@@ -346,10 +361,13 @@ def _turn_feedback(interview_type: InterviewType, score: int, answer_length: int
 
 
 def _report_evidence(interview_type: InterviewType, answered_turns: int, average_length: float, answer_text: str) -> list[str]:
+    covered_signals = covered_answer_signals(interview_type, answer_text)
     evidence = [
         f"完成 {answered_turns} 轮有效回答",
         f"单轮平均约 {round(average_length)} 字符",
     ]
+    if covered_signals:
+        evidence.append(f"覆盖核心信号：{' / '.join(covered_signals[:4])}")
     if _contains_any(answer_text, ["首先", "其次", "最后", "first", "second", "finally"]):
         evidence.append("能听到分层表达")
     if _contains_any(answer_text, ["%", "指标", "量化", "提升", "降低", "result", "reduced"]):
@@ -363,8 +381,11 @@ def _risk_flags(interview_type: InterviewType, answer_lengths: list[int], answer
     flags: list[str] = []
     if not answer_lengths:
         return ["没有有效回答，无法形成可靠复盘"]
+    missing_signals = missing_answer_signals(interview_type, answer_text)
     if sum(1 for length in answer_lengths if length < 40) >= 2:
         flags.append("多轮回答偏短，真实面试中容易显得准备不足")
+    if missing_signals:
+        flags.append(f"关键面试信号缺口：{' / '.join(missing_signals[:3])}")
     if not _contains_any(answer_text, ["%", "指标", "量化", "提升", "降低", "result", "reduced"]):
         flags.append("缺少量化结果或具体例子，面试官继续追问时支撑会偏弱")
     if not _contains_any(answer_text, ["首先", "其次", "最后", "第一", "第二", "第三", "first", "second", "finally"]):
