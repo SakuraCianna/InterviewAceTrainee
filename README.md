@@ -258,7 +258,7 @@ cd Backend
 uv run python -m app.cli.interview_quality_observe --limit 200 --min-samples 30
 ```
 
-该命令会读取最近的真实面试会话和问题记录，计算线上样本里的 `wrong_question_risk_rate` 和 `flow_error_risk_rate`。如果真实样本数量不足，会返回 `sample_status=insufficient`，不能把它当成线上指标已经达标。
+该命令会读取最近的真实面试会话和问题记录，计算线上样本里的 `wrong_question_risk_rate` 和 `flow_error_risk_rate`。已知旧流程记录会计入 `legacy_session_count` 并排除出当前版本指标，避免历史数据污染新流程统计。如果当前流程真实样本数量不足，会返回 `sample_status=insufficient`，不能把它当成线上指标已经达标。
 
 如果需要完全清空服务器业务数据并重建数据库，可以在服务器项目目录执行以下命令。该操作会删除 PostgreSQL、Redis 数据卷和本地备份目录，用户、次数、面试记录和日志都会被清空。
 

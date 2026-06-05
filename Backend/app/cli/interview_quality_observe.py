@@ -39,6 +39,8 @@ def database_unavailable_payload(error_message: str) -> dict[str, object]:
         "passed": False,
         "sample_status": "database_unavailable",
         "session_count": 0,
+        "current_session_count": 0,
+        "legacy_session_count": 0,
         "turn_count": 0,
         "wrong_question_risk_rate": 0.0,
         "flow_error_risk_rate": 0.0,

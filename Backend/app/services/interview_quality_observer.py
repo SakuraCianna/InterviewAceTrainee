@@ -25,6 +25,15 @@ SCENARIO_FORBIDDEN_TERMS: dict[InterviewType, tuple[str, ...]] = {
     InterviewType.IELTS: ("岗位", "复试", "群众", "依法", "法条", "FastAPI"),
 }
 
+LEGACY_ROUNDS = {
+    InterviewType.POSTGRADUATE: (
+        ("复试开场", "专业基础", "科研潜力", "文献与英文", "导师沟通", "学术规范"),
+    ),
+    InterviewType.CIVIL_SERVICE: (
+        ("综合分析", "组织协调", "应急应变", "人际沟通", "岗位匹配"),
+    ),
+}
+
 
 @dataclass(frozen=True)
 class ObservedInterviewTurn:
@@ -46,6 +55,8 @@ class ObservedInterviewSession:
 class ObservedScenarioMetric:
     label: str
     session_count: int = 0
+    current_session_count: int = 0
+    legacy_session_count: int = 0
     turn_count: int = 0
     wrong_question_count: int = 0
     flow_error_count: int = 0
@@ -54,6 +65,8 @@ class ObservedScenarioMetric:
         return {
             "label": self.label,
             "session_count": self.session_count,
+            "current_session_count": self.current_session_count,
+            "legacy_session_count": self.legacy_session_count,
             "turn_count": self.turn_count,
             "wrong_question_count": self.wrong_question_count,
             "flow_error_count": self.flow_error_count,
@@ -65,6 +78,8 @@ class ObservedQualityReport:
     passed: bool
     sample_status: str
     session_count: int
+    current_session_count: int
+    legacy_session_count: int
     turn_count: int
     wrong_question_risk_rate: float
     flow_error_risk_rate: float
@@ -76,7 +91,12 @@ class ObservedQualityReport:
     @property
     def failure_summary(self) -> str:
         if self.sample_status == "insufficient":
-            return f"样本不足：当前 {self.session_count} 场，至少需要 {self.min_samples} 场真实记录"
+            if self.legacy_session_count:
+                return (
+                    f"样本不足：当前流程 {self.current_session_count} 场，至少需要 {self.min_samples} 场真实记录；"
+                    f"另有 {self.legacy_session_count} 场旧流程记录已排除"
+                )
+            return f"样本不足：当前流程 {self.current_session_count} 场，至少需要 {self.min_samples} 场真实记录"
         failures = [*self.flow_failures, *self.wrong_question_failures]
         return "；".join(failures) if failures else "线上观测指标通过"
 
@@ -85,6 +105,8 @@ class ObservedQualityReport:
             "passed": self.passed,
             "sample_status": self.sample_status,
             "session_count": self.session_count,
+            "current_session_count": self.current_session_count,
+            "legacy_session_count": self.legacy_session_count,
             "turn_count": self.turn_count,
             "wrong_question_risk_rate": self.wrong_question_risk_rate,
             "flow_error_risk_rate": self.flow_error_risk_rate,
@@ -112,15 +134,24 @@ def evaluate_observed_interviews(
     wrong_question_count = 0
     flow_error_count = 0
     turn_count = 0
+    current_session_count = 0
+    legacy_session_count = 0
 
     for session in sessions:
         metric = scenario_metrics[session.interview_type.value]
         metric.session_count += 1
         ordered_turns = sorted(session.turns, key=lambda turn: turn.turn_index)
-        turn_count += len(ordered_turns)
-        metric.turn_count += len(ordered_turns)
         expected_rounds = EXPECTED_ROUNDS[session.interview_type]
         observed_rounds = [turn.round_name for turn in ordered_turns]
+        if _is_legacy_flow(session.interview_type, observed_rounds):
+            legacy_session_count += 1
+            metric.legacy_session_count += 1
+            continue
+
+        current_session_count += 1
+        metric.current_session_count += 1
+        turn_count += len(ordered_turns)
+        metric.turn_count += len(ordered_turns)
         if observed_rounds != expected_rounds[: len(observed_rounds)]:
             flow_error_count += 1
             metric.flow_error_count += 1
@@ -132,9 +163,9 @@ def evaluate_observed_interviews(
             metric.wrong_question_count += 1
             wrong_question_failures.append(f"{session.session_id} question text does not match {session.interview_type.value}")
 
-    sample_status = "sufficient" if len(sessions) >= min_samples else "insufficient"
-    wrong_question_risk_rate = wrong_question_count / max(len(sessions), 1)
-    flow_error_risk_rate = flow_error_count / max(len(sessions), 1)
+    sample_status = "sufficient" if current_session_count >= min_samples else "insufficient"
+    wrong_question_risk_rate = wrong_question_count / max(current_session_count, 1)
+    flow_error_risk_rate = flow_error_count / max(current_session_count, 1)
     passed = (
         sample_status == "sufficient"
         and wrong_question_risk_rate <= WRONG_QUESTION_RISK_LIMIT
@@ -146,6 +177,8 @@ def evaluate_observed_interviews(
         passed=passed,
         sample_status=sample_status,
         session_count=len(sessions),
+        current_session_count=current_session_count,
+        legacy_session_count=legacy_session_count,
         turn_count=turn_count,
         wrong_question_risk_rate=round(wrong_question_risk_rate, 4),
         flow_error_risk_rate=round(flow_error_risk_rate, 4),
@@ -154,6 +187,15 @@ def evaluate_observed_interviews(
         flow_failures=flow_failures,
         scenario_metrics=scenario_metrics,
     )
+
+
+def _is_legacy_flow(interview_type: InterviewType, observed_rounds: list[str]) -> bool:
+    if not observed_rounds:
+        return False
+    for legacy_rounds in LEGACY_ROUNDS.get(interview_type, ()):
+        if tuple(observed_rounds) == legacy_rounds[: len(observed_rounds)]:
+            return True
+    return False
 
 
 def _has_wrong_question_risk(interview_type: InterviewType, session_text: str) -> bool:
