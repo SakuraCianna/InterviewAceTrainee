@@ -9,7 +9,7 @@ from app.services.ai_router import AIProviderConfig
 from app.services.content_safety_logs import InMemoryContentSafetyLogStore
 from app.services.interview_material_context import InterviewMaterialContext
 from app.services.interview_ai import assess_answer_quality
-from app.services.interview_question_bank import question_bank_inventory, postgraduate_school_tier
+from app.services.interview_question_bank import _select_steps, question_bank_inventory, postgraduate_school_tier
 from app.services.interview_runtime import InMemoryInterviewRuntimeStore, build_interview_steps
 from app.services.provider_configs import InMemoryProviderConfigStore
 
@@ -155,6 +155,18 @@ class InterviewFlowTests(unittest.TestCase):
                     28,
                     f"{scenario} question bank contains rough short questions",
                 )
+
+    def test_question_bank_does_not_select_same_question_twice_in_one_session(self) -> None:
+        steps = _select_steps(
+            [
+                ("第一轮", "easy", ["请说明你如何定位线上问题？", "请介绍一次你拆解复杂任务的经历？"]),
+                ("第二轮", "medium", ["请说明你如何定位线上问题？", "请说明你如何用指标复盘交付结果？"]),
+            ],
+            seed="case",
+        )
+
+        self.assertEqual(steps[0].question_text, "请说明你如何定位线上问题？")
+        self.assertEqual(steps[1].question_text, "请说明你如何用指标复盘交付结果？")
 
     def test_four_scenario_flow_uses_distinct_formal_stage_logic(self) -> None:
         job_steps = build_interview_steps(
@@ -404,6 +416,53 @@ class InterviewFlowTests(unittest.TestCase):
         self.assertIsNotNone(accepted_response.current_question)
         self.assertEqual(accepted_response.current_question.round_name, "专业基础")
         self.assertIn("你刚才提到", accepted_response.current_question.text)
+
+    def test_complete_interview_flow_keeps_questions_unique_and_generates_report(self) -> None:
+        store = InMemoryInterviewRuntimeStore()
+        material_context = self.job_context(
+            job_title="Python 后端工程师",
+            job_requirements="负责 FastAPI、PostgreSQL、Redis、RAG 检索链路、接口稳定性和线上问题定位。",
+            resume_text="智能客服 RAG 项目：我负责 FastAPI 接口、Redis 缓存、PostgreSQL 索引和向量召回优化。",
+            keywords=["FastAPI", "Redis", "PostgreSQL", "RAG"],
+        )
+        initial_state = store.create_session(
+            "candidate@example.com",
+            "complete-job-flow",
+            InterviewType.JOB,
+            material_context,
+        )
+        claims = {"sub": "candidate@example.com", "role": "user", "session_id": "auth-session"}
+        answer_text = (
+            "我负责过智能客服 RAG 项目，背景是岗位 JD 要求接口稳定性和业务交付。"
+            "我负责 FastAPI 接口、Redis 缓存、PostgreSQL 索引和向量召回优化，"
+            "先比较方案成本、事务边界和上线风险，再用日志指标、延迟数据和用户反馈复盘结果，"
+            "最后把问题定位流程沉淀给团队。"
+        )
+
+        seen_questions: list[str] = []
+        response = None
+        for _ in range(initial_state.total_steps):
+            current_state = store.get_session("candidate@example.com", "complete-job-flow")
+            self.assertIsNotNone(current_state)
+            self.assertIsNotNone(current_state.current_question)
+            seen_questions.append(current_state.current_question.text)
+            response = answer_interview_question(
+                session_id="complete-job-flow",
+                payload=InterviewAnswerRequest(answer_text=answer_text),
+                claims=claims,
+                interview_store=store,
+                provider_store=self.disabled_provider_store(),
+                ai_call_log_store=InMemoryAICallLogStore(),
+                content_safety_log_store=InMemoryContentSafetyLogStore(),
+                settings=Settings(),
+            )
+
+        self.assertIsNotNone(response)
+        self.assertEqual(response.status, "completed")
+        self.assertIsNotNone(response.report)
+        self.assertEqual(len(response.report.turns), initial_state.total_steps)
+        normalized_questions = ["".join(question.split()).lower() for question in seen_questions]
+        self.assertEqual(len(normalized_questions), len(set(normalized_questions)))
 
 
 if __name__ == "__main__":

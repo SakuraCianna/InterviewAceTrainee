@@ -1308,10 +1308,27 @@ def _question_mentions_hint(question: str, hint: str) -> bool:
 
 
 def _select_steps(banks: list[QuestionRoundBank], seed: str) -> list[QuestionBankStep]:
-    return [
-        QuestionBankStep(round_name, _pick(questions, seed, round_name, str(index)))
-        for index, (round_name, _difficulty, questions) in enumerate(banks)
-    ]
+    steps: list[QuestionBankStep] = []
+    selected_questions: set[str] = set()
+    for index, (round_name, _difficulty, questions) in enumerate(banks):
+        question = _pick_unique_session_question(questions, selected_questions, seed, round_name, str(index))
+        selected_questions.add(_normalize_question_for_session(question))
+        steps.append(QuestionBankStep(round_name, question))
+    return steps
+
+
+def _pick_unique_session_question(questions: list[str], selected_questions: set[str], *seed_parts: str) -> str:
+    picked_question = _pick(questions, *seed_parts)
+    start_index = questions.index(picked_question)
+    for offset in range(len(questions)):
+        candidate = questions[(start_index + offset) % len(questions)]
+        if _normalize_question_for_session(candidate) not in selected_questions:
+            return candidate
+    return picked_question
+
+
+def _normalize_question_for_session(question: str) -> str:
+    return re.sub(r"\s+", "", question).lower()
 
 
 def _inventory_from_banks(banks: list[QuestionRoundBank]) -> dict[str, Any]:

@@ -135,6 +135,10 @@ def evaluate_interview_quality() -> InterviewQualityReport:
         if round_names != EXPECTED_ROUNDS[case.interview_type]:
             metric.flow_failure_count += 1
             flow_failures.append(f"{case.name} flow mismatch: {round_names}")
+        duplicate_questions = _duplicate_question_texts(steps)
+        if duplicate_questions:
+            metric.flow_failure_count += 1
+            flow_failures.append(f"{case.name} duplicate question text: {duplicate_questions}")
 
         question_text = _join_steps(steps)
         missing_terms = [term for term in case.required_terms if term not in question_text]
@@ -516,3 +520,16 @@ def _postgraduate_context(target_school: str, major: str, research_direction: st
 
 def _join_steps(steps: list[InterviewStep]) -> str:
     return " ".join(f"{step.round_name} {step.question_text}" for step in steps)
+
+
+def _duplicate_question_texts(steps: list[InterviewStep]) -> list[str]:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for step in steps:
+        normalized = "".join(step.question_text.split()).lower()
+        if not normalized:
+            continue
+        if normalized in seen and step.question_text not in duplicates:
+            duplicates.append(step.question_text)
+        seen.add(normalized)
+    return duplicates
