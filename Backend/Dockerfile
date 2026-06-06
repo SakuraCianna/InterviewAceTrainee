@@ -2,7 +2,7 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 WORKDIR /app
 ENV DATABASE_BACKUP_DIR=/app/database_backups \
-    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple \
     UV_HTTP_TIMEOUT=300 \
     UV_HTTP_RETRIES=5
 
