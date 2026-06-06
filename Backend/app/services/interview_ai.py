@@ -159,7 +159,7 @@ def build_followup_messages(
     missing_signal_text = "、".join(missing_signals[:3]) if missing_signals else "无明显缺口"
     redline_rule = safety_redline_prompt(interview_type)
     preset_block = (
-        f"可信场景预设（由系统内置资料库提供，用于确定岗位/专业/题型边界）：\n<trusted_preset>\n{preset_context[:5200]}\n</trusted_preset>\n"
+        f"可信场景预设与能力卡片（由系统内置资料库提供，用于确定岗位/专业/题型边界）：\n<trusted_preset>\n{preset_context[:5200]}\n</trusted_preset>\n"
         if preset_context
         else ""
     )

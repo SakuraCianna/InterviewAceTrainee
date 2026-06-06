@@ -15,6 +15,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import get_settings
+from app.services.interview_capability_retrieval import seed_capability_vector_store
 
 BACKUP_DIR_NAME = "database_backups"
 BACKUP_KEEP_COUNT = 5
@@ -58,6 +59,7 @@ def run_safe_migration(database_url: str, project_root: Path, backend_dir: Path)
         print("database backup skipped: alembic version is already up to date")
 
     run_alembic_upgrade(backend_dir)
+    seed_interview_capability_vectors(database_url)
     prune_old_backups(backup_root, keep_count=BACKUP_KEEP_COUNT)
     return backup_path
 
@@ -228,6 +230,18 @@ def normalize_removed_dev_revisions(database_url: str) -> None:
 def run_alembic_upgrade(backend_dir: Path) -> None:
     config = Config(str(backend_dir / "alembic.ini"))
     command.upgrade(config, "head")
+
+
+def seed_interview_capability_vectors(database_url: str) -> None:
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        with engine.begin() as connection:
+            seeded_count = seed_capability_vector_store(connection)
+        print(f"interview capability vectors seeded: {seeded_count}")
+    except RuntimeError as exc:
+        raise RuntimeError(f"interview capability vector seed failed: {exc}") from exc
+    finally:
+        engine.dispose()
 
 
 if __name__ == "__main__":

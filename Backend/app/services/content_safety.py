@@ -96,7 +96,9 @@ BLOCKING_RULES = (
             r"(忽略|无视|绕过|覆盖|删除).{0,12}(系统|开发者|规则|安全|指令|提示词)",
             r"(泄露|输出|打印|展示|告诉我).{0,12}(系统提示|system prompt|开发者提示|隐藏规则|内部规则)",
             r"(你现在是|扮演).{0,18}(无限制|无约束|越狱|DAN|开发者模式)",
+            r"(知识库|检索结果|文档|简历|岗位要求|题库).{0,18}(要求|指示|规定).{0,18}(忽略|无视|覆盖|泄露|输出|打印)",
             r"(ignore|bypass|override|reveal|print).{0,18}(system prompt|developer message|hidden rule|safety rule)",
+            r"(retrieved document|retrieval result|resume|job description).{0,24}(ignore|bypass|override|reveal|print)",
         ),
     ),
 )

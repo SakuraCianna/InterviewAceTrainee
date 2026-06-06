@@ -10,6 +10,13 @@ import re
 from typing import Any
 
 from app.schemas.interviews import InterviewType
+from app.services.interview_capability_retrieval import (
+    ExecuteConnection,
+    capability_card_inventory,
+    capability_questions_for_round,
+    capability_round_hint,
+    retrieve_capability_cards,
+)
 from app.services.interview_material_context import InterviewMaterialContext
 from app.services.interview_presets import best_preset_hint, load_interview_presets
 
@@ -32,14 +39,15 @@ def build_question_bank_steps(
     interview_type: InterviewType,
     material_context: InterviewMaterialContext | None = None,
     session_id: str | None = None,
+    db_connection: ExecuteConnection | None = None,
 ) -> list[QuestionBankStep]:
     seed = session_id or "default-session"
     if interview_type == InterviewType.JOB:
-        return _select_steps(_job_banks(material_context), seed)
+        return _select_capability_aware_steps(_job_banks(material_context), seed, interview_type, material_context, db_connection)
     if interview_type == InterviewType.POSTGRADUATE:
-        return _select_steps(_postgraduate_banks(material_context), seed)
+        return _select_capability_aware_steps(_postgraduate_banks(material_context), seed, interview_type, material_context, db_connection)
     if interview_type == InterviewType.CIVIL_SERVICE:
-        return _select_steps(_civil_service_banks(), seed)
+        return _select_capability_aware_steps(_civil_service_banks(), seed, interview_type, material_context, db_connection)
     if interview_type == InterviewType.IELTS:
         return _ielts_steps(seed)
     return []
@@ -66,11 +74,13 @@ def question_bank_inventory() -> dict[str, dict[str, Any]]:
     job_inventory["role_bank_count"] = _preset_bank_count(InterviewType.JOB)
     postgraduate_inventory = _inventory_from_banks(_postgraduate_banks(sample_postgraduate_context))
     postgraduate_inventory["major_bank_count"] = _preset_bank_count(InterviewType.POSTGRADUATE)
+    capability_inventory = capability_card_inventory()
     return {
         "job": job_inventory,
         "postgraduate": postgraduate_inventory,
         "civil_service": _inventory_from_banks(_civil_service_banks()),
         "ielts": _ielts_inventory(),
+        "capability_cards": capability_inventory,
     }
 
 
@@ -1224,6 +1234,77 @@ def _ielts_steps(seed: str) -> list[QuestionBankStep]:
         QuestionBankStep("Part 3", theme["part3"][0]),
         QuestionBankStep("Part 3 Follow-up", theme["part3"][1]),
     ]
+
+
+def _select_capability_aware_steps(
+    banks: list[QuestionRoundBank],
+    seed: str,
+    interview_type: InterviewType,
+    material_context: InterviewMaterialContext | None,
+    db_connection: ExecuteConnection | None,
+) -> list[QuestionBankStep]:
+    matches = retrieve_capability_cards(
+        interview_type=interview_type,
+        material_context=material_context,
+        limit=4,
+        db_connection=db_connection,
+    )
+    enriched_banks = _prepend_capability_questions(banks, matches)
+    selected_steps = _select_steps(enriched_banks, seed)
+    if interview_type == InterviewType.IELTS:
+        return selected_steps
+    return _append_capability_round_hints(selected_steps, matches)
+
+
+def _prepend_capability_questions(
+    banks: list[QuestionRoundBank],
+    matches: list[Any],
+) -> list[QuestionRoundBank]:
+    if not matches:
+        return banks
+    enriched: list[QuestionRoundBank] = []
+    for round_name, difficulty, questions in banks:
+        capability_questions = capability_questions_for_round(matches, round_name, limit=3)
+        enriched.append((round_name, difficulty, _dedupe_questions([*capability_questions, *questions])))
+    return enriched
+
+
+def _append_capability_round_hints(
+    steps: list[QuestionBankStep],
+    matches: list[Any],
+) -> list[QuestionBankStep]:
+    if not matches:
+        return steps
+    enriched_steps: list[QuestionBankStep] = []
+    for step in steps:
+        hint = capability_round_hint(matches, step.round_name)
+        if not hint or _question_mentions_hint(step.question_text, hint):
+            enriched_steps.append(step)
+            continue
+        enriched_steps.append(
+            QuestionBankStep(
+                round_name=step.round_name,
+                question_text=f"{step.question_text} 请回答时优先落到：{hint}。",
+            )
+        )
+    return enriched_steps
+
+
+def _dedupe_questions(questions: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for question in questions:
+        normalized = re.sub(r"\s+", "", question).lower()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(question)
+    return deduped
+
+
+def _question_mentions_hint(question: str, hint: str) -> bool:
+    terms = [term.strip() for term in re.split(r"[、，,；;]+", hint) if term.strip()]
+    return any(term in question for term in terms)
 
 
 def _select_steps(banks: list[QuestionRoundBank], seed: str) -> list[QuestionBankStep]:

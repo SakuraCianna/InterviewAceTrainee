@@ -71,8 +71,14 @@ def build_interview_steps(
     interview_type: InterviewType,
     material_context: InterviewMaterialContext | None = None,
     session_id: str | None = None,
+    capability_db_connection: Any | None = None,
 ) -> list[InterviewStep]:
-    bank_steps = build_question_bank_steps(interview_type, material_context, session_id)
+    bank_steps = build_question_bank_steps(
+        interview_type,
+        material_context,
+        session_id,
+        db_connection=capability_db_connection,
+    )
     if bank_steps:
         return [InterviewStep(step.round_name, step.question_text) for step in bank_steps]
 
@@ -788,7 +794,12 @@ class DatabaseInterviewRuntimeStore:
         material_context: InterviewMaterialContext | None = None,
         admin_unlimited_usage: bool = False,
     ) -> InterviewState:
-        steps = build_interview_steps(interview_type, material_context, session_id=session_id)
+        steps = build_interview_steps(
+            interview_type,
+            material_context,
+            session_id=session_id,
+            capability_db_connection=self._session,
+        )
         session_model = InterviewSession(
             id=session_id,
             user_email=user_email,

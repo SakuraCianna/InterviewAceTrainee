@@ -38,6 +38,7 @@ from app.services.interview_materials import DatabaseInterviewMaterialStore
 from app.services.ai_router import AIServiceRouter
 from app.services.capacity_gate import acquire_capacity
 from app.services.interview_ai import assess_answer_quality, build_contextual_fallback_question, generate_next_interview_question
+from app.services.interview_capability_retrieval import build_capability_prompt_context
 from app.services.interview_products import get_interview_product
 from app.services.interview_presets import build_preset_prompt_context
 from app.services.interview_vouchers import DatabaseInterviewVoucherStore, InterviewVoucherStore, get_interview_voucher_store
@@ -396,6 +397,12 @@ def build_next_question_override(
         current_state.material_context,
         round_name=next_round_name,
     )
+    capability_context = build_capability_prompt_context(
+        current_state.interview_type,
+        current_state.material_context,
+        round_name=next_round_name,
+    )
+    trusted_context = "\n\n".join(context for context in (preset_context, capability_context) if context)
     with acquire_capacity(
         "llm:interview_followup",
         settings.llm_concurrency_limit,
@@ -417,7 +424,7 @@ def build_next_question_override(
             answer_text=answer_text,
             next_round_name=next_round_name,
             next_static_question=next_static_question,
-            preset_context=preset_context,
+            preset_context=trusted_context,
             call_log_store=ai_call_log_store,
             content_safety_log_store=content_safety_log_store,
             session_id=current_state.session_id,

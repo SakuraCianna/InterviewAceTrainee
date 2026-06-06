@@ -200,6 +200,14 @@ def _evaluate_inventory(inventory: dict[str, dict[str, Any]]) -> tuple[list[str]
         difficulty_scores = scenario_inventory.get("difficulty_scores", [])
         if difficulty_scores != sorted(difficulty_scores):
             failures.append(f"{scenario} difficulty progression is not ordered")
+    capability_inventory = inventory.get("capability_cards", {})
+    if int(capability_inventory.get("card_count", 0)) < 9:
+        failures.append("capability card inventory is too thin")
+    if int(capability_inventory.get("by_interview_type", {}).get("job", 0)) < 6:
+        failures.append("job capability card coverage is too thin")
+    if int(capability_inventory.get("by_interview_type", {}).get("postgraduate", 0)) < 5:
+        failures.append("postgraduate capability card coverage is too thin")
+    total_question_candidates += int(capability_inventory.get("question_count", 0))
     return failures, total_question_candidates
 
 
@@ -297,6 +305,32 @@ def _quality_scenario_cases() -> list[QualityScenarioCase]:
             ),
             required_terms=("缺陷识别模型项目", "模型评估", "消融实验"),
             forbidden_terms=("雅思", "群众"),
+        ),
+        QualityScenarioCase(
+            name="job-ai-fullstack-capability-cards",
+            interview_type=InterviewType.JOB,
+            session_id="quality-job-ai-fullstack-capability",
+            material_context=_job_context(
+                job_title="AI 全栈开发工程师",
+                job_requirements="负责 React、FastAPI、RAG 检索、Agent 工具调用、评测集建设和提示词注入防护。",
+                resume_text="智能面试 Agent 项目：我负责向量库召回、工具调用编排、DeepSeek 调用和安全评测。",
+                keywords=["RAG", "Agent", "FastAPI", "提示词注入"],
+            ),
+            required_terms=("RAG 召回边界", "Agent 工具调用", "提示词注入防护", "计算机基础"),
+            forbidden_terms=("法条体系", "Part 1", "患者"),
+        ),
+        QualityScenarioCase(
+            name="job-backend-shared-foundations",
+            interview_type=InterviewType.JOB,
+            session_id="quality-job-backend-capability",
+            material_context=_job_context(
+                job_title="Python 后端工程师",
+                job_requirements="负责 FastAPI、PostgreSQL、Redis、接口幂等、事务一致性和线上稳定性。",
+                resume_text="订单系统项目：我负责缓存策略、数据库索引优化、链路追踪和灰度回滚。",
+                keywords=["FastAPI", "PostgreSQL", "Redis", "接口幂等"],
+            ),
+            required_terms=("接口稳定性", "事务边界", "计算机基础"),
+            forbidden_terms=("作品集逻辑", "法条体系", "Part 1"),
         ),
         QualityScenarioCase(
             name="postgraduate-computer",

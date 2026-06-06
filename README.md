@@ -20,7 +20,7 @@
 
 - 前端：React、Vite、TypeScript、GSAP、Iconify SVG。
 - 后端：FastAPI、Python 3.12、uv、SQLAlchemy、Alembic。
-- 数据：PostgreSQL、Redis。
+- 数据：PostgreSQL、Redis、pgvector。
 - 部署：Docker Compose、Nginx、HTTPS 证书挂载。
 - 认证：JWT、HttpOnly Cookie、CSRF Token、管理员角色与二次验证。
 
@@ -93,7 +93,7 @@ CREATE DATABASE mianba
 
 PostgreSQL 的 `UTF8` 编码支持 4 字节 Unicode 字符和 emoji，不使用 MySQL 的 `utf8mb4` 命名。
 
-当前迁移包含 14 张业务表：
+当前迁移包含 15 张业务表：
 
 - `users`：用户账号、角色、启停状态与密码哈希。
 - `credit_ledger`：用户次数发放、扣减、补偿流水。
@@ -104,6 +104,7 @@ PostgreSQL 的 `UTF8` 编码支持 4 字节 Unicode 字符和 emoji，不使用 
 - `ai_provider_configs`：固定 DeepSeek LLM 与腾讯云 ASR/TTS 供应商配置。
 - `ai_call_logs`：AI 调用日志，包含成功状态、延迟、请求 ID、token、音频时长、字符数和用量信息。
 - `content_safety_logs`：内容安全日志，记录用户输入和模型输出命中的红线类别、处置动作和可追溯片段。
+- `interview_capability_vectors`：面试能力卡片向量索引，存放已审核内部题卡的 pgvector 向量、适用场景和元数据。
 - `auth_login_logs`：普通用户与管理员登录审计，记录登录方式、成功状态、失败原因、IP 和 User-Agent。
 - `customer_service_notes`：客服备注，记录用户沟通、补偿口径、关联训练 ID 和管理员操作人。
 - `refund_cases`：退款与纠纷记录，记录诉求、金额、次数补偿、处理状态和处理结论。
@@ -124,7 +125,7 @@ cd Backend
 uv run python -m app.cli.safe_migrate
 ```
 
-安全迁移会先使用 `pg_dump` 在项目根目录的 `database_backups/` 下生成迁移前备份，再执行 Alembic 迁移，并保留最新 5 份备份。
+安全迁移会先使用 `pg_dump` 在项目根目录的 `database_backups/` 下生成迁移前备份，再执行 Alembic 迁移，刷新面试能力卡片向量，并保留最新 5 份备份。
 
 如果系统找不到 `pg_dump`，可以在当前 PowerShell 指定路径：
 
@@ -180,6 +181,8 @@ npm run dev
 - `nginx/sakuracianna.icu_bundle.pem`
 - `nginx/sakuracianna.icu.key`
 
+数据库容器使用 `pgvector/pgvector:pg18`，用于支持面试能力卡片的向量召回。生产环境更新前必须先确保备份可用，再执行迁移。
+
 启动：
 
 ```powershell
@@ -226,8 +229,15 @@ Docker 部署默认启用以下单机容量保护：
 
 后端会优先从 `Backend/app/services/interview_question_bank.py` 生成每场训练的问题序列；如果题库生成失败，才回退到旧的基础问题。题库按轮次维护候选题，每一轮至少 10 个候选问题，并按由易到难的顺序推进。
 
-- 工作面试：结合简历、岗位名称、JD、关键词和岗位预设方向生成职业专属题库；如果材料里能识别到项目、系统、平台、论文、课题或作品经历，项目证据、方案取舍、指标复盘和根因定位轮次会优先围绕该项目追问，不只从通用题库里抽题。
-- 研究生复试：结合目标院校、报考专业和研究方向抽题；每个专业预设都会带入自己的专业边界，例如计算机侧重数据结构、系统边界和模型评估，法学侧重法条体系、法律适用和案例争点。院校层级来自 `Backend/app/interview_presets/school_tiers.json`，以教育部第二轮“双一流”建设高校名单、原 985/C9 等公开历史类别作为训练压力依据，不宣称官方排名。
+题库现在采用“确定性流程骨架 + 能力卡片 + 可选 pgvector 向量召回”的混合方案：
+
+- 确定性流程骨架仍负责轮次顺序、兜底问题和场景隔离，避免向量召回或 LLM 直接控制面试流程。
+- `Backend/app/interview_presets/capability_cards.json` 存放已审核能力卡片，把计算机八股、RAG/Agent、后端工程、法学复试、医学循证、公考结构化和雅思口语评分维度拆成可复用模块。
+- `Backend/app/services/interview_capability_retrieval.py` 会先用本地规则和本地哈希向量召回能力卡片；数据库可用且 `interview_capability_vectors` 已 seed 时，再叠加 pgvector 相似度分数。
+- 用户上传的简历、JD、研究方向和回答只作为不可信匹配查询与面试证据，不允许覆盖系统规则、泄露提示词或改变面试角色。
+
+- 工作面试：结合简历、岗位名称、JD、关键词、岗位预设方向和能力卡片生成职业专属题库；AI 全栈开发、传统后端、数据工程等会共享计算机基础卡片，同时保留 RAG/Agent、接口稳定性、数据指标等岗位专属问法。如果材料里能识别到项目、系统、平台、论文、课题或作品经历，项目证据、方案取舍、指标复盘和根因定位轮次会优先围绕该项目追问，不只从通用题库里抽题。
+- 研究生复试：结合目标院校、报考专业、研究方向和能力卡片抽题；每个专业预设都会带入自己的专业边界，例如计算机侧重数据结构、系统边界和模型评估，法学侧重法条体系、法律适用和案例争点。院校层级来自 `Backend/app/interview_presets/school_tiers.json`，以教育部第二轮“双一流”建设高校名单、原 985/C9 等公开历史类别作为训练压力依据，不宣称官方排名。
 - 考公面试：按岗位认知、综合分析、计划组织、人际沟通、应急处置和现场追问收束抽题，要求回答落到政策依据、群众立场、执行步骤和风险兜底，避免只讲口号。
 - 雅思口语：按 IELTS Speaking Part 1、Part 2、Part 2 Follow-up、Part 3 抽取同一主题链路，当前维护 15 组主题链，保证口语测试节奏和话题连贯性。
 - 自适应追问：回答通过基础质量校验后，系统会优先使用当前会话已经抽好的下一题作为追问边界，再结合上一轮回答生成上下文追问；明显过短、敷衍或跑题的回答不会进入下一题。
@@ -243,7 +253,7 @@ cd Backend
 uv run python -m app.cli.interview_quality_gate
 ```
 
-该命令会验证四类场景的正式轮次、题库候选数量、岗位/专业强区分、项目经历锚定、跨场景串题、低质量回答拦截，并输出：
+该命令会验证四类场景的正式轮次、题库候选数量、能力卡片覆盖、岗位/专业强区分、项目经历锚定、跨场景串题、低质量回答拦截，并输出：
 
 - `wrong_question_risk_rate`：离线样例中的错问风险率，当前门槛为不超过 0.01。
 - `flow_error_risk_rate`：离线样例中的流程错误风险率，当前门槛为不超过 0.02。
@@ -282,5 +292,6 @@ docker builder prune -af
 - Resend 或其他邮件服务的发信域名完成 DNS 验证。
 - 管理员账号需要在后台或数据库中拥有 `admin` 角色，并使用密码 + 邮箱验证码登录后台。
 - 首次上线前执行 `uv run python -m app.cli.safe_migrate`，Docker 环境执行 `docker compose --profile migrate run --rm migrate`。
-- 每次调整面试题库、追问逻辑或回答质量校验后，执行 `uv run python -m app.cli.interview_quality_gate`，确保离线质量门禁通过。
+- 每次调整面试题库、能力卡片、追问逻辑或回答质量校验后，执行 `uv run python -m app.cli.interview_quality_gate`，确保离线质量门禁通过。
+- 数据库迁移后确认日志里出现 `interview capability vectors seeded`，否则说明 pgvector 表或扩展没有准备好。
 - 上线后定期执行 `uv run python -m app.cli.interview_quality_observe --limit 200 --min-samples 30`，用真实记录观察错问风险率和流程错误风险率。

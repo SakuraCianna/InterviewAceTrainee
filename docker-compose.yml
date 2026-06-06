@@ -8,7 +8,7 @@ x-logging: &default-logging
 
 services:
   postgres:
-    image: postgres:18
+    image: pgvector/pgvector:pg18
     container_name: mianba-postgres
     restart: unless-stopped
     environment:
