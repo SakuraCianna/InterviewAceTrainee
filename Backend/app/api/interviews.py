@@ -29,6 +29,7 @@ from app.services.content_safety_logs import ContentSafetyLogStore, get_content_
 from app.services.interview_runtime import (
     DatabaseInterviewRuntimeStore,
     InMemoryInterviewRuntimeStore,
+    InterviewSessionConflictError,
     InterviewSessionNotFoundError,
     InterviewState,
     memory_interview_store,
@@ -178,6 +179,8 @@ def start_interview_with_stores(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="interview_material_required")
     if payload.material_id and material_context is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="interview_material_not_found")
+    if interview_store.session_id_exists(payload.session_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="interview_session_id_conflict")
 
     try:
         voucher_id = None
@@ -211,13 +214,16 @@ def start_interview_with_stores(
     except InsufficientCreditsError as exc:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="insufficient_credits") from exc
 
-    state = interview_store.create_session(
-        claims["sub"],
-        payload.session_id,
-        interview_type,
-        material_context,
-        admin_unlimited_usage=is_admin,
-    )
+    try:
+        state = interview_store.create_session(
+            claims["sub"],
+            payload.session_id,
+            interview_type,
+            material_context,
+            admin_unlimited_usage=is_admin,
+        )
+    except InterviewSessionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="interview_session_id_conflict") from exc
     credit_ledger_store.record(
         user_email=claims["sub"],
         change_amount=entry.change_amount,

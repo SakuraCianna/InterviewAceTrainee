@@ -1,12 +1,14 @@
 import unittest
+from unittest.mock import patch
 
 from fastapi import HTTPException, Response
 from starlette.requests import Request
 
-from app.api.auth import login_with_email_code, login_with_password, register_with_password
+from app.api import auth as auth_api
+from app.api.auth import login_with_email_code, login_with_password, register_with_password, request_email_code
 from app.core.config import Settings
 from app.core.security import hash_password
-from app.schemas.auth import EmailCodeLoginRequest, PasswordLoginRequest, PasswordRegisterRequest
+from app.schemas.auth import EmailCodeLoginRequest, EmailCodeRequest, PasswordLoginRequest, PasswordRegisterRequest
 from app.services.auth_login_logs import InMemoryAuthLoginLogStore
 from app.services.auth_sessions import InMemoryAuthSessionStore, _memory_auth_sessions
 from app.services.email_codes import EmailCodeStore
@@ -31,11 +33,13 @@ class AuthBusinessTests(unittest.TestCase):
     def setUp(self) -> None:
         _memory_users.clear()
         _memory_auth_sessions.clear()
+        auth_api._email_code_limiter._requests.clear()
         self.settings = Settings(access_token_secret="x" * 40)
 
     def tearDown(self) -> None:
         _memory_users.clear()
         _memory_auth_sessions.clear()
+        auth_api._email_code_limiter._requests.clear()
 
     def test_email_code_login_creates_new_user_trial_voucher(self) -> None:
         email = "new-user@example.com"
@@ -132,6 +136,24 @@ class AuthBusinessTests(unittest.TestCase):
         self.assertEqual(exc.exception.status_code, 403)
         self.assertEqual(exc.exception.detail, "admin_login_required")
         self.assertEqual(voucher_store.available_count(email), 0)
+
+    def test_dev_email_code_response_can_be_hidden(self) -> None:
+        settings = Settings(
+            email_provider="dev",
+            expose_dev_email_codes=False,
+            email_code_rate_limit=99,
+            email_code_ip_rate_limit=99,
+            email_code_domain_rate_limit=99,
+        )
+        with patch("app.api.auth.get_redis_client", return_value=None):
+            response = request_email_code(
+                request=build_request(),
+                payload=EmailCodeRequest(email="hidden-code@example.com"),
+                settings=settings,
+                code_store=EmailCodeStore(),
+            )
+
+        self.assertEqual(response.dev_code, "")
 
 
 if __name__ == "__main__":

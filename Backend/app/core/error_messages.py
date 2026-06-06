@@ -30,6 +30,7 @@ ERROR_MESSAGES_ZH: dict[str, str] = {
     "interview_material_required": "该模块需要先提交面试资料。",
     "interview_report_not_found": "该训练暂未生成复盘报告。",
     "interview_session_already_completed": "这场训练已经完成，不能继续提交回答。",
+    "interview_session_id_conflict": "这场训练编号已被占用，请刷新页面后重新开始。",
     "interview_session_not_found": "未找到这场面试训练，请刷新页面后重试。",
     "invalid_access_token": "登录状态已失效，请重新登录。",
     "invalid_credentials": "邮箱或密码不正确，请重新输入。",

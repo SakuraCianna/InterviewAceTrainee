@@ -415,7 +415,7 @@ def request_email_code(
     except EmailDeliveryError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    dev_code = record.code if settings.email_provider == "dev" else ""
+    dev_code = record.code if settings.email_provider == "dev" and settings.expose_dev_email_codes else ""
     return EmailCodeRequestResponse(email=email, expires_in_seconds=settings.email_code_expire_seconds, dev_code=dev_code)
 
 

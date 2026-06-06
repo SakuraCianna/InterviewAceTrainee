@@ -1,5 +1,7 @@
 import unittest
 
+from fastapi import HTTPException
+
 from app.api.interviews import start_interview_with_stores
 from app.schemas.interviews import InterviewStartRequest, InterviewType
 from app.services.credit_balances import InMemoryCreditBalanceStore, _memory_balances
@@ -56,6 +58,36 @@ class InterviewVoucherTests(unittest.TestCase):
         self.assertEqual(response.credit_change, -2)
         self.assertEqual(response.balance_after, 0)
         self.assertEqual(response.ledger_reason, "interview_start:ielts")
+
+    def test_cross_user_session_id_conflict_does_not_consume_credit_or_voucher(self) -> None:
+        email = "candidate@example.com"
+        _memory_balances[email] = 2
+        interview_store = InMemoryInterviewRuntimeStore()
+        interview_store.create_session("owner@example.com", "shared-session", InterviewType.CIVIL_SERVICE)
+        voucher_store = InMemoryInterviewVoucherStore()
+        voucher_store.issue(
+            user_email=email,
+            voucher_type="new_user_trial",
+            issue_reason="registration_bonus",
+        )
+
+        with self.assertRaises(HTTPException) as exc:
+            start_interview_with_stores(
+                payload=InterviewStartRequest(session_id="shared-session", interview_type=InterviewType.CIVIL_SERVICE),
+                claims={"sub": email, "role": "user", "session_id": "session"},
+                credit_store=InMemoryCreditBalanceStore(),
+                credit_ledger_store=InMemoryCreditLedgerStore(),
+                voucher_store=voucher_store,
+                interview_store=interview_store,
+                material_store=InMemoryInterviewMaterialStore(),
+            )
+
+        self.assertEqual(exc.exception.status_code, 409)
+        self.assertEqual(exc.exception.detail, "interview_session_id_conflict")
+        self.assertEqual(_memory_balances[email], 2)
+        self.assertEqual(voucher_store.available_count(email), 1)
+        self.assertIsNotNone(interview_store.get_session("owner@example.com", "shared-session"))
+        self.assertIsNone(interview_store.get_session(email, "shared-session"))
 
     def test_insufficient_paid_credits_without_voucher_still_blocks_interview(self) -> None:
         email = "blocked@example.com"

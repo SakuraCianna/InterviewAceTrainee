@@ -78,7 +78,13 @@ def check_email(settings) -> dict[str, object]:
         domestic_detail = {"provider": domestic_provider, "ready": False, "detail": "unsupported_domestic_email_provider"}
 
     if provider == "dev":
-        return {"ready": domestic_ready, "provider": provider, "detail": "dev_code_response_enabled", "domestic": domestic_detail}
+        return {
+            "ready": domestic_ready,
+            "provider": provider,
+            "detail": "dev_code_response_enabled" if settings.expose_dev_email_codes else "dev_sender_enabled_without_code_exposure",
+            "dev_code_exposed": settings.expose_dev_email_codes,
+            "domestic": domestic_detail,
+        }
     if provider == "resend":
         return {
             "ready": bool(settings.resend_api_key and settings.email_from_address) and domestic_ready,

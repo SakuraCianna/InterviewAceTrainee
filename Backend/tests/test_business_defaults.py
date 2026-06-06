@@ -1,7 +1,7 @@
 import unittest
 
 from app.api.providers import to_response
-from app.core.config import Settings
+from app.core.config import RuntimeSecurityError, Settings, validate_runtime_security
 from app.schemas.interviews import InterviewType
 from app.services.ai_router import AIProviderConfig
 from app.services.interview_products import INTERVIEW_PRODUCTS
@@ -60,6 +60,32 @@ class BusinessDefaultTests(unittest.TestCase):
         self.assertEqual(deepseek.api_key_preview, "环境变量已配置")
         self.assertTrue(tencent.has_api_key)
         self.assertEqual(tencent.api_key_preview, "环境变量已配置")
+
+    def test_production_runtime_rejects_unsafe_development_defaults(self) -> None:
+        settings = Settings(
+            app_env="production",
+            access_token_secret="change-me-before-deploy",
+            auth_cookie_secure=False,
+            expose_dev_email_codes=True,
+        )
+
+        with self.assertRaises(RuntimeSecurityError) as exc:
+            validate_runtime_security(settings)
+
+        message = str(exc.exception)
+        self.assertIn("access_token_secret", message)
+        self.assertIn("auth_cookie_secure", message)
+        self.assertIn("expose_dev_email_codes", message)
+
+    def test_production_runtime_accepts_hardened_auth_settings(self) -> None:
+        settings = Settings(
+            app_env="production",
+            access_token_secret="x" * 40,
+            auth_cookie_secure=True,
+            expose_dev_email_codes=False,
+        )
+
+        validate_runtime_security(settings)
 
 
 if __name__ == "__main__":

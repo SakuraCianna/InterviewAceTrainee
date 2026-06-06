@@ -48,8 +48,11 @@ services:
     env_file:
       - ./Backend/.env
     environment:
+      APP_ENV: production
       DATABASE_URL: postgresql+psycopg://mianba:mianba@postgres:5432/mianba
       REDIS_URL: redis://redis:6379/0
+      AUTH_COOKIE_SECURE: "true"
+      EXPOSE_DEV_EMAIL_CODES: "false"
       UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
       UVICORN_LIMIT_CONCURRENCY: ${UVICORN_LIMIT_CONCURRENCY:-800}
       DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-8}

@@ -43,11 +43,13 @@ docker-compose.yml    容器编排
 ```txt
 DATABASE_URL=postgresql+psycopg://用户名:密码@127.0.0.1:5432/mianba
 REDIS_URL=redis://127.0.0.1:6379/0
+APP_ENV=development
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://sakuracianna.icu,https://www.sakuracianna.icu
 ADMIN_ENTRY_PATH=/sakuracianna
 ACCESS_TOKEN_SECRET=随机长字符串
 AUTH_COOKIE_SECURE=false
 EMAIL_PROVIDER=dev
+EXPOSE_DEV_EMAIL_CODES=true
 EMAIL_FROM_ADDRESS=no-reply@mail.sakuracianna.icu
 EMAIL_CODE_EXPIRE_SECONDS=300
 EMAIL_CODE_RATE_LIMIT=1
@@ -74,6 +76,8 @@ REALTIME_ASR_CAPACITY_LEASE_SECONDS=420
 ```
 
 本机使用 HTTP 调试时，`AUTH_COOKIE_SECURE=false`；服务器启用 HTTPS 后改为 `true`。
+
+生产环境使用 `APP_ENV=production`。后端启动时会拒绝默认或过短的 `ACCESS_TOKEN_SECRET`、拒绝非 Secure Cookie、拒绝开发验证码回显。Docker Compose 已为后端容器设置 `APP_ENV=production`、`AUTH_COOKIE_SECURE=true` 和 `EXPOSE_DEV_EMAIL_CODES=false`；本地调试才建议开启 `EXPOSE_DEV_EMAIL_CODES=true`。
 
 前端配置：
 
@@ -182,6 +186,8 @@ npm run dev
 - `nginx/sakuracianna.icu.key`
 
 数据库容器使用 `pgvector/pgvector:pg18`，用于支持面试能力卡片的向量召回。生产环境更新前必须先确保备份可用，再执行迁移。
+
+Docker 后端容器默认按生产模式启动。如果 `Backend/.env` 没有配置足够长的 `ACCESS_TOKEN_SECRET`，或被其他环境变量覆盖成不安全值，后端会拒绝启动并在日志中提示 `unsafe_production_configuration`。
 
 启动：
 

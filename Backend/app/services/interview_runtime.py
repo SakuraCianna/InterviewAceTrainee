@@ -59,6 +59,10 @@ class InterviewSessionNotFoundError(LookupError):
     """Raised when a session is not owned by the current user or does not exist."""
 
 
+class InterviewSessionConflictError(ValueError):
+    """Raised when a client supplied session id is already occupied."""
+
+
 def _merge_answer_attempt(existing_answer: str | None, answer_text: str, retry_requested: bool) -> str:
     clean_answer = answer_text.strip()
     if not existing_answer:
@@ -620,6 +624,9 @@ class InMemoryInterviewRuntimeStore:
     def __init__(self) -> None:
         self._sessions: dict[str, dict[str, Any]] = {}
 
+    def session_id_exists(self, session_id: str) -> bool:
+        return session_id in self._sessions
+
     def get_session(self, user_email: str, session_id: str) -> InterviewState | None:
         record = self._sessions.get(session_id)
         if record is None or record["user_email"] != user_email:
@@ -644,6 +651,8 @@ class InMemoryInterviewRuntimeStore:
         material_context: InterviewMaterialContext | None = None,
         admin_unlimited_usage: bool = False,
     ) -> InterviewState:
+        if self.session_id_exists(session_id):
+            raise InterviewSessionConflictError("interview session id already exists")
         steps = build_interview_steps(interview_type, material_context, session_id=session_id)
         record = {
             "session_id": session_id,
@@ -769,6 +778,14 @@ class DatabaseInterviewRuntimeStore:
         self._session = session
         self._commit_on_write = commit_on_write
 
+    def session_id_exists(self, session_id: str) -> bool:
+        return (
+            self._session.execute(
+                select(InterviewSession.id).where(InterviewSession.id == session_id).limit(1)
+            ).scalar_one_or_none()
+            is not None
+        )
+
     def get_session(self, user_email: str, session_id: str) -> InterviewState | None:
         session_model = self._find_session(user_email, session_id)
         if session_model is None:
@@ -794,6 +811,8 @@ class DatabaseInterviewRuntimeStore:
         material_context: InterviewMaterialContext | None = None,
         admin_unlimited_usage: bool = False,
     ) -> InterviewState:
+        if self.session_id_exists(session_id):
+            raise InterviewSessionConflictError("interview session id already exists")
         steps = build_interview_steps(
             interview_type,
             material_context,

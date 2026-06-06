@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "面霸练习生"
+    app_env: str = "development"
     api_prefix: str = "/api"
     database_url: str = Field(default="postgresql+psycopg://mianba:mianba@postgres:5432/mianba")
     redis_url: str = Field(default="redis://redis:6379/0")
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     auth_failure_limit: int = 5
     auth_failure_window_seconds: int = 300
     email_provider: str = "dev"
+    expose_dev_email_codes: bool = True
     email_from_name: str = "面霸练习生"
     email_from_address: str = "no-reply@mianba.local"
     email_code_expire_seconds: int = 300
@@ -61,6 +63,29 @@ class Settings(BaseSettings):
     realtime_asr_capacity_lease_seconds: int = 420
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    def is_production_like(self) -> bool:
+        return self.app_env.strip().lower() in {"prod", "production", "runtime"}
+
+
+class RuntimeSecurityError(RuntimeError):
+    """Raised when production starts with unsafe development settings."""
+
+
+def validate_runtime_security(settings: Settings) -> None:
+    if not settings.is_production_like():
+        return
+
+    failures: list[str] = []
+    if settings.access_token_secret == "change-me-before-deploy" or len(settings.access_token_secret) < 32:
+        failures.append("access_token_secret")
+    if not settings.auth_cookie_secure:
+        failures.append("auth_cookie_secure")
+    if settings.expose_dev_email_codes:
+        failures.append("expose_dev_email_codes")
+
+    if failures:
+        raise RuntimeSecurityError(f"unsafe_production_configuration:{','.join(failures)}")
 
 
 @lru_cache
