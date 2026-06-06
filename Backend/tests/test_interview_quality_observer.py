@@ -1,10 +1,17 @@
 import unittest
 
+from sqlalchemy import Column, MetaData, String, Table, Text, create_engine
+
 from app.schemas.interviews import InterviewType
 from app.services.interview_quality_observer import (
+    CAPABILITY_VECTOR_TABLE,
     ObservedInterviewSession,
     ObservedInterviewTurn,
     evaluate_observed_interviews,
+    inspect_capability_vectors,
+    observe_capability_card_seeds,
+    observe_interview_core_readiness,
+    observe_recall_quality,
 )
 from app.cli.interview_quality_observe import database_unavailable_payload
 
@@ -121,6 +128,92 @@ class InterviewQualityObserverTests(unittest.TestCase):
         self.assertFalse(payload["passed"])
         self.assertEqual(payload["sample_status"], "database_unavailable")
         self.assertIn("database", payload["failure_summary"])
+
+    def test_capability_card_seed_observation_tracks_seed_counts(self) -> None:
+        observation = observe_capability_card_seeds()
+
+        self.assertTrue(observation.ready, observation.to_dict())
+        self.assertGreaterEqual(observation.counts_by_interview_type[InterviewType.JOB.value], 200)
+        self.assertGreaterEqual(observation.counts_by_interview_type[InterviewType.POSTGRADUATE.value], 100)
+        self.assertGreaterEqual(observation.counts_by_interview_type[InterviewType.CIVIL_SERVICE.value], 5)
+        self.assertGreaterEqual(observation.counts_by_interview_type[InterviewType.IELTS.value], 4)
+        self.assertEqual(observation.total_seed_count, sum(observation.counts_by_interview_type.values()))
+        self.assertFalse(observation.missing_preset_files)
+
+    def test_recall_quality_observation_tracks_key_probe_signals(self) -> None:
+        observation = observe_recall_quality()
+        probes = {probe.name: probe for probe in observation.probes}
+
+        self.assertTrue(observation.ready, observation.to_dict())
+        self.assertEqual(observation.probe_count, 4)
+        self.assertEqual(observation.passed_probe_count, 4)
+        self.assertEqual(probes["job_python_backend"].matched_preset_id, "backend-python-engineer")
+        self.assertGreater(probes["job_python_backend"].top_score, 0)
+        self.assertGreater(probes["job_python_backend"].top_score_gap or 0, 0)
+        self.assertEqual(probes["postgraduate_computer_science"].matched_preset_id, "computer-science")
+
+    def test_capability_vector_observation_reports_missing_table(self) -> None:
+        engine = create_engine("sqlite+pysqlite:///:memory:")
+        with engine.connect() as connection:
+            observation = inspect_capability_vectors(connection, expected_seed_count=2)
+
+        self.assertFalse(observation.ready)
+        self.assertFalse(observation.table_exists)
+        self.assertEqual(observation.detail, "table_missing")
+
+    def test_capability_vector_observation_reports_model_coverage_and_status(self) -> None:
+        engine = create_engine("sqlite+pysqlite:///:memory:")
+        metadata = MetaData()
+        vector_table = Table(
+            CAPABILITY_VECTOR_TABLE,
+            metadata,
+            Column("id", String, primary_key=True),
+            Column("preset_id", String, nullable=False),
+            Column("embedding_model", String, nullable=False),
+            Column("embedding_vector", Text, nullable=False),
+            Column("status", String, nullable=False),
+        )
+        metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                vector_table.insert(),
+                [
+                    {
+                        "id": "vector-1",
+                        "preset_id": "backend-python-engineer",
+                        "embedding_model": "text-embedding-v1",
+                        "embedding_vector": "[0.1, 0.2]",
+                        "status": "ready",
+                    },
+                    {
+                        "id": "vector-2",
+                        "preset_id": "computer-science",
+                        "embedding_model": "text-embedding-v1",
+                        "embedding_vector": "[0.2, 0.3]",
+                        "status": "ready",
+                    },
+                ],
+            )
+            observation = inspect_capability_vectors(connection, expected_seed_count=2)
+
+        self.assertTrue(observation.ready, observation.to_dict())
+        self.assertTrue(observation.table_exists)
+        self.assertEqual(observation.total_vector_count, 2)
+        self.assertEqual(observation.non_empty_vector_count, 2)
+        self.assertEqual(observation.distinct_seed_count, 2)
+        self.assertEqual(observation.coverage_rate, 1.0)
+        self.assertEqual(observation.embedding_models, [{"model": "text-embedding-v1", "count": 2}])
+
+    def test_core_readiness_keeps_vector_table_gap_visible(self) -> None:
+        engine = create_engine("sqlite+pysqlite:///:memory:")
+        with engine.connect() as connection:
+            report = observe_interview_core_readiness(connection)
+
+        self.assertFalse(report.ready)
+        self.assertTrue(report.capability_cards.ready)
+        self.assertTrue(report.recall_quality.ready)
+        self.assertFalse(report.capability_vectors.ready)
+        self.assertIn(CAPABILITY_VECTOR_TABLE, report.failure_summary)
 
 
 if __name__ == "__main__":

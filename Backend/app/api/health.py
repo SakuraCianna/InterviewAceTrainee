@@ -4,6 +4,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import get_settings
 from app.db.session import engine
+from app.services.interview_quality_observer import observe_interview_core_readiness
 from app.services.redis_runtime import get_redis_client
 
 router = APIRouter(prefix="/health", tags=["health"])
@@ -40,10 +41,19 @@ def read_readiness() -> dict[str, object]:
         "redis": check_redis(),
         "email": check_email(settings),
         "auth": check_auth(settings),
+        "interview_core": check_interview_core(),
     }
-    required_checks_ready = checks["database"]["ready"] and checks["auth"]["ready"]
+    required_checks_ready = all(
+        checks[name]["ready"]
+        for name in ("database", "auth", "interview_core")
+    )
     status = "ready" if required_checks_ready else "degraded"
     return {"status": status, "service": "mianba-backend", "checks": checks}
+
+
+@router.get("/interview-core")
+def read_interview_core_readiness() -> dict[str, object]:
+    return check_interview_core()
 
 
 def check_database() -> dict[str, object]:
@@ -95,3 +105,11 @@ def check_auth(settings) -> dict[str, object]:
         "cookie_secure": settings.auth_cookie_secure,
         "same_site": settings.auth_cookie_samesite,
     }
+
+
+def check_interview_core() -> dict[str, object]:
+    try:
+        with engine.connect() as connection:
+            return observe_interview_core_readiness(connection).to_dict()
+    except SQLAlchemyError as exc:
+        return observe_interview_core_readiness(database_error=str(exc)).to_dict()

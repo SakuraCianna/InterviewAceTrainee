@@ -169,6 +169,7 @@ npm run dev
 管理后台：http://localhost:5173/sakuracianna
 后端健康检查：http://localhost:8000/api/health
 后端就绪检查：http://localhost:8000/api/health/readiness
+核心面试业务观测：http://localhost:8000/api/health/interview-core
 ```
 
 ## Docker 运行
@@ -260,6 +261,14 @@ uv run python -m app.cli.interview_quality_observe --limit 200 --min-samples 30
 
 该命令会读取最近的真实面试会话和问题记录，计算线上样本里的 `wrong_question_risk_rate` 和 `flow_error_risk_rate`。已知旧流程记录会计入 `legacy_session_count` 并排除出当前版本指标，避免历史数据污染新流程统计。如果当前流程真实样本数量不足，会返回 `sample_status=insufficient`，不能把它当成线上指标已经达标。
 
+后端 readiness 还会输出 `checks.interview_core`，用于快速判断核心面试业务是否具备上线条件。该检查会汇总能力卡片 seed 数量、`interview_capability_vectors` 表就绪状态、向量覆盖率、embedding 模型分布和基础召回探针结果。也可以单独访问：
+
+```txt
+http://localhost:8000/api/health/interview-core
+```
+
+如果 `interview_capability_vectors` 不存在、为空、向量覆盖不到全部能力卡片 seed、缺少 embedding 模型信息，或典型能力卡片召回探针失败，`/api/health/readiness` 会返回 `status=degraded`。
+
 如果需要完全清空服务器业务数据并重建数据库，可以在服务器项目目录执行以下命令。该操作会删除 PostgreSQL、Redis 数据卷和本地备份目录，用户、次数、面试记录和日志都会被清空。
 
 服务器 Linux Shell：
@@ -284,3 +293,4 @@ docker builder prune -af
 - 首次上线前执行 `uv run python -m app.cli.safe_migrate`，Docker 环境执行 `docker compose --profile migrate run --rm migrate`。
 - 每次调整面试题库、追问逻辑或回答质量校验后，执行 `uv run python -m app.cli.interview_quality_gate`，确保离线质量门禁通过。
 - 上线后定期执行 `uv run python -m app.cli.interview_quality_observe --limit 200 --min-samples 30`，用真实记录观察错问风险率和流程错误风险率。
+- 上线前确认 `/api/health/readiness` 中 `checks.interview_core.ready=true`，并检查能力卡片 seed 数量、向量覆盖率、embedding 模型分布和召回探针结果。
