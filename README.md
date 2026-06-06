@@ -73,6 +73,11 @@ LLM_CONCURRENCY_LIMIT=24
 LLM_CAPACITY_LEASE_SECONDS=45
 REALTIME_ASR_CONCURRENCY_LIMIT=80
 REALTIME_ASR_CAPACITY_LEASE_SECONDS=420
+CAPABILITY_EMBEDDING_PROVIDER=sentence-transformers
+CAPABILITY_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+CAPABILITY_EMBEDDING_DEVICE=
+CAPABILITY_EMBEDDING_BATCH_SIZE=32
+CAPABILITY_EMBEDDING_QUERY_INSTRUCTION=为这个句子生成表示以用于检索相关文章：
 ```
 
 本机使用 HTTP 调试时，`AUTH_COOKIE_SECURE=false`；服务器启用 HTTPS 后改为 `true`。
@@ -174,6 +179,7 @@ npm run dev
 管理后台：http://localhost:5173/sakuracianna
 后端健康检查：http://localhost:8000/api/health
 后端就绪检查：http://localhost:8000/api/health/readiness
+核心面试业务观测：http://localhost:8000/api/health/interview-core
 ```
 
 ## Docker 运行
@@ -276,6 +282,45 @@ uv run python -m app.cli.interview_quality_observe --limit 200 --min-samples 30
 
 该命令会读取最近的真实面试会话和问题记录，计算线上样本里的 `wrong_question_risk_rate` 和 `flow_error_risk_rate`。已知旧流程记录会计入 `legacy_session_count` 并排除出当前版本指标，避免历史数据污染新流程统计。如果当前流程真实样本数量不足，会返回 `sample_status=insufficient`，不能把它当成线上指标已经达标。
 
+后端 readiness 还会输出 `checks.interview_core`，用于快速判断核心面试业务是否具备上线条件。该检查会汇总能力卡片 seed 数量、`interview_capability_vectors` 表就绪状态、向量覆盖率、embedding 模型分布和基础召回探针结果。也可以单独访问：
+
+```txt
+http://localhost:8000/api/health/interview-core
+```
+
+如果 `interview_capability_vectors` 不存在、为空、向量覆盖不到全部能力卡片 seed、缺少 embedding 模型信息，或典型能力卡片召回探针失败，`/api/health/readiness` 会返回 `status=degraded`。
+
+能力卡片向量召回默认使用 Hugging Face 上的中文 embedding 模型 `BAAI/bge-small-zh-v1.5`。默认会给短 query 加 `CAPABILITY_EMBEDDING_QUERY_INSTRUCTION`，能力卡片文本本身不加指令。如果需要更强的多语或长文本检索能力，可以通过 `CAPABILITY_EMBEDDING_MODEL=BAAI/bge-m3` 切换，并按模型说明决定是否清空 query instruction；同时要先评估本机或服务器的模型下载、内存和推理耗时。`local-hash-v1` 只保留为显式离线基线，不再作为默认 embedding 方案。
+
+首次运行真实 embedding 对比前安装可选依赖：
+
+```powershell
+cd Backend
+uv sync --extra embeddings
+```
+
+离线对比三类 query 的召回差异：
+
+```powershell
+cd Backend
+uv run python -m app.cli.compare_capability_retrieval --limit 5
+```
+
+如果只想确认脚本结构是否可跑，可以显式使用 hash 基线，但这个结果不能用于判断真实向量方案效果：
+
+```powershell
+cd Backend
+uv run python -m app.cli.compare_capability_retrieval --provider local-hash --limit 5
+```
+
+写入数据库向量前需要先执行迁移，确保 PostgreSQL 已安装 `pgvector` 扩展：
+
+```powershell
+cd Backend
+uv run python -m app.cli.safe_migrate
+uv run python -m app.cli.seed_interview_capability_vectors
+```
+
 如果需要完全清空服务器业务数据并重建数据库，可以在服务器项目目录执行以下命令。该操作会删除 PostgreSQL、Redis 数据卷和本地备份目录，用户、次数、面试记录和日志都会被清空。
 
 服务器 Linux Shell：
@@ -301,3 +346,4 @@ docker builder prune -af
 - 每次调整面试题库、能力卡片、追问逻辑或回答质量校验后，执行 `uv run python -m app.cli.interview_quality_gate`，确保离线质量门禁通过。
 - 数据库迁移后确认日志里出现 `interview capability vectors seeded`，否则说明 pgvector 表或扩展没有准备好。
 - 上线后定期执行 `uv run python -m app.cli.interview_quality_observe --limit 200 --min-samples 30`，用真实记录观察错问风险率和流程错误风险率。
+- 上线前确认 `/api/health/readiness` 中 `checks.interview_core.ready=true`，并检查能力卡片 seed 数量、向量覆盖率、embedding 模型分布和召回探针结果。

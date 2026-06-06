@@ -1,15 +1,42 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime
+import json
 from typing import Any
+
+from sqlalchemy import MetaData, Table, func, inspect, select
+from sqlalchemy.engine import Connection
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.interviews import InterviewType
 from app.services.interview_material_context import InterviewMaterialContext
+from app.services.interview_presets import (
+    PRESET_INDEX_FILE,
+    load_interview_presets,
+    match_interview_presets,
+    read_preset_markdown,
+)
 from app.services.interview_quality_gate import EXPECTED_ROUNDS, SCENARIO_LABELS
 
 
 WRONG_QUESTION_RISK_LIMIT = 0.01
 FLOW_ERROR_RISK_LIMIT = 0.02
+CAPABILITY_VECTOR_TABLE = "interview_capability_vectors"
+
+CAPABILITY_SEED_MINIMUMS: dict[str, int] = {
+    InterviewType.JOB.value: 200,
+    InterviewType.POSTGRADUATE.value: 100,
+    InterviewType.CIVIL_SERVICE.value: 5,
+    InterviewType.IELTS.value: 4,
+}
+
+VECTOR_SEED_ID_COLUMNS = ("preset_id", "capability_id", "card_id", "seed_id", "source_id")
+VECTOR_VALUE_COLUMNS = ("embedding_vector", "embedding", "vector", "vector_json")
+VECTOR_MODEL_COLUMNS = ("embedding_model", "embedding_model_name", "model_name")
+VECTOR_STATUS_COLUMNS = ("status", "ready_status", "state")
+READY_VECTOR_STATUSES = {"ready", "active", "enabled", "completed", "ok"}
 
 SCENARIO_REQUIRED_TERMS: dict[InterviewType, tuple[str, ...]] = {
     InterviewType.JOB: ("岗位", "项目"),
@@ -206,3 +233,566 @@ def _has_wrong_question_risk(interview_type: InterviewType, session_text: str) -
         return True
     required_terms = SCENARIO_REQUIRED_TERMS[interview_type]
     return not any(term.lower() in session_text.lower() for term in required_terms)
+
+
+@dataclass
+class CapabilitySeedObservation:
+    ready: bool
+    source_version: str | None
+    source_policy: str | None
+    total_seed_count: int
+    counts_by_interview_type: dict[str, int]
+    expected_minimums: dict[str, int]
+    missing_preset_files: list[str] = field(default_factory=list)
+    duplicate_seed_ids: list[str] = field(default_factory=list)
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ready": self.ready,
+            "source_version": self.source_version,
+            "source_policy": self.source_policy,
+            "total_seed_count": self.total_seed_count,
+            "counts_by_interview_type": self.counts_by_interview_type,
+            "expected_minimums": self.expected_minimums,
+            "missing_preset_files": self.missing_preset_files,
+            "duplicate_seed_ids": self.duplicate_seed_ids,
+            "error": self.error,
+        }
+
+
+@dataclass
+class CapabilityVectorObservation:
+    ready: bool
+    table_name: str
+    table_exists: bool
+    expected_seed_count: int
+    total_vector_count: int = 0
+    non_empty_vector_count: int = 0
+    distinct_seed_count: int | None = None
+    coverage_rate: float = 0.0
+    seed_id_column: str | None = None
+    vector_column: str | None = None
+    embedding_model_column: str | None = None
+    embedding_models: list[dict[str, Any]] = field(default_factory=list)
+    status_column: str | None = None
+    status_counts: list[dict[str, Any]] = field(default_factory=list)
+    missing_observation_columns: list[str] = field(default_factory=list)
+    detail: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ready": self.ready,
+            "table_name": self.table_name,
+            "table_exists": self.table_exists,
+            "expected_seed_count": self.expected_seed_count,
+            "total_vector_count": self.total_vector_count,
+            "non_empty_vector_count": self.non_empty_vector_count,
+            "distinct_seed_count": self.distinct_seed_count,
+            "coverage_rate": self.coverage_rate,
+            "seed_id_column": self.seed_id_column,
+            "vector_column": self.vector_column,
+            "embedding_model_column": self.embedding_model_column,
+            "embedding_models": self.embedding_models,
+            "status_column": self.status_column,
+            "status_counts": self.status_counts,
+            "missing_observation_columns": self.missing_observation_columns,
+            "detail": self.detail,
+        }
+
+
+@dataclass
+class RecallProbeObservation:
+    name: str
+    interview_type: str
+    expected_preset_id: str
+    matched_preset_id: str | None
+    matched_title: str | None
+    top_score: int
+    runner_up_score: int | None
+    top_score_gap: int | None
+    match_count: int
+    ready: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "interview_type": self.interview_type,
+            "expected_preset_id": self.expected_preset_id,
+            "matched_preset_id": self.matched_preset_id,
+            "matched_title": self.matched_title,
+            "top_score": self.top_score,
+            "runner_up_score": self.runner_up_score,
+            "top_score_gap": self.top_score_gap,
+            "match_count": self.match_count,
+            "ready": self.ready,
+        }
+
+
+@dataclass
+class RecallQualityObservation:
+    ready: bool
+    probe_count: int
+    passed_probe_count: int
+    probes: list[RecallProbeObservation]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ready": self.ready,
+            "probe_count": self.probe_count,
+            "passed_probe_count": self.passed_probe_count,
+            "probes": [probe.to_dict() for probe in self.probes],
+        }
+
+
+@dataclass
+class InterviewCoreReadinessObservation:
+    ready: bool
+    capability_cards: CapabilitySeedObservation
+    capability_vectors: CapabilityVectorObservation
+    recall_quality: RecallQualityObservation
+    failure_reasons: list[str]
+
+    @property
+    def failure_summary(self) -> str:
+        return "；".join(self.failure_reasons) if self.failure_reasons else "核心面试业务观测通过"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ready": self.ready,
+            "capability_cards": self.capability_cards.to_dict(),
+            "capability_vectors": self.capability_vectors.to_dict(),
+            "recall_quality": self.recall_quality.to_dict(),
+            "failure_reasons": self.failure_reasons,
+            "failure_summary": self.failure_summary,
+        }
+
+
+@dataclass(frozen=True)
+class RecallProbeSpec:
+    name: str
+    interview_type: InterviewType
+    material_context: InterviewMaterialContext | None
+    round_name: str
+    expected_preset_id: str
+
+
+def observe_interview_core_readiness(
+    connection: Connection | None = None,
+    database_error: str | None = None,
+) -> InterviewCoreReadinessObservation:
+    capability_cards = observe_capability_card_seeds()
+    capability_vectors = inspect_capability_vectors(
+        connection,
+        expected_seed_count=capability_cards.total_seed_count,
+        database_error=database_error,
+    )
+    recall_quality = observe_recall_quality()
+    failure_reasons = _core_failure_reasons(capability_cards, capability_vectors, recall_quality)
+    return InterviewCoreReadinessObservation(
+        ready=not failure_reasons,
+        capability_cards=capability_cards,
+        capability_vectors=capability_vectors,
+        recall_quality=recall_quality,
+        failure_reasons=failure_reasons,
+    )
+
+
+def observe_capability_card_seeds() -> CapabilitySeedObservation:
+    try:
+        payload = _read_preset_index_payload()
+    except (OSError, ValueError) as exc:
+        return CapabilitySeedObservation(
+            ready=False,
+            source_version=None,
+            source_policy=None,
+            total_seed_count=0,
+            counts_by_interview_type={interview_type.value: 0 for interview_type in InterviewType},
+            expected_minimums=dict(CAPABILITY_SEED_MINIMUMS),
+            error=str(exc),
+        )
+
+    raw_ids = [str(item.get("id", "")) for item in payload.get("presets", [])]
+    duplicate_seed_ids = sorted(seed_id for seed_id, count in Counter(raw_ids).items() if seed_id and count > 1)
+    presets = load_interview_presets()
+    counts = Counter(preset.interview_type.value for preset in presets)
+    counts_by_interview_type = {interview_type.value: counts.get(interview_type.value, 0) for interview_type in InterviewType}
+    missing_preset_files = [
+        preset.file
+        for preset in presets
+        if not read_preset_markdown(preset).strip()
+    ]
+    enough_seed_counts = all(
+        counts_by_interview_type.get(interview_type, 0) >= minimum
+        for interview_type, minimum in CAPABILITY_SEED_MINIMUMS.items()
+    )
+    ready = enough_seed_counts and not missing_preset_files and not duplicate_seed_ids
+    return CapabilitySeedObservation(
+        ready=ready,
+        source_version=_string_or_none(payload.get("version")),
+        source_policy=_string_or_none(payload.get("source_policy")),
+        total_seed_count=len(presets),
+        counts_by_interview_type=counts_by_interview_type,
+        expected_minimums=dict(CAPABILITY_SEED_MINIMUMS),
+        missing_preset_files=missing_preset_files,
+        duplicate_seed_ids=duplicate_seed_ids,
+    )
+
+
+def inspect_capability_vectors(
+    connection: Connection | None,
+    expected_seed_count: int,
+    database_error: str | None = None,
+) -> CapabilityVectorObservation:
+    if connection is None:
+        return CapabilityVectorObservation(
+            ready=False,
+            table_name=CAPABILITY_VECTOR_TABLE,
+            table_exists=False,
+            expected_seed_count=expected_seed_count,
+            detail=f"database_unavailable: {database_error[:240]}" if database_error else "database_unavailable",
+        )
+
+    try:
+        inspector = inspect(connection)
+        if not inspector.has_table(CAPABILITY_VECTOR_TABLE):
+            return CapabilityVectorObservation(
+                ready=False,
+                table_name=CAPABILITY_VECTOR_TABLE,
+                table_exists=False,
+                expected_seed_count=expected_seed_count,
+                detail="table_missing",
+            )
+
+        vector_table = Table(CAPABILITY_VECTOR_TABLE, MetaData(), autoload_with=connection)
+        columns = set(vector_table.c.keys())
+        seed_id_column = _first_existing_column(columns, VECTOR_SEED_ID_COLUMNS)
+        vector_column = _first_existing_column(columns, VECTOR_VALUE_COLUMNS)
+        embedding_model_column = _first_existing_column(columns, VECTOR_MODEL_COLUMNS)
+        status_column = _first_existing_column(columns, VECTOR_STATUS_COLUMNS)
+        total_vector_count = _count_rows(connection, vector_table)
+        non_empty_vector_count = (
+            _count_non_null_rows(connection, vector_table, vector_column)
+            if vector_column is not None
+            else 0
+        )
+        distinct_seed_count = (
+            _count_distinct_values(connection, vector_table, seed_id_column)
+            if seed_id_column is not None
+            else None
+        )
+        embedding_models = (
+            _group_counts(connection, vector_table, embedding_model_column, "model")
+            if embedding_model_column is not None
+            else []
+        )
+        status_counts = (
+            _group_counts(connection, vector_table, status_column, "status")
+            if status_column is not None
+            else []
+        )
+    except SQLAlchemyError as exc:
+        return CapabilityVectorObservation(
+            ready=False,
+            table_name=CAPABILITY_VECTOR_TABLE,
+            table_exists=True,
+            expected_seed_count=expected_seed_count,
+            detail=str(exc)[:240],
+        )
+
+    coverage_basis = distinct_seed_count if distinct_seed_count is not None else total_vector_count
+    coverage_rate = _ratio(coverage_basis, expected_seed_count)
+    model_count = sum(int(item["count"]) for item in embedding_models)
+    all_status_ready = _all_vector_statuses_ready(status_counts, total_vector_count)
+    missing_observation_columns = _missing_vector_columns(seed_id_column, vector_column, embedding_model_column)
+    ready = (
+        total_vector_count > 0
+        and seed_id_column is not None
+        and coverage_basis >= expected_seed_count
+        and vector_column is not None
+        and non_empty_vector_count == total_vector_count
+        and embedding_model_column is not None
+        and model_count == total_vector_count
+        and all_status_ready
+    )
+    return CapabilityVectorObservation(
+        ready=ready,
+        table_name=CAPABILITY_VECTOR_TABLE,
+        table_exists=True,
+        expected_seed_count=expected_seed_count,
+        total_vector_count=total_vector_count,
+        non_empty_vector_count=non_empty_vector_count,
+        distinct_seed_count=distinct_seed_count,
+        coverage_rate=coverage_rate,
+        seed_id_column=seed_id_column,
+        vector_column=vector_column,
+        embedding_model_column=embedding_model_column,
+        embedding_models=embedding_models,
+        status_column=status_column,
+        status_counts=status_counts,
+        missing_observation_columns=missing_observation_columns,
+    )
+
+
+def observe_recall_quality() -> RecallQualityObservation:
+    probes = [_run_recall_probe(spec) for spec in _recall_probe_specs()]
+    passed_probe_count = sum(1 for probe in probes if probe.ready)
+    return RecallQualityObservation(
+        ready=passed_probe_count == len(probes),
+        probe_count=len(probes),
+        passed_probe_count=passed_probe_count,
+        probes=probes,
+    )
+
+
+def _run_recall_probe(spec: RecallProbeSpec) -> RecallProbeObservation:
+    matches = match_interview_presets(
+        spec.interview_type,
+        spec.material_context,
+        round_name=spec.round_name,
+        limit=3,
+    )
+    top_match = matches[0] if matches else None
+    runner_up_score = matches[1].score if len(matches) > 1 else None
+    top_score = top_match.score if top_match else 0
+    top_score_gap = top_score - runner_up_score if runner_up_score is not None else top_score
+    ready = (
+        top_match is not None
+        and top_match.id == spec.expected_preset_id
+        and top_score > 0
+        and (runner_up_score is None or top_score > runner_up_score)
+    )
+    return RecallProbeObservation(
+        name=spec.name,
+        interview_type=spec.interview_type.value,
+        expected_preset_id=spec.expected_preset_id,
+        matched_preset_id=top_match.id if top_match else None,
+        matched_title=top_match.title if top_match else None,
+        top_score=top_score,
+        runner_up_score=runner_up_score,
+        top_score_gap=top_score_gap,
+        match_count=len(matches),
+        ready=ready,
+    )
+
+
+def _recall_probe_specs() -> list[RecallProbeSpec]:
+    return [
+        RecallProbeSpec(
+            name="job_python_backend",
+            interview_type=InterviewType.JOB,
+            material_context=InterviewMaterialContext(
+                id="core-observe-job",
+                user_email="observe@example.com",
+                interview_type=InterviewType.JOB,
+                resume_filename=None,
+                resume_content_type=None,
+                resume_text="智能客服 RAG 项目：我负责检索链路、向量库召回、Redis 缓存和接口延迟优化。",
+                job_title="Python 后端工程师",
+                job_requirements="负责 FastAPI 服务、PostgreSQL 建模、Redis 缓存、RAG 检索链路和接口稳定性。",
+                target_school=None,
+                major=None,
+                research_direction=None,
+                profile_summary="FastAPI、Redis、RAG 检索链路和线上稳定性。",
+                keywords=["FastAPI", "Redis", "RAG", "向量库"],
+                created_at=datetime(2026, 6, 5),
+            ),
+            round_name="专业一面",
+            expected_preset_id="backend-python-engineer",
+        ),
+        RecallProbeSpec(
+            name="postgraduate_computer_science",
+            interview_type=InterviewType.POSTGRADUATE,
+            material_context=InterviewMaterialContext(
+                id="core-observe-postgraduate",
+                user_email="observe@example.com",
+                interview_type=InterviewType.POSTGRADUATE,
+                resume_filename=None,
+                resume_content_type=None,
+                resume_text=None,
+                job_title=None,
+                job_requirements=None,
+                target_school="北京大学",
+                major="计算机科学与技术",
+                research_direction="大模型教育应用",
+                profile_summary="计算机科学与技术、大模型教育应用。",
+                keywords=["计算机", "大模型", "教育"],
+                created_at=datetime(2026, 6, 5),
+            ),
+            round_name="专业基础",
+            expected_preset_id="computer-science",
+        ),
+        RecallProbeSpec(
+            name="civil_service_comprehensive_analysis",
+            interview_type=InterviewType.CIVIL_SERVICE,
+            material_context=None,
+            round_name="综合分析",
+            expected_preset_id="civil-comprehensive-analysis",
+        ),
+        RecallProbeSpec(
+            name="ielts_speaking_part2",
+            interview_type=InterviewType.IELTS,
+            material_context=None,
+            round_name="Part 2",
+            expected_preset_id="ielts-speaking-part2",
+        ),
+    ]
+
+
+def _core_failure_reasons(
+    capability_cards: CapabilitySeedObservation,
+    capability_vectors: CapabilityVectorObservation,
+    recall_quality: RecallQualityObservation,
+) -> list[str]:
+    reasons: list[str] = []
+    if not capability_cards.ready:
+        low_seed_types = [
+            f"{interview_type}:{capability_cards.counts_by_interview_type.get(interview_type, 0)}/{minimum}"
+            for interview_type, minimum in capability_cards.expected_minimums.items()
+            if capability_cards.counts_by_interview_type.get(interview_type, 0) < minimum
+        ]
+        if low_seed_types:
+            reasons.append(f"能力卡片 seed 数不足 {', '.join(low_seed_types)}")
+        if capability_cards.missing_preset_files:
+            reasons.append(f"能力卡片文件缺失 {len(capability_cards.missing_preset_files)} 个")
+        if capability_cards.duplicate_seed_ids:
+            reasons.append(f"能力卡片 seed id 重复 {', '.join(capability_cards.duplicate_seed_ids[:5])}")
+        if capability_cards.error:
+            reasons.append(f"能力卡片索引读取失败 {capability_cards.error[:120]}")
+    if not capability_vectors.ready:
+        reasons.append(_capability_vector_failure_reason(capability_vectors))
+    if not recall_quality.ready:
+        failed_probes = [probe.name for probe in recall_quality.probes if not probe.ready]
+        reasons.append(f"能力卡片召回探针失败 {', '.join(failed_probes)}")
+    return reasons
+
+
+def _capability_vector_failure_reason(observation: CapabilityVectorObservation) -> str:
+    if not observation.table_exists:
+        return f"{observation.table_name} 未就绪：{observation.detail or 'table_missing'}"
+    if observation.detail:
+        return f"{observation.table_name} 未就绪：表读取失败 {observation.detail}"
+    if observation.total_vector_count <= 0:
+        return f"{observation.table_name} 未就绪：向量记录为空"
+    if observation.seed_id_column is None:
+        return f"{observation.table_name} 未就绪：缺少能力卡片 seed 标识列"
+    if observation.coverage_rate < 1:
+        return (
+            f"{observation.table_name} 未覆盖全部能力卡片 seed："
+            f"{observation.distinct_seed_count or observation.total_vector_count}/{observation.expected_seed_count}"
+        )
+    if observation.vector_column is None:
+        return f"{observation.table_name} 未就绪：缺少 embedding 向量列"
+    if observation.non_empty_vector_count != observation.total_vector_count:
+        return (
+            f"{observation.table_name} 未就绪：非空向量 "
+            f"{observation.non_empty_vector_count}/{observation.total_vector_count}"
+        )
+    if observation.embedding_model_column is None:
+        return f"{observation.table_name} 未就绪：缺少 embedding 模型列"
+    model_count = sum(int(item["count"]) for item in observation.embedding_models)
+    if model_count != observation.total_vector_count:
+        return (
+            f"{observation.table_name} 未就绪：embedding 模型信息 "
+            f"{model_count}/{observation.total_vector_count}"
+        )
+    if not _all_vector_statuses_ready(observation.status_counts, observation.total_vector_count):
+        return f"{observation.table_name} 未就绪：存在非 ready 状态向量"
+    return f"{observation.table_name} 未就绪：{observation.detail or 'unknown'}"
+
+
+def _read_preset_index_payload() -> dict[str, Any]:
+    if not PRESET_INDEX_FILE.exists():
+        raise OSError(f"{PRESET_INDEX_FILE} does not exist")
+    payload = PRESET_INDEX_FILE.read_text(encoding="utf-8")
+    return json.loads(payload)
+
+
+def _first_existing_column(columns: set[str], candidates: tuple[str, ...]) -> str | None:
+    for candidate in candidates:
+        if candidate in columns:
+            return candidate
+    return None
+
+
+def _count_rows(connection: Connection, vector_table: Table) -> int:
+    return int(connection.execute(select(func.count()).select_from(vector_table)).scalar_one())
+
+
+def _count_non_null_rows(connection: Connection, vector_table: Table, column_name: str) -> int:
+    column = vector_table.c[column_name]
+    return int(
+        connection.execute(
+            select(func.count()).select_from(vector_table).where(column.is_not(None))
+        ).scalar_one()
+    )
+
+
+def _count_distinct_values(connection: Connection, vector_table: Table, column_name: str) -> int:
+    column = vector_table.c[column_name]
+    return int(
+        connection.execute(
+            select(func.count(func.distinct(column))).select_from(vector_table).where(column.is_not(None))
+        ).scalar_one()
+    )
+
+
+def _group_counts(
+    connection: Connection,
+    vector_table: Table,
+    column_name: str,
+    label: str,
+) -> list[dict[str, Any]]:
+    column = vector_table.c[column_name]
+    count_label = func.count().label("count")
+    rows = connection.execute(
+        select(column, count_label)
+        .select_from(vector_table)
+        .where(column.is_not(None))
+        .group_by(column)
+        .order_by(count_label.desc())
+    ).all()
+    return [
+        {label: str(row[0]), "count": int(row[1])}
+        for row in rows
+        if row[0] is not None and str(row[0]).strip()
+    ]
+
+
+def _missing_vector_columns(
+    seed_id_column: str | None,
+    vector_column: str | None,
+    embedding_model_column: str | None,
+) -> list[str]:
+    missing: list[str] = []
+    if seed_id_column is None:
+        missing.append("seed_id")
+    if vector_column is None:
+        missing.append("embedding_vector")
+    if embedding_model_column is None:
+        missing.append("embedding_model")
+    return missing
+
+
+def _all_vector_statuses_ready(status_counts: list[dict[str, Any]], total_vector_count: int) -> bool:
+    if not status_counts:
+        return True
+    ready_count = sum(
+        int(item["count"])
+        for item in status_counts
+        if str(item.get("status", "")).strip().lower() in READY_VECTOR_STATUSES
+    )
+    return ready_count == total_vector_count
+
+
+def _ratio(value: int, total: int) -> float:
+    if total <= 0:
+        return 0.0
+    return round(min(value / total, 1.0), 4)
+
+
+def _string_or_none(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

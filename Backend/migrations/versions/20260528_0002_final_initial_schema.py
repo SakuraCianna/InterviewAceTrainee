@@ -172,6 +172,45 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=False),
     )
 
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
+    op.execute(
+        """
+        CREATE TABLE IF NOT EXISTS interview_capability_vectors (
+            id VARCHAR(80) PRIMARY KEY,
+            card_id VARCHAR(160) NOT NULL,
+            title VARCHAR(240) NOT NULL,
+            interview_types JSONB NOT NULL,
+            content_hash VARCHAR(64) NOT NULL,
+            embedding_model VARCHAR(160) NOT NULL,
+            embedding_dimensions INTEGER NOT NULL,
+            source_text TEXT NOT NULL,
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            embedding vector NOT NULL,
+            status VARCHAR(32) NOT NULL DEFAULT 'ready',
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+    op.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_interview_capability_vectors_card_model
+        ON interview_capability_vectors (card_id, embedding_model)
+        """
+    )
+    op.execute(
+        """
+        CREATE INDEX IF NOT EXISTS ix_interview_capability_vectors_model_status
+        ON interview_capability_vectors (embedding_model, status)
+        """
+    )
+    op.execute(
+        """
+        CREATE INDEX IF NOT EXISTS ix_interview_capability_vectors_interview_types
+        ON interview_capability_vectors USING GIN (interview_types)
+        """
+    )
+
     op.create_table(
         "ai_call_logs",
         sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
@@ -284,6 +323,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute("DROP TABLE IF EXISTS interview_capability_vectors")
     op.drop_index("ix_admin_audit_logs_admin_email", table_name="admin_audit_logs")
     op.drop_table("admin_audit_logs")
     op.drop_index("ix_refund_cases_related_session_id", table_name="refund_cases")

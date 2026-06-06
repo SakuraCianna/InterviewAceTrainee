@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "embedding_model": "local-hash-v1",
-  "embedding_dimensions": 384,
+  "embedding_model": "BAAI/bge-small-zh-v1.5",
+  "embedding_dimensions": 0,
   "cards": [
     {
       "id": "computer-foundations-shared",
