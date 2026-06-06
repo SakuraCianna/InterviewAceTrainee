@@ -93,7 +93,7 @@ services:
     volumes:
       - ./database_backups:/app/database_backups
     logging: *default-logging
-    command: ["uv", "run", "python", "-m", "app.cli.safe_migrate"]
+    command: ["python", "-m", "app.cli.safe_migrate"]
 
   frontend:
     build:
