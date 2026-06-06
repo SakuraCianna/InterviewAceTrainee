@@ -191,7 +191,7 @@ npm run dev
 - `nginx/sakuracianna.icu_bundle.pem`
 - `nginx/sakuracianna.icu.key`
 
-数据库容器使用 `pgvector/pgvector:pg18`，用于支持面试能力卡片的向量召回。生产环境更新前必须先确保备份可用，再执行迁移。
+数据库容器使用 `pgvector/pgvector:pg18`，用于支持面试能力卡片的向量召回。后端镜像使用 `python:3.12-slim-bookworm` 和 `pip install -r requirements.txt` 构建，不依赖 `uv` 运行或创建环境。生产环境更新前必须先确保备份可用，再执行迁移。
 
 Docker 后端容器默认按生产模式启动。如果 `Backend/.env` 没有配置足够长的 `ACCESS_TOKEN_SECRET`，或被其他环境变量覆盖成不安全值，后端会拒绝启动并在日志中提示 `unsafe_production_configuration`。
 
@@ -245,7 +245,7 @@ Docker 部署默认启用以下单机容量保护：
 
 - 确定性流程骨架仍负责轮次顺序、兜底问题和场景隔离，避免向量召回或 LLM 直接控制面试流程。
 - `Backend/app/interview_presets/capability_cards.json` 存放已审核能力卡片，把计算机八股、RAG/Agent、后端工程、法学复试、医学循证、公考结构化和雅思口语评分维度拆成可复用模块。
-- `Backend/app/services/interview_capability_retrieval.py` 会先用本地规则和本地哈希向量召回能力卡片；数据库可用且 `interview_capability_vectors` 已 seed 时，再叠加 pgvector 相似度分数。
+- `Backend/app/services/interview_capability_retrieval.py` 会先用本地规则召回能力卡片；数据库可用且 `interview_capability_vectors` 已 seed 时，再叠加 pgvector 相似度分数。`local-hash-v1` 只作为显式离线对比基线保留。
 - 用户上传的简历、JD、研究方向和回答只作为不可信匹配查询与面试证据，不允许覆盖系统规则、泄露提示词或改变面试角色。
 
 - 工作面试：结合简历、岗位名称、JD、关键词、岗位预设方向和能力卡片生成职业专属题库；AI 全栈开发、传统后端、数据工程等会共享计算机基础卡片，同时保留 RAG/Agent、接口稳定性、数据指标等岗位专属问法。如果材料里能识别到项目、系统、平台、论文、课题或作品经历，项目证据、方案取舍、指标复盘和根因定位轮次会优先围绕该项目追问，不只从通用题库里抽题。
@@ -320,6 +320,8 @@ cd Backend
 uv run python -m app.cli.safe_migrate
 uv run python -m app.cli.seed_interview_capability_vectors
 ```
+
+生产 Docker 镜像默认不安装 `sentence-transformers`，迁移阶段如果缺少该可选依赖会跳过向量 seed 并继续完成表结构迁移。需要让 `/api/health/readiness` 的能力卡片向量检查变为 ready 时，应在具备 embedding 依赖和模型下载条件的环境执行 `seed_interview_capability_vectors`。
 
 如果需要完全清空服务器业务数据并重建数据库，可以在服务器项目目录执行以下命令。该操作会删除 PostgreSQL、Redis 数据卷和本地备份目录，用户、次数、面试记录和日志都会被清空。
 
