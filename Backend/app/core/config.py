@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     llm_capacity_lease_seconds: int = 45
     realtime_asr_concurrency_limit: int = 80
     realtime_asr_capacity_lease_seconds: int = 420
+    capability_embedding_provider: str = "sentence-transformers"
+    capability_embedding_model: str = "BAAI/bge-small-zh-v1.5"
+    capability_embedding_device: str = ""
+    capability_embedding_batch_size: int = 32
+    capability_embedding_query_instruction: str = "为这个句子生成表示以用于检索相关文章："
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

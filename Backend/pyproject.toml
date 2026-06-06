@@ -23,3 +23,8 @@ dependencies = [
     "tencentcloud-sdk-python>=3.1.101",
     "websockets>=16.0",
 ]
+
+[project.optional-dependencies]
+embeddings = [
+    "sentence-transformers>=3.0.0",
+]
