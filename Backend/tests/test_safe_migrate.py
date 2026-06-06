@@ -1,7 +1,10 @@
+import io
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 from sqlalchemy import create_engine, text
 
@@ -11,6 +14,7 @@ from app.cli.safe_migrate import (
     has_pending_database_operations_for_state,
     normalize_removed_dev_revisions,
     prune_old_backups,
+    seed_interview_capability_vectors,
 )
 
 
@@ -65,6 +69,31 @@ class SafeMigrateTests(unittest.TestCase):
 
             self.assertEqual(self._read_versions(database_url), {BASELINE_REVISION})
 
+    def test_seed_vectors_skips_missing_optional_embedding_dependency(self) -> None:
+        fake_engine = _FakeEngine()
+        output = io.StringIO()
+
+        with (
+            patch("app.cli.safe_migrate.create_engine", return_value=fake_engine),
+            patch(
+                "app.cli.safe_migrate.seed_capability_vector_store",
+                side_effect=RuntimeError("缺少 sentence-transformers，可执行 `uv sync --extra embeddings` 后再生成真实能力卡片向量"),
+            ),
+            redirect_stdout(output),
+        ):
+            seed_interview_capability_vectors("sqlite+pysqlite:///:memory:")
+
+        self.assertIn("interview capability vector seed skipped", output.getvalue())
+        self.assertTrue(fake_engine.disposed)
+
+    def test_seed_vectors_keeps_failing_for_non_optional_runtime_errors(self) -> None:
+        with (
+            patch("app.cli.safe_migrate.create_engine", return_value=_FakeEngine()),
+            patch("app.cli.safe_migrate.seed_capability_vector_store", side_effect=RuntimeError("database error")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "interview capability vector seed failed"):
+                seed_interview_capability_vectors("sqlite+pysqlite:///:memory:")
+
     def _create_sqlite_database(self, temp_dir: str, versions: list[str]) -> str:
         database_path = Path(temp_dir) / "mianba.db"
         database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
@@ -88,6 +117,25 @@ class SafeMigrateTests(unittest.TestCase):
                 return set(connection.execute(text("SELECT version_num FROM alembic_version")).scalars())
         finally:
             engine.dispose()
+
+
+class _FakeEngine:
+    def __init__(self) -> None:
+        self.disposed = False
+
+    def begin(self) -> "_FakeConnectionContext":
+        return _FakeConnectionContext()
+
+    def dispose(self) -> None:
+        self.disposed = True
+
+
+class _FakeConnectionContext:
+    def __enter__(self) -> object:
+        return object()
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        return None
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ BACKUP_DIR_NAME = "database_backups"
 BACKUP_KEEP_COUNT = 5
 BASELINE_REVISION = "20260528_0002"
 REMOVED_DEV_REVISIONS = {"20260525_0002", "20260525_0003"}
+OPTIONAL_EMBEDDING_MISSING_MARKER = "缺少 sentence-transformers"
 
 
 def main() -> int:
@@ -239,9 +240,16 @@ def seed_interview_capability_vectors(database_url: str) -> None:
             seeded_count = seed_capability_vector_store(connection)
         print(f"interview capability vectors seeded: {seeded_count}")
     except RuntimeError as exc:
+        if is_optional_embedding_dependency_error(exc):
+            print(f"interview capability vector seed skipped: {exc}")
+            return
         raise RuntimeError(f"interview capability vector seed failed: {exc}") from exc
     finally:
         engine.dispose()
+
+
+def is_optional_embedding_dependency_error(exc: RuntimeError) -> bool:
+    return OPTIONAL_EMBEDDING_MISSING_MARKER in str(exc)
 
 
 if __name__ == "__main__":
