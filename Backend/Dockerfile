@@ -6,7 +6,8 @@ ENV DATABASE_BACKUP_DIR=/app/database_backups \
     UV_HTTP_TIMEOUT=300 \
     UV_HTTP_RETRIES=5
 
-RUN apt-get update -o Acquire::Retries=5 \
+RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update -o Acquire::Retries=5 \
     && apt-get install -y --no-install-recommends -o Acquire::Retries=5 postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
