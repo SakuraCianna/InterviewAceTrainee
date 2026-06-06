@@ -5,8 +5,10 @@ from sqlalchemy import Column, MetaData, String, Table, Text, create_engine
 from app.schemas.interviews import InterviewType
 from app.services.interview_quality_observer import (
     CAPABILITY_VECTOR_TABLE,
+    CapabilityVectorObservation,
     ObservedInterviewSession,
     ObservedInterviewTurn,
+    _capability_vector_failure_reason,
     evaluate_observed_interviews,
     inspect_capability_vectors,
     observe_capability_card_seeds,
@@ -214,6 +216,21 @@ class InterviewQualityObserverTests(unittest.TestCase):
         self.assertTrue(report.recall_quality.ready)
         self.assertFalse(report.capability_vectors.ready)
         self.assertIn(CAPABILITY_VECTOR_TABLE, report.failure_summary)
+
+    def test_capability_vector_failure_summary_prioritizes_table_read_error(self) -> None:
+        reason = _capability_vector_failure_reason(
+            CapabilityVectorObservation(
+                ready=False,
+                table_name=CAPABILITY_VECTOR_TABLE,
+                table_exists=True,
+                expected_seed_count=382,
+                detail='could not access file "vector"',
+            )
+        )
+
+        self.assertIn("表读取失败", reason)
+        self.assertIn("vector", reason)
+        self.assertNotIn("向量记录为空", reason)
 
 
 if __name__ == "__main__":

@@ -670,6 +670,8 @@ def _core_failure_reasons(
 def _capability_vector_failure_reason(observation: CapabilityVectorObservation) -> str:
     if not observation.table_exists:
         return f"{observation.table_name} 未就绪：{observation.detail or 'table_missing'}"
+    if observation.detail:
+        return f"{observation.table_name} 未就绪：表读取失败 {observation.detail}"
     if observation.total_vector_count <= 0:
         return f"{observation.table_name} 未就绪：向量记录为空"
     if observation.seed_id_column is None:
