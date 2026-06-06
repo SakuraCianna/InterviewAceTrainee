@@ -11,7 +11,7 @@ RUN apt-get update -o Acquire::Retries=5 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock* ./
-RUN uv sync --frozen --no-dev --extra embeddings
+RUN uv sync --frozen --no-dev
 
 COPY app ./app
 COPY alembic.ini ./alembic.ini

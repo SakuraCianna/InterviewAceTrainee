@@ -175,15 +175,18 @@ def retrieve_capability_cards(
     vector_scores: dict[str, float] = {}
 
     if db_connection is not None and capability_vector_table_ready(db_connection):
-        provider = embedding_provider or create_embedding_provider()
-        query_embedding = embed_query_text(provider, query)
-        vector_scores = search_capability_vectors(
-            db_connection,
-            interview_type,
-            query_embedding,
-            limit=max(limit * 3, 8),
-            embedding_model=provider.model_name,
-        )
+        try:
+            provider = embedding_provider or create_embedding_provider()
+            query_embedding = embed_query_text(provider, query)
+            vector_scores = search_capability_vectors(
+                db_connection,
+                interview_type,
+                query_embedding,
+                limit=max(limit * 3, 8),
+                embedding_model=provider.model_name,
+            )
+        except (RuntimeError, ValueError):
+            vector_scores = {}
     elif embedding_provider is not None and cards:
         query_embedding = embed_query_text(embedding_provider, query)
         card_embeddings = embedding_provider.embed_texts([card.search_text for card in cards])
