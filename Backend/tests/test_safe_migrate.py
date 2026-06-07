@@ -69,26 +69,55 @@ class SafeMigrateTests(unittest.TestCase):
 
             self.assertEqual(self._read_versions(database_url), {BASELINE_REVISION})
 
-    def test_seed_vectors_skips_missing_optional_embedding_dependency(self) -> None:
+    def test_seed_vectors_runs_live_seed_when_offline_export_is_missing(self) -> None:
         fake_engine = _FakeEngine()
         output = io.StringIO()
 
         with (
             patch("app.cli.safe_migrate.create_engine", return_value=fake_engine),
-            patch(
-                "app.cli.safe_migrate.seed_capability_vector_store",
-                side_effect=RuntimeError("缺少 sentence-transformers，可执行 `uv sync --extra embeddings` 后再生成真实能力卡片向量"),
-            ),
+            patch("app.cli.safe_migrate.import_capability_vector_store_from_export", return_value=0),
+            patch("app.cli.safe_migrate.seed_capability_vector_store", return_value=7) as live_seed,
             redirect_stdout(output),
         ):
             seed_interview_capability_vectors("sqlite+pysqlite:///:memory:")
 
-        self.assertIn("interview capability vector seed skipped", output.getvalue())
+        live_seed.assert_called_once()
+        self.assertIn("interview capability vectors seeded: 7", output.getvalue())
         self.assertTrue(fake_engine.disposed)
+
+    def test_seed_vectors_imports_offline_export_before_live_embedding(self) -> None:
+        fake_engine = _FakeEngine()
+        output = io.StringIO()
+
+        with (
+            patch("app.cli.safe_migrate.create_engine", return_value=fake_engine),
+            patch("app.cli.safe_migrate.import_capability_vector_store_from_export", return_value=12) as import_export,
+            patch("app.cli.safe_migrate.seed_capability_vector_store") as live_seed,
+            redirect_stdout(output),
+        ):
+            seed_interview_capability_vectors("sqlite+pysqlite:///:memory:")
+
+        import_export.assert_called_once()
+        live_seed.assert_not_called()
+        self.assertIn("interview capability vectors imported from offline export: 12", output.getvalue())
+        self.assertTrue(fake_engine.disposed)
+
+    def test_seed_vectors_fails_when_offline_export_and_optional_dependency_are_missing(self) -> None:
+        with (
+            patch("app.cli.safe_migrate.create_engine", return_value=_FakeEngine()),
+            patch("app.cli.safe_migrate.import_capability_vector_store_from_export", return_value=0),
+            patch(
+                "app.cli.safe_migrate.seed_capability_vector_store",
+                side_effect=RuntimeError("缺少 sentence-transformers，可执行 `uv sync --extra embeddings` 后再生成真实能力卡片向量"),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "offline capability vector export"):
+                seed_interview_capability_vectors("sqlite+pysqlite:///:memory:")
 
     def test_seed_vectors_keeps_failing_for_non_optional_runtime_errors(self) -> None:
         with (
             patch("app.cli.safe_migrate.create_engine", return_value=_FakeEngine()),
+            patch("app.cli.safe_migrate.import_capability_vector_store_from_export", return_value=0),
             patch("app.cli.safe_migrate.seed_capability_vector_store", side_effect=RuntimeError("database error")),
         ):
             with self.assertRaisesRegex(RuntimeError, "interview capability vector seed failed"):

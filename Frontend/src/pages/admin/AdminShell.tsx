@@ -11,6 +11,7 @@ import {
   createRefundCase,
   getCurrentUser,
   getDashboardStats,
+  getInterviewCoreHealth,
   getUserInterviewReport,
   issueVouchers,
   listAiCallLogs,
@@ -49,6 +50,7 @@ import type {
   CreditLedgerEntry,
   CurrentUser,
   CustomerServiceNoteEntry,
+  InterviewCoreHealth,
   ProviderConfig,
   RefundCaseEntry,
   SystemConfig,
@@ -56,6 +58,13 @@ import type {
 
 const ADMIN_CODE_COOLDOWN_SECONDS = 90;
 const ADMIN_CODE_STORAGE_PREFIX = "mianba_admin_code_next:";
+
+const interviewTypeLabels: Record<string, string> = {
+  job: "求职",
+  postgraduate: "考研",
+  civil_service: "公考",
+  ielts: "雅思",
+};
 
 const adminSectionNavItems: { key: AdminSectionKey; label: string; icon: string }[] = [
   { key: "overview", label: "概览", icon: "lucide:gauge" },
@@ -127,6 +136,8 @@ export function AdminShell() {
   const [selectedReport, setSelectedReport] = useState<AdminInterviewReport | null>(null);
   const [reportMessage, setReportMessage] = useState("");
   const [message, setMessage] = useState("请使用管理员邮箱、密码和邮箱验证码进入后台。");
+  const [interviewCoreHealth, setInterviewCoreHealth] = useState<InterviewCoreHealth | null>(null);
+  const [interviewCoreHealthMessage, setInterviewCoreHealthMessage] = useState("面试核心健康检查尚未读取。");
   const [isLoading, setIsLoading] = useState(false);
   const [activeAdminSection, setActiveAdminSection] = useState<AdminSectionKey>("overview");
 
@@ -188,6 +199,30 @@ export function AdminShell() {
     return value == null ? "暂无" : `${value}%`;
   }
 
+  function formatCorePercent(value?: number | null) {
+    if (value == null) {
+      return "暂无";
+    }
+    const percent = Math.round(value * 1000) / 10;
+    return `${Number.isInteger(percent) ? percent.toFixed(0) : percent.toFixed(1)}%`;
+  }
+
+  function formatCoreCount(value?: number | null) {
+    return value == null ? "暂无" : value.toLocaleString("zh-CN");
+  }
+
+  function coreStatusLabel(ready: boolean) {
+    return ready ? "正常" : "退化";
+  }
+
+  function coreStatusClass(ready: boolean) {
+    return ready ? "admin-health-pill is-ready" : "admin-health-pill is-degraded";
+  }
+
+  function interviewTypeLabel(value: string) {
+    return interviewTypeLabels[value] ?? value;
+  }
+
   const selectedCreditReason = creditReasonOptions.find((option) => option.value === creditReason) ?? creditReasonOptions[0];
 
   const consoleLayoutRef = useRef<HTMLDivElement | null>(null);
@@ -232,6 +267,7 @@ export function AdminShell() {
     await Promise.allSettled([
       loadProviders(),
       loadDashboardStats(),
+      loadInterviewCoreHealth(),
       loadSystemConfigs(),
       loadAuditLogs(),
       loadAiCallLogs(),
@@ -317,6 +353,26 @@ export function AdminShell() {
       return;
     }
     setDashboardStats(data);
+  }
+
+  async function loadInterviewCoreHealth() {
+    let result: Awaited<ReturnType<typeof getInterviewCoreHealth>>;
+    try {
+      result = await getInterviewCoreHealth();
+    } catch {
+      setInterviewCoreHealth(null);
+      setInterviewCoreHealthMessage("面试核心健康检查读取失败，请确认后端服务和 /api/health/interview-core 可访问。");
+      return;
+    }
+
+    const { response, data } = result;
+    if (!response.ok) {
+      setInterviewCoreHealth(null);
+      setInterviewCoreHealthMessage(`面试核心健康检查读取失败：${getApiErrorMessage(data, "请确认后端健康检查接口可访问。")}`);
+      return;
+    }
+    setInterviewCoreHealth(data);
+    setInterviewCoreHealthMessage(data.ready ? "面试核心链路正常。" : data.failure_summary || "面试核心链路存在退化。");
   }
 
   async function loadCreditLedger(userEmail = creditUser) {
@@ -669,6 +725,7 @@ export function AdminShell() {
     await Promise.allSettled([
       loadProviders(),
       loadDashboardStats(),
+      loadInterviewCoreHealth(),
       loadSystemConfigs(),
       loadAuditLogs(),
       loadAiCallLogs(),
@@ -693,6 +750,8 @@ export function AdminShell() {
     setRefundCases([]);
     setSystemConfigs([]);
     setDashboardStats(null);
+    setInterviewCoreHealth(null);
+    setInterviewCoreHealthMessage("面试核心健康检查尚未读取。");
     setProviderTestResults({});
     setUserSearchResults([]);
     setSelectedUserHistory([]);
@@ -791,6 +850,142 @@ export function AdminShell() {
                   <em>待处理退款 / 纠纷</em>
                 </article>
               </div>
+
+              <section className="admin-core-health">
+                <div className="admin-core-health-heading">
+                  <div>
+                    <h3>面试核心观测</h3>
+                    <p>直接读取后端 interview-core 健康检查，用来定位能力卡片、向量覆盖和召回探针是哪一层退化。</p>
+                  </div>
+                  <span className={!interviewCoreHealth ? "admin-dashboard-badge is-muted" : interviewCoreHealth.ready ? "admin-dashboard-badge" : "admin-dashboard-badge is-danger"}>
+                    {!interviewCoreHealth ? "等待健康检查" : interviewCoreHealth.ready ? "核心正常" : "核心退化"}
+                  </span>
+                </div>
+
+                {!interviewCoreHealth ? (
+                  <p className="admin-empty-text">{interviewCoreHealthMessage}</p>
+                ) : (
+                  <>
+                    <div className="admin-core-health-grid">
+                      <article className={interviewCoreHealth.capability_cards.ready ? "admin-core-card" : "admin-core-card is-degraded"}>
+                        <div className="admin-core-card-head">
+                          <span>能力卡片 seed</span>
+                          <em className={coreStatusClass(interviewCoreHealth.capability_cards.ready)}>
+                            {coreStatusLabel(interviewCoreHealth.capability_cards.ready)}
+                          </em>
+                        </div>
+                        <strong>{formatCoreCount(interviewCoreHealth.capability_cards.total_seed_count)}</strong>
+                        <p>
+                          {interviewCoreHealth.capability_cards.source_version ? `版本 ${interviewCoreHealth.capability_cards.source_version}` : "未记录版本"}
+                          {interviewCoreHealth.capability_cards.source_policy ? ` · ${interviewCoreHealth.capability_cards.source_policy}` : ""}
+                        </p>
+                        <div className="admin-core-breakdown">
+                          {Object.entries(interviewCoreHealth.capability_cards.counts_by_interview_type).map(([type, count]) => {
+                            const minimum = interviewCoreHealth.capability_cards.expected_minimums[type];
+                            return (
+                              <span key={type}>
+                                {interviewTypeLabel(type)}
+                                <b>{formatCoreCount(count)}{minimum != null ? `/${formatCoreCount(minimum)}` : ""}</b>
+                              </span>
+                            );
+                          })}
+                        </div>
+                        {(interviewCoreHealth.capability_cards.error ||
+                          interviewCoreHealth.capability_cards.missing_preset_files.length > 0 ||
+                          interviewCoreHealth.capability_cards.duplicate_seed_ids.length > 0) && (
+                          <div className="admin-core-alerts">
+                            {interviewCoreHealth.capability_cards.error && <p>{interviewCoreHealth.capability_cards.error}</p>}
+                            {interviewCoreHealth.capability_cards.missing_preset_files.length > 0 && (
+                              <p>缺失文件 {interviewCoreHealth.capability_cards.missing_preset_files.slice(0, 3).join(" / ")}</p>
+                            )}
+                            {interviewCoreHealth.capability_cards.duplicate_seed_ids.length > 0 && (
+                              <p>重复 ID {interviewCoreHealth.capability_cards.duplicate_seed_ids.slice(0, 5).join(" / ")}</p>
+                            )}
+                          </div>
+                        )}
+                      </article>
+
+                      <article className={interviewCoreHealth.capability_vectors.ready ? "admin-core-card" : "admin-core-card is-degraded"}>
+                        <div className="admin-core-card-head">
+                          <span>能力向量覆盖</span>
+                          <em className={coreStatusClass(interviewCoreHealth.capability_vectors.ready)}>
+                            {coreStatusLabel(interviewCoreHealth.capability_vectors.ready)}
+                          </em>
+                        </div>
+                        <strong>{formatCorePercent(interviewCoreHealth.capability_vectors.coverage_rate)}</strong>
+                        <p>
+                          覆盖 {formatCoreCount(interviewCoreHealth.capability_vectors.distinct_seed_count ?? interviewCoreHealth.capability_vectors.total_vector_count)}
+                          /{formatCoreCount(interviewCoreHealth.capability_vectors.expected_seed_count)}
+                          {" · "}
+                          非空向量 {formatCoreCount(interviewCoreHealth.capability_vectors.non_empty_vector_count)}
+                          /{formatCoreCount(interviewCoreHealth.capability_vectors.total_vector_count)}
+                        </p>
+                        <div className="admin-core-metrics">
+                          <span>表</span>
+                          <b>{interviewCoreHealth.capability_vectors.table_exists ? interviewCoreHealth.capability_vectors.table_name : "未创建"}</b>
+                          <span>观测列</span>
+                          <b>
+                            {interviewCoreHealth.capability_vectors.missing_observation_columns.length > 0
+                              ? `缺 ${interviewCoreHealth.capability_vectors.missing_observation_columns.join(" / ")}`
+                              : "完整"}
+                          </b>
+                          <span>模型</span>
+                          <b>
+                            {interviewCoreHealth.capability_vectors.embedding_models.length > 0
+                              ? interviewCoreHealth.capability_vectors.embedding_models.map((item) => `${item.model}:${item.count}`).join(" / ")
+                              : "未记录"}
+                          </b>
+                          <span>状态</span>
+                          <b>
+                            {interviewCoreHealth.capability_vectors.status_counts.length > 0
+                              ? interviewCoreHealth.capability_vectors.status_counts.map((item) => `${item.status}:${item.count}`).join(" / ")
+                              : "未分状态"}
+                          </b>
+                        </div>
+                        {interviewCoreHealth.capability_vectors.detail && (
+                          <div className="admin-core-alerts">
+                            <p>{interviewCoreHealth.capability_vectors.detail}</p>
+                          </div>
+                        )}
+                      </article>
+
+                      <article className={interviewCoreHealth.recall_quality.ready ? "admin-core-card" : "admin-core-card is-degraded"}>
+                        <div className="admin-core-card-head">
+                          <span>召回探针</span>
+                          <em className={coreStatusClass(interviewCoreHealth.recall_quality.ready)}>
+                            {coreStatusLabel(interviewCoreHealth.recall_quality.ready)}
+                          </em>
+                        </div>
+                        <strong>{interviewCoreHealth.recall_quality.passed_probe_count}/{interviewCoreHealth.recall_quality.probe_count}</strong>
+                        <p>四类面试的固定探针命中预期能力卡片。</p>
+                        <div className="admin-core-probes">
+                          {interviewCoreHealth.recall_quality.probes.map((probe) => (
+                            <article key={probe.name} className={probe.ready ? "is-ready" : "is-degraded"}>
+                              <div>
+                                <strong>{probe.name}</strong>
+                                <span>{interviewTypeLabel(probe.interview_type)} · {probe.matched_title ?? probe.matched_preset_id ?? "未命中"}</span>
+                              </div>
+                              <em>{probe.ready ? "通过" : "失败"}</em>
+                              <small>Top {probe.top_score} / Gap {probe.top_score_gap ?? "暂无"} / {probe.match_count} 条</small>
+                            </article>
+                          ))}
+                        </div>
+                      </article>
+                    </div>
+
+                    {interviewCoreHealth.failure_reasons.length > 0 ? (
+                      <div className="admin-core-failures">
+                        <strong>退化原因</strong>
+                        {interviewCoreHealth.failure_reasons.map((reason) => (
+                          <p key={reason}>{reason}</p>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="admin-core-ok">{interviewCoreHealth.failure_summary}</p>
+                    )}
+                  </>
+                )}
+              </section>
 
               {!dashboardStats.database_ready ? (
                 <p className="admin-empty-text">统计接口已经就绪，完成数据库迁移后会自动显示图表。</p>

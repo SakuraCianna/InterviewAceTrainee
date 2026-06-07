@@ -12,6 +12,7 @@ import type {
   CreditLedgerEntry,
   CurrentUser,
   CustomerServiceNoteEntry,
+  InterviewCoreHealth,
   ProviderConfig,
   RefundCaseEntry,
   SystemConfig,
@@ -101,6 +102,10 @@ export function listSystemConfigs() {
 
 export function getDashboardStats() {
   return requestJson<AdminDashboardStats>("/api/admin/stats", credentials);
+}
+
+export function getInterviewCoreHealth() {
+  return requestJson<InterviewCoreHealth & AdminApiErrorPayload>("/api/health/interview-core", credentials);
 }
 
 export function listCreditLedger(userEmail: string) {

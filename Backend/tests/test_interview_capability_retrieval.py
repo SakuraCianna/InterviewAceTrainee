@@ -1,6 +1,9 @@
 from datetime import datetime
 import math
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from app.cli.compare_capability_retrieval import compare_default_queries, default_query_cases
 from app.schemas.interviews import InterviewType
@@ -8,10 +11,12 @@ from app.services.interview_capability_retrieval import (
     DEFAULT_EMBEDDING_MODEL,
     LOCAL_HASH_EMBEDDING_MODEL,
     LocalHashEmbeddingProvider,
+    build_capability_vector_export,
     build_capability_prompt_context,
     capability_card_inventory,
     create_embedding_provider,
     embedding_model_name,
+    import_capability_vector_store_from_export,
     load_capability_cards,
     local_text_embedding,
     retrieve_capability_cards,
@@ -26,6 +31,13 @@ class KeywordEmbeddingProvider:
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         return [_keyword_vector(text) for text in texts]
+
+
+class UnavailableEmbeddingProvider:
+    model_name = DEFAULT_EMBEDDING_MODEL
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        raise RuntimeError("缺少 sentence-transformers")
 
 
 class InterviewCapabilityRetrievalTests(unittest.TestCase):
@@ -170,6 +182,49 @@ class InterviewCapabilityRetrievalTests(unittest.TestCase):
         self.assertTrue(matches)
         self.assertTrue(any(match.vector_score > 0 for match in matches))
 
+    def test_retrieve_uses_stored_vector_anchor_when_runtime_provider_is_unavailable(self) -> None:
+        query_case = default_query_cases()[0]
+
+        with (
+            patch("app.services.interview_capability_retrieval.capability_vector_table_ready", return_value=True),
+            patch(
+                "app.services.interview_capability_retrieval.search_capability_vectors_from_anchor_cards",
+                return_value={"ai-agent-rag": 0.92},
+            ) as anchor_search,
+        ):
+            matches = retrieve_capability_cards(
+                query_case.interview_type,
+                material_context=query_case.material_context,
+                round_name=query_case.round_name,
+                limit=5,
+                db_connection=_RecordingConnection(),
+                embedding_provider=UnavailableEmbeddingProvider(),
+            )
+
+        anchor_search.assert_called_once()
+        self.assertTrue(any(match.id == "ai-agent-rag" and match.vector_score == 0.92 for match in matches))
+
+    def test_offline_vector_export_can_be_imported_without_embedding_provider(self) -> None:
+        payload = build_capability_vector_export(KeywordEmbeddingProvider(), batch_size=3)
+
+        self.assertEqual(payload["schema_version"], 1)
+        self.assertEqual(payload["embedding_model"], "test-keyword-embedding")
+        self.assertEqual(len(payload["vectors"]), len(load_capability_cards()))
+        self.assertEqual(payload["vectors"][0]["embedding_dimensions"], 4)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "capability_vectors.json"
+            export_path.write_text(json_dumps(payload), encoding="utf-8")
+            connection = _RecordingConnection()
+
+            with patch("app.services.interview_capability_retrieval.capability_vector_table_ready", return_value=True):
+                imported_count = import_capability_vector_store_from_export(connection, export_path)
+
+        self.assertEqual(imported_count, len(load_capability_cards()))
+        self.assertEqual(len(connection.parameters), imported_count)
+        self.assertEqual(connection.parameters[0]["embedding_model"], "test-keyword-embedding")
+        self.assertTrue(connection.parameters[0]["embedding"].startswith("["))
+
 
 def _keyword_vector(text: str) -> list[float]:
     normalized = normalize_match_text(text)
@@ -188,6 +243,22 @@ def _keyword_vector(text: str) -> list[float]:
 
 def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in text for term in terms)
+
+
+def json_dumps(payload: object) -> str:
+    import json
+
+    return json.dumps(payload, ensure_ascii=False)
+
+
+class _RecordingConnection:
+    def __init__(self) -> None:
+        self.parameters: list[dict[str, object]] = []
+
+    def execute(self, statement: object, parameters: dict[str, object] | None = None) -> object:
+        if parameters is not None:
+            self.parameters.append(parameters)
+        return object()
 
 
 if __name__ == "__main__":

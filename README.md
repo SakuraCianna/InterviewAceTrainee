@@ -136,6 +136,23 @@ uv run python -m app.cli.safe_migrate
 
 安全迁移会先使用 `pg_dump` 在项目根目录的 `database_backups/` 下生成迁移前备份，再执行 Alembic 迁移，刷新面试能力卡片向量，并保留最新 5 份备份。
 
+能力卡片向量的生产推荐流程是离线生成、镜像内导入。生成真实向量的机器需要安装 embedding extra：
+
+```powershell
+cd Backend
+uv sync --extra embeddings
+uv run python -m app.cli.seed_interview_capability_vectors --export-json app/interview_presets/capability_vectors.json
+```
+
+生产镜像不安装 `sentence-transformers`。`safe_migrate` 会优先导入 `app/interview_presets/capability_vectors.json` 中的真实能力卡片向量；如果离线向量包不存在且当前环境也无法现场生成真实向量，迁移会失败并提示先生成离线包，避免上线后静默降级为纯词面召回。带数据库连接的能力卡片检索如果无法加载 embedding provider，会基于已导入的真实卡片向量做词面锚点扩展召回，不要求生产镜像安装 `sentence-transformers`。
+
+也可以手动导入已生成的离线包：
+
+```powershell
+cd Backend
+uv run python -m app.cli.seed_interview_capability_vectors --import-json app/interview_presets/capability_vectors.json
+```
+
 如果系统找不到 `pg_dump`，可以在当前 PowerShell 指定路径：
 
 ```powershell
@@ -191,7 +208,7 @@ npm run dev
 - `nginx/sakuracianna.icu_bundle.pem`
 - `nginx/sakuracianna.icu.key`
 
-数据库容器使用 `pgvector/pgvector:pg18`，用于支持面试能力卡片的向量召回。后端镜像使用 `python:3.12-slim-bookworm` 和 `pip install -r requirements.txt` 构建，不依赖 `uv` 运行或创建环境。生产环境更新前必须先确保备份可用，再执行迁移。
+数据库容器使用 `pgvector/pgvector:pg18`，用于支持面试能力卡片的向量召回。后端镜像使用 `python:3.12-slim-bookworm` 和 `pip install -r requirements.txt` 构建，不依赖 `uv` 运行或创建环境，也不安装 `sentence-transformers`。生产环境更新前必须先确保备份可用，并在构建镜像前生成 `Backend/app/interview_presets/capability_vectors.json`，再执行迁移。
 
 Docker 后端容器默认按生产模式启动。如果 `Backend/.env` 没有配置足够长的 `ACCESS_TOKEN_SECRET`，或被其他环境变量覆盖成不安全值，后端会拒绝启动并在日志中提示 `unsafe_production_configuration`。
 

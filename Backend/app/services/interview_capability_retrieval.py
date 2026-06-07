@@ -20,7 +20,9 @@ from app.services.interview_presets import normalize_match_text
 
 PRESET_ROOT = Path(__file__).resolve().parents[1] / "interview_presets"
 CAPABILITY_CARDS_FILE = PRESET_ROOT / "capability_cards.json"
+CAPABILITY_VECTOR_EXPORT_FILE = PRESET_ROOT / "capability_vectors.json"
 CAPABILITY_VECTOR_TABLE = "interview_capability_vectors"
+CAPABILITY_VECTOR_EXPORT_SCHEMA_VERSION = 1
 DEFAULT_EMBEDDING_PROVIDER = "sentence-transformers"
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
 LOCAL_HASH_EMBEDDING_MODEL = "local-hash-v1"
@@ -172,21 +174,30 @@ def retrieve_capability_cards(
 ) -> list[CapabilityCardMatch]:
     cards = [card for card in load_capability_cards() if interview_type in card.interview_types]
     query = _query_text(interview_type, material_context, round_name)
+    lexical_scores = {card.id: _lexical_score(card, query, round_name) for card in cards}
     vector_scores: dict[str, float] = {}
 
     if db_connection is not None and capability_vector_table_ready(db_connection):
+        embedding_model_for_search = embedding_model_name()
         try:
             provider = embedding_provider or create_embedding_provider()
+            embedding_model_for_search = provider.model_name
             query_embedding = embed_query_text(provider, query)
             vector_scores = search_capability_vectors(
                 db_connection,
                 interview_type,
                 query_embedding,
                 limit=max(limit * 3, 8),
-                embedding_model=provider.model_name,
+                embedding_model=embedding_model_for_search,
             )
         except (RuntimeError, ValueError):
-            vector_scores = {}
+            vector_scores = search_capability_vectors_from_anchor_cards(
+                db_connection,
+                interview_type,
+                lexical_scores,
+                limit=max(limit * 3, 8),
+                embedding_model=embedding_model_for_search,
+            )
     elif embedding_provider is not None and cards:
         query_embedding = embed_query_text(embedding_provider, query)
         card_embeddings = embedding_provider.embed_texts([card.search_text for card in cards])
@@ -197,7 +208,7 @@ def retrieve_capability_cards(
 
     matches: list[CapabilityCardMatch] = []
     for card in cards:
-        lexical_score = _lexical_score(card, query, round_name)
+        lexical_score = lexical_scores.get(card.id, 0)
         vector_score = vector_scores.get(card.id, 0.0)
         if lexical_score <= 0 and vector_score <= 0:
             continue
@@ -321,73 +332,263 @@ def seed_capability_vector_store(
     for offset in range(0, len(cards), effective_batch_size):
         batch = cards[offset : offset + effective_batch_size]
         embeddings = provider.embed_texts([card.search_text for card in batch])
+        if len(embeddings) != len(batch):
+            raise RuntimeError("embedding provider returned an unexpected vector count")
         for card, embedding in zip(batch, embeddings, strict=True):
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO interview_capability_vectors (
-                        id,
-                        card_id,
-                        title,
-                        interview_types,
-                        content_hash,
-                        embedding_model,
-                        embedding_dimensions,
-                        source_text,
-                        metadata_json,
-                        embedding,
-                        status,
-                        updated_at
-                    )
-                    VALUES (
-                        :id,
-                        :card_id,
-                        :title,
-                        CAST(:interview_types AS jsonb),
-                        :content_hash,
-                        :embedding_model,
-                        :embedding_dimensions,
-                        :source_text,
-                        CAST(:metadata_json AS jsonb),
-                        CAST(:embedding AS vector),
-                        'ready',
-                        NOW()
-                    )
-                    ON CONFLICT (card_id, embedding_model) DO UPDATE SET
-                        title = EXCLUDED.title,
-                        interview_types = EXCLUDED.interview_types,
-                        content_hash = EXCLUDED.content_hash,
-                        embedding_dimensions = EXCLUDED.embedding_dimensions,
-                        source_text = EXCLUDED.source_text,
-                        metadata_json = EXCLUDED.metadata_json,
-                        embedding = EXCLUDED.embedding,
-                        status = 'ready',
-                        updated_at = NOW()
-                    """
+            insert_capability_vector_row(
+                connection,
+                capability_vector_row_parameters(
+                    card=card,
+                    embedding_model=provider.model_name,
+                    embedding=embedding,
                 ),
-                {
-                    "id": _vector_row_id(card.id, provider.model_name),
-                    "card_id": card.id,
-                    "title": card.title,
-                    "interview_types": json.dumps([interview_type.value for interview_type in card.interview_types], ensure_ascii=False),
-                    "content_hash": hashlib.sha256(card.search_text.encode("utf-8")).hexdigest(),
-                    "embedding_model": provider.model_name,
-                    "embedding_dimensions": len(embedding),
-                    "source_text": card.search_text,
-                    "metadata_json": json.dumps(
-                        {
-                            "aliases": list(card.aliases),
-                            "rounds": list(card.rounds),
-                            "capability_tags": list(card.capability_tags),
-                            "question_angles": list(card.question_angles),
-                        },
-                        ensure_ascii=False,
-                    ),
-                    "embedding": vector_sql_literal(embedding),
-                },
             )
             count += 1
     return count
+
+
+def build_capability_vector_export(
+    embedding_provider: TextEmbeddingProvider,
+    batch_size: int | None = None,
+) -> dict[str, Any]:
+    cards = list(load_capability_cards())
+    effective_batch_size = max(1, batch_size or get_settings().capability_embedding_batch_size)
+    vectors: list[dict[str, Any]] = []
+    for offset in range(0, len(cards), effective_batch_size):
+        batch = cards[offset : offset + effective_batch_size]
+        embeddings = embedding_provider.embed_texts([card.search_text for card in batch])
+        if len(embeddings) != len(batch):
+            raise RuntimeError("embedding provider returned an unexpected vector count")
+        for card, embedding in zip(batch, embeddings, strict=True):
+            normalized_embedding = normalize_embedding_vector(embedding)
+            vectors.append(
+                {
+                    "card_id": card.id,
+                    "title": card.title,
+                    "interview_types": [interview_type.value for interview_type in card.interview_types],
+                    "content_hash": capability_card_content_hash(card),
+                    "embedding_model": embedding_provider.model_name,
+                    "embedding_dimensions": len(normalized_embedding),
+                    "source_text": card.search_text,
+                    "metadata": capability_card_metadata(card),
+                    "embedding": normalized_embedding,
+                }
+            )
+    dimensions = vectors[0]["embedding_dimensions"] if vectors else 0
+    return {
+        "schema_version": CAPABILITY_VECTOR_EXPORT_SCHEMA_VERSION,
+        "embedding_model": embedding_provider.model_name,
+        "embedding_dimensions": dimensions,
+        "card_count": len(cards),
+        "source_cards_file": CAPABILITY_CARDS_FILE.name,
+        "vectors": vectors,
+    }
+
+
+def write_capability_vector_export(
+    output_path: str | Path,
+    embedding_provider: TextEmbeddingProvider,
+    batch_size: int | None = None,
+) -> dict[str, Any]:
+    payload = build_capability_vector_export(embedding_provider, batch_size=batch_size)
+    target_path = Path(output_path)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return payload
+
+
+def import_capability_vector_store_from_export(
+    connection: ExecuteConnection,
+    export_path: str | Path | None = None,
+    *,
+    required: bool = False,
+) -> int:
+    if not capability_vector_table_ready(connection):
+        raise RuntimeError("interview_capability_vectors table or pgvector extension is not ready")
+
+    source_path = Path(export_path) if export_path is not None else CAPABILITY_VECTOR_EXPORT_FILE
+    if not source_path.exists():
+        if required:
+            raise RuntimeError(f"offline capability vector export not found: {source_path}")
+        return 0
+
+    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    vector_records = validate_capability_vector_export(payload, source_path)
+    for card, embedding_model, embedding in vector_records:
+        insert_capability_vector_row(
+            connection,
+            capability_vector_row_parameters(
+                card=card,
+                embedding_model=embedding_model,
+                embedding=embedding,
+            ),
+        )
+    return len(vector_records)
+
+
+def validate_capability_vector_export(
+    payload: dict[str, Any],
+    source_path: Path | None = None,
+) -> list[tuple[CapabilityCard, str, list[float]]]:
+    source_label = str(source_path or CAPABILITY_VECTOR_EXPORT_FILE)
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"offline capability vector export is invalid: {source_label}")
+    if payload.get("schema_version") != CAPABILITY_VECTOR_EXPORT_SCHEMA_VERSION:
+        raise RuntimeError(f"offline capability vector export schema is unsupported: {source_label}")
+
+    vectors = payload.get("vectors")
+    if not isinstance(vectors, list):
+        raise RuntimeError(f"offline capability vector export is missing vectors: {source_label}")
+
+    cards_by_id = {card.id: card for card in load_capability_cards()}
+    expected_ids = set(cards_by_id)
+    exported_ids: set[str] = set()
+    records: list[tuple[CapabilityCard, str, list[float]]] = []
+    payload_model = str(payload.get("embedding_model") or "").strip()
+    try:
+        payload_dimensions = int(payload.get("embedding_dimensions") or 0)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"offline capability vector export has invalid embedding dimensions: {source_label}") from exc
+
+    for item in vectors:
+        if not isinstance(item, dict):
+            raise RuntimeError(f"offline capability vector export contains an invalid vector row: {source_label}")
+        card_id = str(item.get("card_id") or "").strip()
+        if not card_id or card_id not in cards_by_id:
+            raise RuntimeError(f"offline capability vector export contains unknown capability card: {card_id}")
+        if card_id in exported_ids:
+            raise RuntimeError(f"offline capability vector export contains duplicate capability card: {card_id}")
+        exported_ids.add(card_id)
+
+        card = cards_by_id[card_id]
+        if str(item.get("content_hash") or "") != capability_card_content_hash(card):
+            raise RuntimeError(f"offline capability vector export is stale for capability card: {card_id}")
+
+        embedding_model = str(item.get("embedding_model") or payload_model).strip()
+        if not embedding_model:
+            raise RuntimeError(f"offline capability vector export is missing embedding model for card: {card_id}")
+
+        embedding = normalize_embedding_vector(item.get("embedding"))
+        try:
+            row_dimensions = int(item.get("embedding_dimensions") or len(embedding))
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(f"offline capability vector export has invalid dimensions for card: {card_id}") from exc
+        if row_dimensions != len(embedding):
+            raise RuntimeError(f"offline capability vector export has mismatched dimensions for card: {card_id}")
+        if payload_dimensions and payload_dimensions != len(embedding):
+            raise RuntimeError(f"offline capability vector export has mixed dimensions for card: {card_id}")
+        records.append((card, embedding_model, embedding))
+
+    if exported_ids != expected_ids:
+        missing = sorted(expected_ids - exported_ids)
+        extra = sorted(exported_ids - expected_ids)
+        details = []
+        if missing:
+            details.append(f"missing={','.join(missing[:5])}")
+        if extra:
+            details.append(f"extra={','.join(extra[:5])}")
+        raise RuntimeError(f"offline capability vector export does not match capability cards: {';'.join(details)}")
+
+    return records
+
+
+def capability_card_content_hash(card: CapabilityCard) -> str:
+    return hashlib.sha256(card.search_text.encode("utf-8")).hexdigest()
+
+
+def capability_card_metadata(card: CapabilityCard) -> dict[str, list[str]]:
+    return {
+        "aliases": list(card.aliases),
+        "rounds": list(card.rounds),
+        "capability_tags": list(card.capability_tags),
+        "question_angles": list(card.question_angles),
+    }
+
+
+def normalize_embedding_vector(value: Any) -> list[float]:
+    if not isinstance(value, list):
+        raise RuntimeError("embedding vector must be a list")
+    normalized: list[float] = []
+    for item in value:
+        try:
+            number = float(item)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("embedding vector contains non-numeric values") from exc
+        if not math.isfinite(number):
+            raise RuntimeError("embedding vector contains non-finite values")
+        normalized.append(round(number, 8))
+    if not normalized:
+        raise RuntimeError("embedding vector must not be empty")
+    return normalized
+
+
+def capability_vector_row_parameters(
+    *,
+    card: CapabilityCard,
+    embedding_model: str,
+    embedding: list[float],
+) -> dict[str, Any]:
+    normalized_embedding = normalize_embedding_vector(embedding)
+    return {
+        "id": _vector_row_id(card.id, embedding_model),
+        "card_id": card.id,
+        "title": card.title,
+        "interview_types": json.dumps([interview_type.value for interview_type in card.interview_types], ensure_ascii=False),
+        "content_hash": capability_card_content_hash(card),
+        "embedding_model": embedding_model,
+        "embedding_dimensions": len(normalized_embedding),
+        "source_text": card.search_text,
+        "metadata_json": json.dumps(capability_card_metadata(card), ensure_ascii=False),
+        "embedding": vector_sql_literal(normalized_embedding),
+    }
+
+
+def insert_capability_vector_row(connection: ExecuteConnection, parameters: dict[str, Any]) -> None:
+    connection.execute(
+        text(
+            """
+            INSERT INTO interview_capability_vectors (
+                id,
+                card_id,
+                title,
+                interview_types,
+                content_hash,
+                embedding_model,
+                embedding_dimensions,
+                source_text,
+                metadata_json,
+                embedding,
+                status,
+                updated_at
+            )
+            VALUES (
+                :id,
+                :card_id,
+                :title,
+                CAST(:interview_types AS jsonb),
+                :content_hash,
+                :embedding_model,
+                :embedding_dimensions,
+                :source_text,
+                CAST(:metadata_json AS jsonb),
+                CAST(:embedding AS vector),
+                'ready',
+                NOW()
+            )
+            ON CONFLICT (card_id, embedding_model) DO UPDATE SET
+                title = EXCLUDED.title,
+                interview_types = EXCLUDED.interview_types,
+                content_hash = EXCLUDED.content_hash,
+                embedding_dimensions = EXCLUDED.embedding_dimensions,
+                source_text = EXCLUDED.source_text,
+                metadata_json = EXCLUDED.metadata_json,
+                embedding = EXCLUDED.embedding,
+                status = 'ready',
+                updated_at = NOW()
+            """
+        ),
+        parameters,
+    )
 
 
 def capability_vector_table_ready(connection: ExecuteConnection) -> bool:
@@ -443,6 +644,111 @@ def search_capability_vectors(
     return {str(row["card_id"]): float(row["vector_score"] or 0.0) for row in rows if row.get("card_id")}
 
 
+def search_capability_vectors_from_anchor_cards(
+    connection: ExecuteConnection,
+    interview_type: InterviewType,
+    lexical_scores: dict[str, int],
+    limit: int = 8,
+    embedding_model: str | None = None,
+    max_anchor_cards: int = 3,
+) -> dict[str, float]:
+    anchor_card_ids = [
+        card_id
+        for card_id, score in sorted(lexical_scores.items(), key=lambda item: (-item[1], item[0]))
+        if score > 0
+    ][: max(1, max_anchor_cards)]
+    if not anchor_card_ids:
+        return {}
+
+    model_name = embedding_model or embedding_model_name()
+    stored_embeddings = load_capability_vector_embeddings(
+        connection,
+        interview_type=interview_type,
+        card_ids=anchor_card_ids,
+        embedding_model=model_name,
+    )
+    query_embedding = average_embedding_vectors(
+        [stored_embeddings[card_id] for card_id in anchor_card_ids if card_id in stored_embeddings]
+    )
+    if not query_embedding:
+        return {}
+    return search_capability_vectors(
+        connection,
+        interview_type=interview_type,
+        query_embedding=query_embedding,
+        limit=limit,
+        embedding_model=model_name,
+    )
+
+
+def load_capability_vector_embeddings(
+    connection: ExecuteConnection,
+    interview_type: InterviewType,
+    card_ids: list[str],
+    embedding_model: str,
+) -> dict[str, list[float]]:
+    if not card_ids or not capability_vector_table_ready(connection):
+        return {}
+    try:
+        rows = connection.execute(
+            text(
+                """
+                SELECT
+                    card_id,
+                    embedding::text AS embedding
+                FROM interview_capability_vectors
+                WHERE interview_types @> CAST(:interview_filter AS jsonb)
+                    AND embedding_model = :embedding_model
+                    AND status = 'ready'
+                    AND card_id IN (
+                        SELECT jsonb_array_elements_text(CAST(:card_ids AS jsonb))
+                    )
+                """
+            ),
+            {
+                "interview_filter": json.dumps([interview_type.value]),
+                "embedding_model": embedding_model,
+                "card_ids": json.dumps(card_ids, ensure_ascii=False),
+            },
+        ).mappings()
+    except (RuntimeError, ValueError, SQLAlchemyError):
+        return {}
+
+    embeddings: dict[str, list[float]] = {}
+    for row in rows:
+        card_id = str(row.get("card_id") or "")
+        if not card_id:
+            continue
+        try:
+            embeddings[card_id] = parse_vector_sql_literal(str(row.get("embedding") or ""))
+        except RuntimeError:
+            continue
+    return embeddings
+
+
+def average_embedding_vectors(vectors: list[list[float]]) -> list[float]:
+    if not vectors:
+        return []
+    dimensions = len(vectors[0])
+    if dimensions <= 0:
+        return []
+    sums = [0.0 for _ in range(dimensions)]
+    used_count = 0
+    for vector in vectors:
+        if len(vector) != dimensions:
+            continue
+        for index, value in enumerate(vector):
+            sums[index] += float(value)
+        used_count += 1
+    if used_count <= 0:
+        return []
+    averaged = [value / used_count for value in sums]
+    norm = math.sqrt(sum(value * value for value in averaged))
+    if norm <= 0:
+        return []
+    return [round(value / norm, 8) for value in averaged]
+
+
 def local_text_embedding(text_value: str, dimensions: int | None = None) -> list[float]:
     size = max(8, dimensions or DEFAULT_LOCAL_HASH_DIMENSIONS)
     values = [0.0 for _ in range(size)]
@@ -480,6 +786,16 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
 
 def vector_sql_literal(vector: list[float]) -> str:
     return "[" + ",".join(str(round(float(value), 8)) for value in vector) + "]"
+
+
+def parse_vector_sql_literal(value: str) -> list[float]:
+    normalized = value.strip()
+    if not normalized.startswith("[") or not normalized.endswith("]"):
+        raise RuntimeError("invalid vector literal")
+    body = normalized[1:-1].strip()
+    if not body:
+        raise RuntimeError("invalid empty vector literal")
+    return normalize_embedding_vector([float(item.strip()) for item in body.split(",") if item.strip()])
 
 
 def embed_query_text(provider: TextEmbeddingProvider, text_value: str) -> list[float]:

@@ -173,6 +173,66 @@ export type SystemConfig = {
   updated_at?: string | null;
 };
 
+export type InterviewCoreCapabilityCards = {
+  ready: boolean;
+  source_version?: string | null;
+  source_policy?: string | null;
+  total_seed_count: number;
+  counts_by_interview_type: Record<string, number>;
+  expected_minimums: Record<string, number>;
+  missing_preset_files: string[];
+  duplicate_seed_ids: string[];
+  error?: string | null;
+};
+
+export type InterviewCoreCapabilityVectors = {
+  ready: boolean;
+  table_name: string;
+  table_exists: boolean;
+  expected_seed_count: number;
+  total_vector_count: number;
+  non_empty_vector_count: number;
+  distinct_seed_count?: number | null;
+  coverage_rate: number;
+  seed_id_column?: string | null;
+  vector_column?: string | null;
+  embedding_model_column?: string | null;
+  embedding_models: { model: string; count: number }[];
+  status_column?: string | null;
+  status_counts: { status: string; count: number }[];
+  missing_observation_columns: string[];
+  detail?: string | null;
+};
+
+export type InterviewCoreRecallProbe = {
+  name: string;
+  interview_type: string;
+  expected_preset_id: string;
+  matched_preset_id?: string | null;
+  matched_title?: string | null;
+  top_score: number;
+  runner_up_score?: number | null;
+  top_score_gap?: number | null;
+  match_count: number;
+  ready: boolean;
+};
+
+export type InterviewCoreRecallQuality = {
+  ready: boolean;
+  probe_count: number;
+  passed_probe_count: number;
+  probes: InterviewCoreRecallProbe[];
+};
+
+export type InterviewCoreHealth = {
+  ready: boolean;
+  capability_cards: InterviewCoreCapabilityCards;
+  capability_vectors: InterviewCoreCapabilityVectors;
+  recall_quality: InterviewCoreRecallQuality;
+  failure_reasons: string[];
+  failure_summary: string;
+};
+
 export type AdminStatsPoint = {
   label: string;
   value: number;

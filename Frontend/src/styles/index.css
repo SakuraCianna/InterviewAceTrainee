@@ -3358,6 +3358,220 @@ button {
   color: #2563eb;
 }
 
+.admin-core-health {
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.admin-core-health-heading {
+  align-items: start;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.admin-core-health-heading h3 {
+  color: #0f172a;
+  font-size: 22px;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.admin-core-health-heading p,
+.admin-core-card p,
+.admin-core-probes span,
+.admin-core-probes small,
+.admin-core-metrics span,
+.admin-core-breakdown span {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.admin-core-health-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-core-card {
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.admin-core-card.is-degraded {
+  border-color: rgba(179, 38, 30, 0.24);
+}
+
+.admin-core-card-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.admin-core-card-head > span {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.admin-core-card > strong {
+  color: #2563eb;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.admin-health-pill {
+  border-radius: 999px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 950;
+  padding: 6px 9px;
+}
+
+.admin-health-pill.is-ready {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+}
+
+.admin-health-pill.is-degraded {
+  background: rgba(179, 38, 30, 0.1);
+  color: #b3261e;
+}
+
+.admin-core-breakdown,
+.admin-core-metrics {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-core-breakdown {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-core-breakdown span,
+.admin-core-metrics {
+  min-width: 0;
+}
+
+.admin-core-breakdown b,
+.admin-core-metrics b {
+  color: #0f172a;
+  display: block;
+  font-size: 13px;
+  font-weight: 950;
+  overflow-wrap: anywhere;
+}
+
+.admin-core-metrics {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.admin-core-alerts,
+.admin-core-failures,
+.admin-core-ok {
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.admin-core-alerts,
+.admin-core-failures {
+  background: #fce8e6;
+  color: #b3261e;
+}
+
+.admin-core-ok {
+  background: #e6f4ea;
+  color: #15803d;
+  font-weight: 900;
+  margin: 0;
+}
+
+.admin-core-alerts p,
+.admin-core-failures p {
+  color: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.55;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-core-failures strong {
+  color: inherit;
+  font-size: 13px;
+}
+
+.admin-core-probes {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-core-probes article {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px;
+}
+
+.admin-core-probes article.is-degraded {
+  border-color: rgba(179, 38, 30, 0.24);
+}
+
+.admin-core-probes div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-core-probes strong {
+  color: #0f172a;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-core-probes em {
+  border-radius: 999px;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 950;
+  padding: 5px 8px;
+}
+
+.admin-core-probes article.is-ready em {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+}
+
+.admin-core-probes article.is-degraded em {
+  background: rgba(179, 38, 30, 0.1);
+  color: #b3261e;
+}
+
+.admin-core-probes small {
+  grid-column: 1 / -1;
+}
+
 .admin-provider-table {
   margin: 0 auto;
   max-width: 1120px;
@@ -6619,6 +6833,12 @@ body:has(.admin-page--authed) {
 }
 
 .admin-page.admin-page--authed .admin-dashboard-heading p,
+.admin-page.admin-page--authed .admin-core-health-heading p,
+.admin-page.admin-page--authed .admin-core-card p,
+.admin-page.admin-page--authed .admin-core-probes span,
+.admin-page.admin-page--authed .admin-core-probes small,
+.admin-page.admin-page--authed .admin-core-metrics span,
+.admin-page.admin-page--authed .admin-core-breakdown span,
 .admin-page.admin-page--authed .admin-empty-text,
 .admin-page.admin-page--authed .admin-report-message,
 .admin-page.admin-page--authed .admin-report-summary,
@@ -6662,6 +6882,12 @@ body:has(.admin-page--authed) {
   background: #fef7e0;
 }
 
+.admin-page.admin-page--authed .admin-dashboard-badge.is-danger {
+  border-color: #fad2cf;
+  color: var(--admin-red);
+  background: #fce8e6;
+}
+
 .admin-page.admin-page--authed .admin-kpi-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -6670,6 +6896,11 @@ body:has(.admin-page--authed) {
 }
 
 .admin-page.admin-page--authed .admin-kpi-grid article,
+.admin-page.admin-page--authed .admin-core-health,
+.admin-page.admin-page--authed .admin-core-card,
+.admin-page.admin-page--authed .admin-core-probes article,
+.admin-page.admin-page--authed .admin-core-failures,
+.admin-page.admin-page--authed .admin-core-ok,
 .admin-page.admin-page--authed .admin-chart-card,
 .admin-page.admin-page--authed .admin-top-users,
 .admin-page.admin-page--authed .admin-ledger-item,
@@ -6720,6 +6951,38 @@ body:has(.admin-page--authed) {
 .admin-page.admin-page--authed .admin-chart-card,
 .admin-page.admin-page--authed .admin-top-users {
   padding: 18px;
+}
+
+.admin-page.admin-page--authed .admin-core-health {
+  margin-top: 2px;
+  padding: 18px;
+}
+
+.admin-page.admin-page--authed .admin-core-health-heading h3,
+.admin-page.admin-page--authed .admin-core-card-head > span,
+.admin-page.admin-page--authed .admin-core-breakdown b,
+.admin-page.admin-page--authed .admin-core-metrics b,
+.admin-page.admin-page--authed .admin-core-probes strong {
+  color: var(--admin-ink);
+}
+
+.admin-page.admin-page--authed .admin-core-card > strong {
+  color: var(--admin-blue);
+}
+
+.admin-page.admin-page--authed .admin-health-pill.is-ready,
+.admin-page.admin-page--authed .admin-core-probes article.is-ready em,
+.admin-page.admin-page--authed .admin-core-ok {
+  color: var(--admin-green);
+  background: #e6f4ea;
+}
+
+.admin-page.admin-page--authed .admin-health-pill.is-degraded,
+.admin-page.admin-page--authed .admin-core-probes article.is-degraded em,
+.admin-page.admin-page--authed .admin-core-alerts,
+.admin-page.admin-page--authed .admin-core-failures {
+  color: var(--admin-red);
+  background: #fce8e6;
 }
 
 .admin-page.admin-page--authed .admin-panel label,
@@ -6854,7 +7117,8 @@ body:has(.admin-page--authed) {
   .admin-page.admin-page--authed .admin-workbench,
   .admin-page.admin-page--authed .admin-user-grid,
   .admin-page.admin-page--authed .admin-ops-grid,
-  .admin-page.admin-page--authed .admin-trace-grid {
+  .admin-page.admin-page--authed .admin-trace-grid,
+  .admin-page.admin-page--authed .admin-core-health-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -6893,6 +7157,7 @@ body:has(.admin-page--authed) {
 
   .admin-page.admin-page--authed .admin-section-heading,
   .admin-page.admin-page--authed .admin-dashboard-heading,
+  .admin-page.admin-page--authed .admin-core-health-heading,
   .admin-page.admin-page--authed .admin-search-form,
   .admin-page.admin-page--authed .admin-form-grid,
   .admin-page.admin-page--authed .provider-row,
@@ -6903,6 +7168,7 @@ body:has(.admin-page--authed) {
 
   .admin-page.admin-page--authed .admin-kpi-grid,
   .admin-page.admin-page--authed .admin-chart-grid,
+  .admin-page.admin-page--authed .admin-core-health-grid,
   .admin-page.admin-page--authed .admin-mini-metrics {
     grid-template-columns: 1fr;
   }

@@ -15,7 +15,10 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import get_settings
-from app.services.interview_capability_retrieval import seed_capability_vector_store
+from app.services.interview_capability_retrieval import (
+    import_capability_vector_store_from_export,
+    seed_capability_vector_store,
+)
 
 BACKUP_DIR_NAME = "database_backups"
 BACKUP_KEEP_COUNT = 5
@@ -237,12 +240,19 @@ def seed_interview_capability_vectors(database_url: str) -> None:
     engine = create_engine(database_url, pool_pre_ping=True)
     try:
         with engine.begin() as connection:
+            imported_count = import_capability_vector_store_from_export(connection)
+            if imported_count > 0:
+                print(f"interview capability vectors imported from offline export: {imported_count}")
+                return
             seeded_count = seed_capability_vector_store(connection)
         print(f"interview capability vectors seeded: {seeded_count}")
     except RuntimeError as exc:
         if is_optional_embedding_dependency_error(exc):
-            print(f"interview capability vector seed skipped: {exc}")
-            return
+            raise RuntimeError(
+                "offline capability vector export is missing and sentence-transformers is not installed; "
+                "run `uv sync --extra embeddings` then `uv run python -m app.cli.seed_interview_capability_vectors "
+                "--export-json app/interview_presets/capability_vectors.json` before production migration"
+            ) from exc
         raise RuntimeError(f"interview capability vector seed failed: {exc}") from exc
     finally:
         engine.dispose()
