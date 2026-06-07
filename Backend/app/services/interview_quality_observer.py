@@ -6,8 +6,9 @@ from datetime import datetime
 import json
 from typing import Any
 
-from sqlalchemy import MetaData, Table, func, inspect, select
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Connection
+from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.interviews import InterviewType
@@ -474,30 +475,29 @@ def inspect_capability_vectors(
                 detail="table_missing",
             )
 
-        vector_table = Table(CAPABILITY_VECTOR_TABLE, MetaData(), autoload_with=connection)
-        columns = set(vector_table.c.keys())
+        columns = _table_column_names(connection, inspector, CAPABILITY_VECTOR_TABLE)
         seed_id_column = _first_existing_column(columns, VECTOR_SEED_ID_COLUMNS)
         vector_column = _first_existing_column(columns, VECTOR_VALUE_COLUMNS)
         embedding_model_column = _first_existing_column(columns, VECTOR_MODEL_COLUMNS)
         status_column = _first_existing_column(columns, VECTOR_STATUS_COLUMNS)
-        total_vector_count = _count_rows(connection, vector_table)
+        total_vector_count = _count_rows(connection, CAPABILITY_VECTOR_TABLE)
         non_empty_vector_count = (
-            _count_non_null_rows(connection, vector_table, vector_column)
+            _count_non_null_rows(connection, CAPABILITY_VECTOR_TABLE, vector_column)
             if vector_column is not None
             else 0
         )
         distinct_seed_count = (
-            _count_distinct_values(connection, vector_table, seed_id_column)
+            _count_distinct_values(connection, CAPABILITY_VECTOR_TABLE, seed_id_column)
             if seed_id_column is not None
             else None
         )
         embedding_models = (
-            _group_counts(connection, vector_table, embedding_model_column, "model")
+            _group_counts(connection, CAPABILITY_VECTOR_TABLE, embedding_model_column, "model")
             if embedding_model_column is not None
             else []
         )
         status_counts = (
-            _group_counts(connection, vector_table, status_column, "status")
+            _group_counts(connection, CAPABILITY_VECTOR_TABLE, status_column, "status")
             if status_column is not None
             else []
         )
@@ -725,48 +725,78 @@ def _first_existing_column(columns: set[str], candidates: tuple[str, ...]) -> st
     return None
 
 
-def _count_rows(connection: Connection, vector_table: Table) -> int:
-    return int(connection.execute(select(func.count()).select_from(vector_table)).scalar_one())
+def _table_column_names(connection: Connection, inspector: Inspector, table_name: str) -> set[str]:
+    if connection.dialect.name == "postgresql":
+        rows = connection.execute(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                    AND table_name = :table_name
+                """
+            ),
+            {"table_name": table_name},
+        ).scalars()
+        return {str(column_name) for column_name in rows}
+    return {str(column["name"]) for column in inspector.get_columns(table_name)}
 
 
-def _count_non_null_rows(connection: Connection, vector_table: Table, column_name: str) -> int:
-    column = vector_table.c[column_name]
+def _count_rows(connection: Connection, table_name: str) -> int:
+    sql = f"SELECT COUNT(*) FROM {_quote_identifier(connection, table_name)}"
+    return int(connection.execute(text(sql)).scalar_one())
+
+
+def _count_non_null_rows(connection: Connection, table_name: str, column_name: str) -> int:
+    table_identifier = _quote_identifier(connection, table_name)
+    column_identifier = _quote_identifier(connection, column_name)
     return int(
         connection.execute(
-            select(func.count()).select_from(vector_table).where(column.is_not(None))
+            text(f"SELECT COUNT(*) FROM {table_identifier} WHERE {column_identifier} IS NOT NULL")
         ).scalar_one()
     )
 
 
-def _count_distinct_values(connection: Connection, vector_table: Table, column_name: str) -> int:
-    column = vector_table.c[column_name]
+def _count_distinct_values(connection: Connection, table_name: str, column_name: str) -> int:
+    table_identifier = _quote_identifier(connection, table_name)
+    column_identifier = _quote_identifier(connection, column_name)
     return int(
         connection.execute(
-            select(func.count(func.distinct(column))).select_from(vector_table).where(column.is_not(None))
+            text(
+                f"SELECT COUNT(DISTINCT {column_identifier}) "
+                f"FROM {table_identifier} "
+                f"WHERE {column_identifier} IS NOT NULL"
+            )
         ).scalar_one()
     )
 
 
 def _group_counts(
     connection: Connection,
-    vector_table: Table,
+    table_name: str,
     column_name: str,
     label: str,
 ) -> list[dict[str, Any]]:
-    column = vector_table.c[column_name]
-    count_label = func.count().label("count")
+    table_identifier = _quote_identifier(connection, table_name)
+    column_identifier = _quote_identifier(connection, column_name)
     rows = connection.execute(
-        select(column, count_label)
-        .select_from(vector_table)
-        .where(column.is_not(None))
-        .group_by(column)
-        .order_by(count_label.desc())
-    ).all()
+        text(
+            f"SELECT {column_identifier} AS value, COUNT(*) AS count "
+            f"FROM {table_identifier} "
+            f"WHERE {column_identifier} IS NOT NULL "
+            f"GROUP BY {column_identifier} "
+            f"ORDER BY count DESC"
+        )
+    ).mappings()
     return [
-        {label: str(row[0]), "count": int(row[1])}
+        {label: str(row["value"]), "count": int(row["count"])}
         for row in rows
-        if row[0] is not None and str(row[0]).strip()
+        if row["value"] is not None and str(row["value"]).strip()
     ]
+
+
+def _quote_identifier(connection: Connection, identifier: str) -> str:
+    return connection.dialect.identifier_preparer.quote(identifier)
 
 
 def _missing_vector_columns(
