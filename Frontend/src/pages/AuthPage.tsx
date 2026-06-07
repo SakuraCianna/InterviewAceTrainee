@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { FormEvent, useLayoutEffect, useRef, useState } from "react";
 import { Button, SafeArea } from "antd-mobile";
 import { gsap } from "gsap";
 import { AppIcon } from "../components/AppIcon";

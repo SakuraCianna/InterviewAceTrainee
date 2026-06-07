@@ -102,7 +102,6 @@ export function InterviewRoom() {
   const [recordingElapsedMs, setRecordingElapsedMs] = useState(0);
   const [answerLimitMs, setAnswerLimitMs] = useState(ANSWER_LIMIT_MS);
   const [silenceRemainingMs, setSilenceRemainingMs] = useState(SILENCE_AUTO_FINISH_MS);
-  const [microphoneReady, setMicrophoneReady] = useState(false);
   const [microphoneDevices, setMicrophoneDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedMicrophoneId, setSelectedMicrophoneId] = useState("");
   const [microphoneLevel, setMicrophoneLevel] = useState(0);
@@ -261,7 +260,6 @@ export function InterviewRoom() {
   function handleMicrophoneChange(deviceId: string) {
     stopMicrophoneTest();
     setSelectedMicrophoneId(deviceId);
-    setMicrophoneReady(false);
     setMicrophoneLevel(0);
     setMicrophoneStatus("idle");
     setMicrophoneMessage("已切换输入设备，请重新检测麦克风。");
@@ -303,7 +301,6 @@ export function InterviewRoom() {
     }
     stopMicrophoneTest();
     setMicrophoneStatus("testing");
-    setMicrophoneReady(false);
     setMicrophoneMessage("正在打开麦克风，请试着说一句话。");
     try {
       const stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints());
@@ -361,7 +358,6 @@ export function InterviewRoom() {
     }
     stopMicrophoneTest();
     setPendingResume(resume);
-    setMicrophoneReady(false);
     setMicrophoneLevel(0);
     setMicrophoneStatus("idle");
     setMicrophoneMessage("正式进入面试前, 请先选择并检测麦克风");
@@ -374,7 +370,6 @@ export function InterviewRoom() {
       return;
     }
     stopMicrophoneTest();
-    setMicrophoneReady(true);
     navigate("/interview/room");
     void startSession(pendingResume);
     setPendingResume(false);
@@ -1149,7 +1144,6 @@ export function InterviewRoom() {
     setInterviewState(null);
     setActiveSession(null);
     setPendingResume(false);
-    setMicrophoneReady(false);
     setMicrophoneStatus("idle");
     setMicrophoneLevel(0);
     setSessionId(createSessionId());
