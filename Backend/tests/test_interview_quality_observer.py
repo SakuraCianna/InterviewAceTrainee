@@ -3,6 +3,7 @@ import unittest
 from sqlalchemy import Column, MetaData, String, Table, Text, create_engine
 
 from app.schemas.interviews import InterviewType
+from app.services.interview_capability_retrieval import capability_card_inventory
 from app.services.interview_quality_observer import (
     CAPABILITY_VECTOR_TABLE,
     CapabilityVectorObservation,
@@ -215,6 +216,7 @@ class InterviewQualityObserverTests(unittest.TestCase):
         self.assertTrue(report.capability_cards.ready)
         self.assertTrue(report.recall_quality.ready)
         self.assertFalse(report.capability_vectors.ready)
+        self.assertEqual(report.capability_vectors.expected_seed_count, capability_card_inventory()["card_count"])
         self.assertIn(CAPABILITY_VECTOR_TABLE, report.failure_summary)
 
     def test_capability_vector_failure_summary_prioritizes_table_read_error(self) -> None:

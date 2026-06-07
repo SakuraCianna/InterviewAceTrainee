@@ -11,6 +11,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.interviews import InterviewType
+from app.services.interview_capability_retrieval import capability_card_inventory
 from app.services.interview_material_context import InterviewMaterialContext
 from app.services.interview_presets import (
     PRESET_INDEX_FILE,
@@ -382,9 +383,10 @@ def observe_interview_core_readiness(
     database_error: str | None = None,
 ) -> InterviewCoreReadinessObservation:
     capability_cards = observe_capability_card_seeds()
+    expected_vector_seed_count = _capability_vector_expected_seed_count()
     capability_vectors = inspect_capability_vectors(
         connection,
-        expected_seed_count=capability_cards.total_seed_count,
+        expected_seed_count=expected_vector_seed_count,
         database_error=database_error,
     )
     recall_quality = observe_recall_quality()
@@ -396,6 +398,14 @@ def observe_interview_core_readiness(
         recall_quality=recall_quality,
         failure_reasons=failure_reasons,
     )
+
+
+def _capability_vector_expected_seed_count() -> int:
+    inventory = capability_card_inventory()
+    try:
+        return int(inventory.get("card_count") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def observe_capability_card_seeds() -> CapabilitySeedObservation:
