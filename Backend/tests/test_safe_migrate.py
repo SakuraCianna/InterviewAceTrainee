@@ -14,7 +14,9 @@ from app.cli.safe_migrate import (
     has_pending_database_operations_for_state,
     normalize_removed_dev_revisions,
     prune_old_backups,
+    run_safe_migration,
     seed_interview_capability_vectors,
+    verify_interview_core_readiness,
 )
 
 
@@ -102,6 +104,23 @@ class SafeMigrateTests(unittest.TestCase):
         self.assertIn("interview capability vectors imported from offline export: 12", output.getvalue())
         self.assertTrue(fake_engine.disposed)
 
+    def test_seed_vectors_fails_on_offline_export_model_mismatch_without_live_seed(self) -> None:
+        with (
+            patch("app.cli.safe_migrate.create_engine", return_value=_FakeEngine()),
+            patch(
+                "app.cli.safe_migrate.import_capability_vector_store_from_export",
+                side_effect=RuntimeError(
+                    "offline capability vector export embedding model mismatch: expected BAAI/bge-m3, "
+                    "found BAAI/bge-small-zh-v1.5"
+                ),
+            ),
+            patch("app.cli.safe_migrate.seed_capability_vector_store") as live_seed,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "embedding model mismatch"):
+                seed_interview_capability_vectors("sqlite+pysqlite:///:memory:")
+
+        live_seed.assert_not_called()
+
     def test_seed_vectors_fails_when_offline_export_and_optional_dependency_are_missing(self) -> None:
         with (
             patch("app.cli.safe_migrate.create_engine", return_value=_FakeEngine()),
@@ -122,6 +141,35 @@ class SafeMigrateTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "interview capability vector seed failed"):
                 seed_interview_capability_vectors("sqlite+pysqlite:///:memory:")
+
+    def test_safe_migration_runs_core_readiness_after_vector_seed(self) -> None:
+        calls: list[str] = []
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            backend_dir = project_root / "Backend"
+            backend_dir.mkdir()
+            with (
+                patch("app.cli.safe_migrate.ensure_database_reachable", side_effect=lambda _database_url: calls.append("reachable")),
+                patch("app.cli.safe_migrate.has_pending_database_operations", return_value=False),
+                patch("app.cli.safe_migrate.run_alembic_upgrade", side_effect=lambda _backend_dir: calls.append("migrate")),
+                patch("app.cli.safe_migrate.seed_interview_capability_vectors", side_effect=lambda _database_url: calls.append("seed_vectors")),
+                patch("app.cli.safe_migrate.verify_interview_core_readiness", side_effect=lambda _database_url: calls.append("readiness")),
+            ):
+                run_safe_migration("sqlite+pysqlite:///:memory:", project_root, backend_dir)
+
+        self.assertEqual(calls, ["reachable", "migrate", "seed_vectors", "readiness"])
+
+    def test_verify_interview_core_readiness_fails_with_failure_summary(self) -> None:
+        with (
+            patch("app.cli.safe_migrate.create_engine", return_value=_FakeEngine()),
+            patch(
+                "app.cli.safe_migrate.observe_interview_core_readiness",
+                return_value=_FakeReadinessReport(ready=False, failure_summary="能力卡片向量未覆盖全部 seed"),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "能力卡片向量未覆盖全部 seed"):
+                verify_interview_core_readiness("sqlite+pysqlite:///:memory:")
 
     def _create_sqlite_database(self, temp_dir: str, versions: list[str]) -> str:
         database_path = Path(temp_dir) / "mianba.db"
@@ -155,6 +203,9 @@ class _FakeEngine:
     def begin(self) -> "_FakeConnectionContext":
         return _FakeConnectionContext()
 
+    def connect(self) -> "_FakeConnectionContext":
+        return _FakeConnectionContext()
+
     def dispose(self) -> None:
         self.disposed = True
 
@@ -165,6 +216,12 @@ class _FakeConnectionContext:
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         return None
+
+
+class _FakeReadinessReport:
+    def __init__(self, *, ready: bool, failure_summary: str) -> None:
+        self.ready = ready
+        self.failure_summary = failure_summary
 
 
 if __name__ == "__main__":

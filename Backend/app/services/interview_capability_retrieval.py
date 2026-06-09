@@ -164,6 +164,18 @@ def create_embedding_provider(
     raise ValueError(f"不支持的能力卡片 embedding provider: {provider_name}")
 
 
+def configured_embedding_model_name(
+    provider_name: str | None = None,
+    model_name: str | None = None,
+) -> str:
+    settings = get_settings()
+    provider = (provider_name or settings.capability_embedding_provider or DEFAULT_EMBEDDING_PROVIDER).strip().lower()
+    if provider in {"local-hash", "local_hash", LOCAL_HASH_EMBEDDING_MODEL, "hash"}:
+        return LOCAL_HASH_EMBEDDING_MODEL
+    configured_model = (model_name or settings.capability_embedding_model or DEFAULT_EMBEDDING_MODEL).strip()
+    return configured_model or DEFAULT_EMBEDDING_MODEL
+
+
 def retrieve_capability_cards(
     interview_type: InterviewType,
     material_context: InterviewMaterialContext | None = None,
@@ -402,6 +414,7 @@ def import_capability_vector_store_from_export(
     export_path: str | Path | None = None,
     *,
     required: bool = False,
+    expected_embedding_model: str | None = None,
 ) -> int:
     if not capability_vector_table_ready(connection):
         raise RuntimeError("interview_capability_vectors table or pgvector extension is not ready")
@@ -413,7 +426,11 @@ def import_capability_vector_store_from_export(
         return 0
 
     payload = json.loads(source_path.read_text(encoding="utf-8"))
-    vector_records = validate_capability_vector_export(payload, source_path)
+    vector_records = validate_capability_vector_export(
+        payload,
+        source_path,
+        expected_embedding_model=expected_embedding_model,
+    )
     for card, embedding_model, embedding in vector_records:
         insert_capability_vector_row(
             connection,
@@ -429,6 +446,8 @@ def import_capability_vector_store_from_export(
 def validate_capability_vector_export(
     payload: dict[str, Any],
     source_path: Path | None = None,
+    *,
+    expected_embedding_model: str | None = None,
 ) -> list[tuple[CapabilityCard, str, list[float]]]:
     source_label = str(source_path or CAPABILITY_VECTOR_EXPORT_FILE)
     if not isinstance(payload, dict):
@@ -445,6 +464,16 @@ def validate_capability_vector_export(
     exported_ids: set[str] = set()
     records: list[tuple[CapabilityCard, str, list[float]]] = []
     payload_model = str(payload.get("embedding_model") or "").strip()
+    expected_model = (expected_embedding_model or embedding_model_name()).strip()
+    if not payload_model:
+        raise RuntimeError(f"offline capability vector export is missing embedding model: {source_label}")
+    if expected_model and payload_model != expected_model:
+        raise RuntimeError(
+            "offline capability vector export embedding model mismatch: "
+            f"expected {expected_model}, found {payload_model} in {source_label}; "
+            "regenerate Backend/app/interview_presets/capability_vectors.json with the current "
+            "CAPABILITY_EMBEDDING_MODEL before importing"
+        )
     try:
         payload_dimensions = int(payload.get("embedding_dimensions") or 0)
     except (TypeError, ValueError) as exc:
@@ -467,6 +496,11 @@ def validate_capability_vector_export(
         embedding_model = str(item.get("embedding_model") or payload_model).strip()
         if not embedding_model:
             raise RuntimeError(f"offline capability vector export is missing embedding model for card: {card_id}")
+        if embedding_model != payload_model:
+            raise RuntimeError(
+                "offline capability vector export has mixed embedding models: "
+                f"expected {payload_model}, found {embedding_model} for card {card_id}"
+            )
 
         embedding = normalize_embedding_vector(item.get("embedding"))
         try:
@@ -839,10 +873,7 @@ def load_capability_cards() -> tuple[CapabilityCard, ...]:
 def embedding_model_name(provider: TextEmbeddingProvider | None = None) -> str:
     if provider is not None:
         return provider.model_name
-    settings = get_settings()
-    if settings.capability_embedding_provider.strip().lower() in {"local-hash", "local_hash", LOCAL_HASH_EMBEDDING_MODEL, "hash"}:
-        return LOCAL_HASH_EMBEDDING_MODEL
-    return settings.capability_embedding_model or DEFAULT_EMBEDDING_MODEL
+    return configured_embedding_model_name()
 
 
 def embedding_dimensions(provider: TextEmbeddingProvider | None = None) -> int:
