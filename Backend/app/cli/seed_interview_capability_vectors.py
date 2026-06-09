@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.db.session import engine
 from app.services.interview_capability_retrieval import (
     capability_card_inventory,
+    configured_embedding_model_name,
     create_embedding_provider,
     import_capability_vector_store_from_export,
     seed_capability_vector_store,
@@ -31,14 +32,21 @@ def main() -> int:
 
     try:
         if args.import_json is not None:
+            expected_embedding_model = configured_embedding_model_name(args.provider, args.model)
             with engine.begin() as connection:
-                count = import_capability_vector_store_from_export(connection, args.import_json, required=True)
+                count = import_capability_vector_store_from_export(
+                    connection,
+                    args.import_json,
+                    required=True,
+                    expected_embedding_model=expected_embedding_model,
+                )
             print(
                 json.dumps(
                     {
                         "ok": True,
                         "imported_count": count,
                         "import_json": str(args.import_json),
+                        "expected_embedding_model": expected_embedding_model,
                         "inventory": capability_card_inventory(),
                     },
                     ensure_ascii=False,

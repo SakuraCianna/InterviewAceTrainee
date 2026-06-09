@@ -12,7 +12,7 @@ from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.schemas.interviews import InterviewType
-from app.services.interview_capability_retrieval import capability_card_inventory
+from app.services.interview_capability_retrieval import capability_card_inventory, embedding_model_name
 from app.services.interview_material_context import InterviewMaterialContext
 from app.services.interview_presets import (
     PRESET_INDEX_FILE,
@@ -269,10 +269,15 @@ class CapabilityVectorObservation:
     table_name: str
     table_exists: bool
     expected_seed_count: int
+    expected_embedding_model: str = ""
     total_vector_count: int = 0
     non_empty_vector_count: int = 0
     distinct_seed_count: int | None = None
     coverage_rate: float = 0.0
+    matching_model_vector_count: int = 0
+    matching_model_non_empty_vector_count: int = 0
+    matching_model_distinct_seed_count: int | None = None
+    matching_model_coverage_rate: float = 0.0
     seed_id_column: str | None = None
     vector_column: str | None = None
     embedding_model_column: str | None = None
@@ -288,10 +293,15 @@ class CapabilityVectorObservation:
             "table_name": self.table_name,
             "table_exists": self.table_exists,
             "expected_seed_count": self.expected_seed_count,
+            "expected_embedding_model": self.expected_embedding_model,
             "total_vector_count": self.total_vector_count,
             "non_empty_vector_count": self.non_empty_vector_count,
             "distinct_seed_count": self.distinct_seed_count,
             "coverage_rate": self.coverage_rate,
+            "matching_model_vector_count": self.matching_model_vector_count,
+            "matching_model_non_empty_vector_count": self.matching_model_non_empty_vector_count,
+            "matching_model_distinct_seed_count": self.matching_model_distinct_seed_count,
+            "matching_model_coverage_rate": self.matching_model_coverage_rate,
             "seed_id_column": self.seed_id_column,
             "vector_column": self.vector_column,
             "embedding_model_column": self.embedding_model_column,
@@ -455,12 +465,14 @@ def inspect_capability_vectors(
     expected_seed_count: int,
     database_error: str | None = None,
 ) -> CapabilityVectorObservation:
+    expected_embedding_model = embedding_model_name()
     if connection is None:
         return CapabilityVectorObservation(
             ready=False,
             table_name=CAPABILITY_VECTOR_TABLE,
             table_exists=False,
             expected_seed_count=expected_seed_count,
+            expected_embedding_model=expected_embedding_model,
             detail=f"database_unavailable: {database_error[:240]}" if database_error else "database_unavailable",
         )
 
@@ -472,6 +484,7 @@ def inspect_capability_vectors(
                 table_name=CAPABILITY_VECTOR_TABLE,
                 table_exists=False,
                 expected_seed_count=expected_seed_count,
+                expected_embedding_model=expected_embedding_model,
                 detail="table_missing",
             )
 
@@ -496,6 +509,38 @@ def inspect_capability_vectors(
             if embedding_model_column is not None
             else []
         )
+        matching_model_vector_count = (
+            _count_rows_where_value(
+                connection,
+                CAPABILITY_VECTOR_TABLE,
+                embedding_model_column,
+                expected_embedding_model,
+            )
+            if embedding_model_column is not None
+            else 0
+        )
+        matching_model_non_empty_vector_count = (
+            _count_non_null_rows_where_value(
+                connection,
+                CAPABILITY_VECTOR_TABLE,
+                vector_column,
+                embedding_model_column,
+                expected_embedding_model,
+            )
+            if vector_column is not None and embedding_model_column is not None
+            else 0
+        )
+        matching_model_distinct_seed_count = (
+            _count_distinct_values_where_value(
+                connection,
+                CAPABILITY_VECTOR_TABLE,
+                seed_id_column,
+                embedding_model_column,
+                expected_embedding_model,
+            )
+            if seed_id_column is not None and embedding_model_column is not None
+            else None
+        )
         status_counts = (
             _group_counts(connection, CAPABILITY_VECTOR_TABLE, status_column, "status")
             if status_column is not None
@@ -507,11 +552,18 @@ def inspect_capability_vectors(
             table_name=CAPABILITY_VECTOR_TABLE,
             table_exists=True,
             expected_seed_count=expected_seed_count,
+            expected_embedding_model=expected_embedding_model,
             detail=str(exc)[:240],
         )
 
     coverage_basis = distinct_seed_count if distinct_seed_count is not None else total_vector_count
     coverage_rate = _ratio(coverage_basis, expected_seed_count)
+    matching_model_coverage_basis = (
+        matching_model_distinct_seed_count
+        if matching_model_distinct_seed_count is not None
+        else matching_model_vector_count
+    )
+    matching_model_coverage_rate = _ratio(matching_model_coverage_basis, expected_seed_count)
     model_count = sum(int(item["count"]) for item in embedding_models)
     all_status_ready = _all_vector_statuses_ready(status_counts, total_vector_count)
     missing_observation_columns = _missing_vector_columns(seed_id_column, vector_column, embedding_model_column)
@@ -523,6 +575,9 @@ def inspect_capability_vectors(
         and non_empty_vector_count == total_vector_count
         and embedding_model_column is not None
         and model_count == total_vector_count
+        and matching_model_vector_count > 0
+        and matching_model_coverage_basis >= expected_seed_count
+        and matching_model_non_empty_vector_count == matching_model_vector_count
         and all_status_ready
     )
     return CapabilityVectorObservation(
@@ -530,10 +585,15 @@ def inspect_capability_vectors(
         table_name=CAPABILITY_VECTOR_TABLE,
         table_exists=True,
         expected_seed_count=expected_seed_count,
+        expected_embedding_model=expected_embedding_model,
         total_vector_count=total_vector_count,
         non_empty_vector_count=non_empty_vector_count,
         distinct_seed_count=distinct_seed_count,
         coverage_rate=coverage_rate,
+        matching_model_vector_count=matching_model_vector_count,
+        matching_model_non_empty_vector_count=matching_model_non_empty_vector_count,
+        matching_model_distinct_seed_count=matching_model_distinct_seed_count,
+        matching_model_coverage_rate=matching_model_coverage_rate,
         seed_id_column=seed_id_column,
         vector_column=vector_column,
         embedding_model_column=embedding_model_column,
@@ -706,6 +766,25 @@ def _capability_vector_failure_reason(observation: CapabilityVectorObservation) 
             f"{observation.table_name} 未就绪：embedding 模型信息 "
             f"{model_count}/{observation.total_vector_count}"
         )
+    matching_model_seed_count = (
+        observation.matching_model_distinct_seed_count
+        if observation.matching_model_distinct_seed_count is not None
+        else observation.matching_model_vector_count
+    )
+    if matching_model_seed_count < observation.expected_seed_count:
+        return (
+            f"{observation.table_name} 未就绪：当前默认 embedding 模型 "
+            f"{observation.expected_embedding_model or 'unknown'} 覆盖 "
+            f"{matching_model_seed_count}/{observation.expected_seed_count}，"
+            f"已导入模型 {_embedding_model_distribution_label(observation.embedding_models)}；"
+            "请用当前 CAPABILITY_EMBEDDING_MODEL 重生成 "
+            "Backend/app/interview_presets/capability_vectors.json 并重新导入"
+        )
+    if observation.matching_model_non_empty_vector_count != observation.matching_model_vector_count:
+        return (
+            f"{observation.table_name} 未就绪：当前默认 embedding 模型非空向量 "
+            f"{observation.matching_model_non_empty_vector_count}/{observation.matching_model_vector_count}"
+        )
     if not _all_vector_statuses_ready(observation.status_counts, observation.total_vector_count):
         return f"{observation.table_name} 未就绪：存在非 ready 状态向量"
     return f"{observation.table_name} 未就绪：{observation.detail or 'unknown'}"
@@ -771,6 +850,67 @@ def _count_distinct_values(connection: Connection, table_name: str, column_name:
     )
 
 
+def _count_rows_where_value(
+    connection: Connection,
+    table_name: str,
+    column_name: str,
+    value: str,
+) -> int:
+    table_identifier = _quote_identifier(connection, table_name)
+    column_identifier = _quote_identifier(connection, column_name)
+    return int(
+        connection.execute(
+            text(f"SELECT COUNT(*) FROM {table_identifier} WHERE {column_identifier} = :value"),
+            {"value": value},
+        ).scalar_one()
+    )
+
+
+def _count_non_null_rows_where_value(
+    connection: Connection,
+    table_name: str,
+    value_column_name: str,
+    filter_column_name: str,
+    filter_value: str,
+) -> int:
+    table_identifier = _quote_identifier(connection, table_name)
+    value_column_identifier = _quote_identifier(connection, value_column_name)
+    filter_column_identifier = _quote_identifier(connection, filter_column_name)
+    return int(
+        connection.execute(
+            text(
+                f"SELECT COUNT(*) FROM {table_identifier} "
+                f"WHERE {filter_column_identifier} = :filter_value "
+                f"AND {value_column_identifier} IS NOT NULL"
+            ),
+            {"filter_value": filter_value},
+        ).scalar_one()
+    )
+
+
+def _count_distinct_values_where_value(
+    connection: Connection,
+    table_name: str,
+    distinct_column_name: str,
+    filter_column_name: str,
+    filter_value: str,
+) -> int:
+    table_identifier = _quote_identifier(connection, table_name)
+    distinct_column_identifier = _quote_identifier(connection, distinct_column_name)
+    filter_column_identifier = _quote_identifier(connection, filter_column_name)
+    return int(
+        connection.execute(
+            text(
+                f"SELECT COUNT(DISTINCT {distinct_column_identifier}) "
+                f"FROM {table_identifier} "
+                f"WHERE {filter_column_identifier} = :filter_value "
+                f"AND {distinct_column_identifier} IS NOT NULL"
+            ),
+            {"filter_value": filter_value},
+        ).scalar_one()
+    )
+
+
 def _group_counts(
     connection: Connection,
     table_name: str,
@@ -823,6 +963,15 @@ def _all_vector_statuses_ready(status_counts: list[dict[str, Any]], total_vector
         if str(item.get("status", "")).strip().lower() in READY_VECTOR_STATUSES
     )
     return ready_count == total_vector_count
+
+
+def _embedding_model_distribution_label(embedding_models: list[dict[str, Any]]) -> str:
+    if not embedding_models:
+        return "无"
+    return "、".join(
+        f"{item.get('model', 'unknown')}={int(item.get('count') or 0)}"
+        for item in embedding_models[:5]
+    )
 
 
 def _ratio(value: int, total: int) -> float:

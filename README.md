@@ -134,7 +134,7 @@ cd Backend
 uv run python -m app.cli.safe_migrate
 ```
 
-安全迁移会先使用 `pg_dump` 在项目根目录的 `database_backups/` 下生成迁移前备份，再执行 Alembic 迁移，刷新面试能力卡片向量，并保留最新 5 份备份。
+安全迁移会先使用 `pg_dump` 在项目根目录的 `database_backups/` 下生成迁移前备份，再执行 Alembic 迁移，刷新面试能力卡片向量，然后自动执行一次核心面试业务 readiness 校验，并保留最新 5 份备份。如果 readiness 失败，命令会输出 `failure_summary` 摘要并以非 0 状态退出，中断本次发布。
 
 能力卡片向量的生产推荐流程是离线生成、镜像内导入。生成真实向量的机器需要安装 embedding extra：
 
@@ -145,6 +145,8 @@ uv run python -m app.cli.seed_interview_capability_vectors --export-json app/int
 ```
 
 生产镜像不安装 `sentence-transformers`。`safe_migrate` 会优先导入 `app/interview_presets/capability_vectors.json` 中的真实能力卡片向量；如果离线向量包不存在且当前环境也无法现场生成真实向量，迁移会失败并提示先生成离线包，避免上线后静默降级为纯词面召回。带数据库连接的能力卡片检索如果无法加载 embedding provider，会基于已导入的真实卡片向量做词面锚点扩展召回，不要求生产镜像安装 `sentence-transformers`。
+
+如果切换 `CAPABILITY_EMBEDDING_MODEL`，必须使用同一个模型重新生成 `Backend/app/interview_presets/capability_vectors.json`，并随代码或镜像一起发布。`safe_migrate` 和手动 `--import-json` 都会校验离线包顶层与每条向量的 `embedding_model` 必须等于当前默认模型；不一致会直接失败并提示重生成离线包，不会导入旧模型向量。
 
 也可以手动导入已生成的离线包：
 
@@ -208,7 +210,7 @@ npm run dev
 - `nginx/sakuracianna.icu_bundle.pem`
 - `nginx/sakuracianna.icu.key`
 
-数据库容器使用 `pgvector/pgvector:pg18`，用于支持面试能力卡片的向量召回。后端镜像使用 `python:3.12-slim-bookworm` 和 `pip install -r requirements.txt` 构建，不依赖 `uv` 运行或创建环境，也不安装 `sentence-transformers`。生产环境更新前必须先确保备份可用，并在构建镜像前生成 `Backend/app/interview_presets/capability_vectors.json`，再执行迁移。
+数据库容器使用 `pgvector/pgvector:pg18`，用于支持面试能力卡片的向量召回。后端镜像使用 `python:3.12-slim-bookworm` 和 `pip install -r requirements.txt` 构建，不依赖 `uv` 运行或创建环境，也不安装 `sentence-transformers`。生产环境更新前必须先确保备份可用，并在构建镜像前生成与当前 `CAPABILITY_EMBEDDING_MODEL` 一致的 `Backend/app/interview_presets/capability_vectors.json`，再执行迁移。
 
 Docker 后端容器默认按生产模式启动。如果 `Backend/.env` 没有配置足够长的 `ACCESS_TOKEN_SECRET`，或被其他环境变量覆盖成不安全值，后端会拒绝启动并在日志中提示 `unsafe_production_configuration`。
 
@@ -220,7 +222,7 @@ docker compose --profile migrate run --rm migrate
 docker compose up -d
 ```
 
-若数据库发生变化，生产环境先执行 `docker compose build`，再执行 `docker compose --profile migrate run --rm migrate`。迁移命令会在迁移前备份一次数据库并保留最新 5 份，后端容器正常启动和重启不会自动生成备份。
+若数据库发生变化，生产环境先执行 `docker compose build`，再执行 `docker compose --profile migrate run --rm migrate`。迁移命令会在迁移前备份一次数据库，完成表结构迁移和能力向量导入后自动检查核心面试业务 readiness，失败时会在日志中输出明确摘要并中断；后端容器正常启动和重启不会自动生成备份。
 
 查看状态：
 
@@ -305,9 +307,9 @@ uv run python -m app.cli.interview_quality_observe --limit 200 --min-samples 30
 http://localhost:8000/api/health/interview-core
 ```
 
-如果 `interview_capability_vectors` 不存在、为空、向量覆盖不到全部能力卡片 seed、缺少 embedding 模型信息，或典型能力卡片召回探针失败，`/api/health/readiness` 会返回 `status=degraded`。
+如果 `interview_capability_vectors` 不存在、为空、向量覆盖不到全部能力卡片 seed、缺少 embedding 模型信息、数据库内向量模型和当前默认模型不一致，或典型能力卡片召回探针失败，`/api/health/readiness` 会返回 `status=degraded`。
 
-能力卡片向量召回默认使用 Hugging Face 上的中文 embedding 模型 `BAAI/bge-small-zh-v1.5`。默认会给短 query 加 `CAPABILITY_EMBEDDING_QUERY_INSTRUCTION`，能力卡片文本本身不加指令。如果需要更强的多语或长文本检索能力，可以通过 `CAPABILITY_EMBEDDING_MODEL=BAAI/bge-m3` 切换，并按模型说明决定是否清空 query instruction；同时要先评估本机或服务器的模型下载、内存和推理耗时。`local-hash-v1` 只保留为显式离线基线，不再作为默认 embedding 方案。
+能力卡片向量召回默认使用 Hugging Face 上的中文 embedding 模型 `BAAI/bge-small-zh-v1.5`。默认会给短 query 加 `CAPABILITY_EMBEDDING_QUERY_INSTRUCTION`，能力卡片文本本身不加指令。如果需要更强的多语或长文本检索能力，可以通过 `CAPABILITY_EMBEDDING_MODEL=BAAI/bge-m3` 切换，并按模型说明决定是否清空 query instruction；同时要先评估本机或服务器的模型下载、内存和推理耗时。切换默认模型后必须重新执行 `seed_interview_capability_vectors --export-json app/interview_presets/capability_vectors.json`，否则迁移导入会失败，readiness 会明确退化为当前默认模型向量覆盖不足。`local-hash-v1` 只保留为显式离线基线，不再作为默认 embedding 方案。
 
 首次运行真实 embedding 对比前安装可选依赖：
 
@@ -338,7 +340,7 @@ uv run python -m app.cli.safe_migrate
 uv run python -m app.cli.seed_interview_capability_vectors
 ```
 
-生产 Docker 镜像默认不安装 `sentence-transformers`，迁移阶段如果缺少该可选依赖会跳过向量 seed 并继续完成表结构迁移。需要让 `/api/health/readiness` 的能力卡片向量检查变为 ready 时，应在具备 embedding 依赖和模型下载条件的环境执行 `seed_interview_capability_vectors`。
+生产 Docker 镜像默认不安装 `sentence-transformers`，迁移阶段会优先导入离线 `capability_vectors.json`。如果离线包缺失，或离线包中的 `embedding_model` 与当前 `CAPABILITY_EMBEDDING_MODEL` 不一致，迁移会失败并提示先用当前模型重生成离线包，不会静默跳过向量 seed。需要让 `/api/health/readiness` 的能力卡片向量检查变为 ready 时，应在具备 embedding 依赖和模型下载条件的环境执行 `seed_interview_capability_vectors` 或导入已生成的离线包。
 
 如果需要完全清空服务器业务数据并重建数据库，可以在服务器项目目录执行以下命令。该操作会删除 PostgreSQL、Redis 数据卷和本地备份目录，用户、次数、面试记录和日志都会被清空。
 
@@ -363,6 +365,6 @@ docker builder prune -af
 - 管理员账号需要在后台或数据库中拥有 `admin` 角色，并使用密码 + 邮箱验证码登录后台。
 - 首次上线前执行 `uv run python -m app.cli.safe_migrate`，Docker 环境执行 `docker compose --profile migrate run --rm migrate`。
 - 每次调整面试题库、能力卡片、追问逻辑或回答质量校验后，执行 `uv run python -m app.cli.interview_quality_gate`，确保离线质量门禁通过。
-- 数据库迁移后确认日志里出现 `interview capability vectors seeded`，否则说明 pgvector 表或扩展没有准备好。
+- 数据库迁移后确认日志里出现 `interview capability vectors imported from offline export` 或 `interview capability vectors seeded`，否则说明离线包、模型配置、pgvector 表或扩展没有准备好。
 - 上线后定期执行 `uv run python -m app.cli.interview_quality_observe --limit 200 --min-samples 30`，用真实记录观察错问风险率和流程错误风险率。
-- 上线前确认 `/api/health/readiness` 中 `checks.interview_core.ready=true`，并检查能力卡片 seed 数量、向量覆盖率、embedding 模型分布和召回探针结果。
+- `safe_migrate` 会在发布迁移阶段自动校验核心面试 readiness；上线前仍建议确认 `/api/health/readiness` 中 `checks.interview_core.ready=true`，并检查能力卡片 seed 数量、向量覆盖率、embedding 模型分布和召回探针结果。

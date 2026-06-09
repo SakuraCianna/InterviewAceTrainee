@@ -3,7 +3,7 @@ import unittest
 from sqlalchemy import Column, MetaData, String, Table, Text, create_engine
 
 from app.schemas.interviews import InterviewType
-from app.services.interview_capability_retrieval import capability_card_inventory
+from app.services.interview_capability_retrieval import DEFAULT_EMBEDDING_MODEL, capability_card_inventory
 from app.services.interview_quality_observer import (
     CAPABILITY_VECTOR_TABLE,
     CapabilityVectorObservation,
@@ -184,14 +184,14 @@ class InterviewQualityObserverTests(unittest.TestCase):
                     {
                         "id": "vector-1",
                         "preset_id": "backend-python-engineer",
-                        "embedding_model": "text-embedding-v1",
+                        "embedding_model": DEFAULT_EMBEDDING_MODEL,
                         "embedding_vector": "[0.1, 0.2]",
                         "status": "ready",
                     },
                     {
                         "id": "vector-2",
                         "preset_id": "computer-science",
-                        "embedding_model": "text-embedding-v1",
+                        "embedding_model": DEFAULT_EMBEDDING_MODEL,
                         "embedding_vector": "[0.2, 0.3]",
                         "status": "ready",
                     },
@@ -205,7 +205,53 @@ class InterviewQualityObserverTests(unittest.TestCase):
         self.assertEqual(observation.non_empty_vector_count, 2)
         self.assertEqual(observation.distinct_seed_count, 2)
         self.assertEqual(observation.coverage_rate, 1.0)
-        self.assertEqual(observation.embedding_models, [{"model": "text-embedding-v1", "count": 2}])
+        self.assertEqual(observation.expected_embedding_model, DEFAULT_EMBEDDING_MODEL)
+        self.assertEqual(observation.matching_model_distinct_seed_count, 2)
+        self.assertEqual(observation.matching_model_coverage_rate, 1.0)
+        self.assertEqual(observation.embedding_models, [{"model": DEFAULT_EMBEDDING_MODEL, "count": 2}])
+
+    def test_capability_vector_observation_degrades_when_default_model_is_not_seeded(self) -> None:
+        engine = create_engine("sqlite+pysqlite:///:memory:")
+        metadata = MetaData()
+        vector_table = Table(
+            CAPABILITY_VECTOR_TABLE,
+            metadata,
+            Column("id", String, primary_key=True),
+            Column("preset_id", String, nullable=False),
+            Column("embedding_model", String, nullable=False),
+            Column("embedding_vector", Text, nullable=False),
+            Column("status", String, nullable=False),
+        )
+        metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(
+                vector_table.insert(),
+                [
+                    {
+                        "id": "vector-1",
+                        "preset_id": "backend-python-engineer",
+                        "embedding_model": "old-embedding-model",
+                        "embedding_vector": "[0.1, 0.2]",
+                        "status": "ready",
+                    },
+                    {
+                        "id": "vector-2",
+                        "preset_id": "computer-science",
+                        "embedding_model": "old-embedding-model",
+                        "embedding_vector": "[0.2, 0.3]",
+                        "status": "ready",
+                    },
+                ],
+            )
+            observation = inspect_capability_vectors(connection, expected_seed_count=2)
+
+        self.assertFalse(observation.ready, observation.to_dict())
+        self.assertEqual(observation.expected_embedding_model, DEFAULT_EMBEDDING_MODEL)
+        self.assertEqual(observation.matching_model_vector_count, 0)
+        reason = _capability_vector_failure_reason(observation)
+        self.assertIn("当前默认 embedding 模型", reason)
+        self.assertIn("old-embedding-model=2", reason)
+        self.assertIn("capability_vectors.json", reason)
 
     def test_core_readiness_keeps_vector_table_gap_visible(self) -> None:
         engine = create_engine("sqlite+pysqlite:///:memory:")

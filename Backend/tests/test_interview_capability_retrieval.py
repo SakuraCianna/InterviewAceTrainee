@@ -218,12 +218,57 @@ class InterviewCapabilityRetrievalTests(unittest.TestCase):
             connection = _RecordingConnection()
 
             with patch("app.services.interview_capability_retrieval.capability_vector_table_ready", return_value=True):
-                imported_count = import_capability_vector_store_from_export(connection, export_path)
+                imported_count = import_capability_vector_store_from_export(
+                    connection,
+                    export_path,
+                    expected_embedding_model="test-keyword-embedding",
+                )
 
         self.assertEqual(imported_count, len(load_capability_cards()))
         self.assertEqual(len(connection.parameters), imported_count)
         self.assertEqual(connection.parameters[0]["embedding_model"], "test-keyword-embedding")
         self.assertTrue(connection.parameters[0]["embedding"].startswith("["))
+
+    def test_offline_vector_export_fails_when_model_differs_from_current_default(self) -> None:
+        payload = build_capability_vector_export(KeywordEmbeddingProvider(), batch_size=3)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "capability_vectors.json"
+            export_path.write_text(json_dumps(payload), encoding="utf-8")
+            connection = _RecordingConnection()
+
+            with (
+                patch("app.services.interview_capability_retrieval.capability_vector_table_ready", return_value=True),
+                self.assertRaisesRegex(RuntimeError, "embedding model mismatch"),
+            ):
+                import_capability_vector_store_from_export(
+                    connection,
+                    export_path,
+                    expected_embedding_model=DEFAULT_EMBEDDING_MODEL,
+                )
+
+        self.assertEqual(connection.parameters, [])
+
+    def test_offline_vector_export_fails_when_rows_mix_embedding_models(self) -> None:
+        payload = build_capability_vector_export(KeywordEmbeddingProvider(), batch_size=3)
+        payload["vectors"][0]["embedding_model"] = "another-embedding-model"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "capability_vectors.json"
+            export_path.write_text(json_dumps(payload), encoding="utf-8")
+            connection = _RecordingConnection()
+
+            with (
+                patch("app.services.interview_capability_retrieval.capability_vector_table_ready", return_value=True),
+                self.assertRaisesRegex(RuntimeError, "mixed embedding models"),
+            ):
+                import_capability_vector_store_from_export(
+                    connection,
+                    export_path,
+                    expected_embedding_model="test-keyword-embedding",
+                )
+
+        self.assertEqual(connection.parameters, [])
 
 
 def _keyword_vector(text: str) -> list[float]:

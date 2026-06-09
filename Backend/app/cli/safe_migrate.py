@@ -19,6 +19,7 @@ from app.services.interview_capability_retrieval import (
     import_capability_vector_store_from_export,
     seed_capability_vector_store,
 )
+from app.services.interview_quality_observer import observe_interview_core_readiness
 
 BACKUP_DIR_NAME = "database_backups"
 BACKUP_KEEP_COUNT = 5
@@ -64,6 +65,7 @@ def run_safe_migration(database_url: str, project_root: Path, backend_dir: Path)
 
     run_alembic_upgrade(backend_dir)
     seed_interview_capability_vectors(database_url)
+    verify_interview_core_readiness(database_url)
     prune_old_backups(backup_root, keep_count=BACKUP_KEEP_COUNT)
     return backup_path
 
@@ -251,9 +253,26 @@ def seed_interview_capability_vectors(database_url: str) -> None:
             raise RuntimeError(
                 "offline capability vector export is missing and sentence-transformers is not installed; "
                 "run `uv sync --extra embeddings` then `uv run python -m app.cli.seed_interview_capability_vectors "
-                "--export-json app/interview_presets/capability_vectors.json` before production migration"
+                "--export-json app/interview_presets/capability_vectors.json` with the current "
+                "CAPABILITY_EMBEDDING_MODEL before production migration"
             ) from exc
         raise RuntimeError(f"interview capability vector seed failed: {exc}") from exc
+    finally:
+        engine.dispose()
+
+
+def verify_interview_core_readiness(database_url: str) -> None:
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        try:
+            with engine.connect() as connection:
+                report = observe_interview_core_readiness(connection)
+        except SQLAlchemyError as exc:
+            report = observe_interview_core_readiness(connection=None, database_error=str(exc))
+
+        if not report.ready:
+            raise RuntimeError(f"interview core readiness check failed: {report.failure_summary}")
+        print("interview core readiness check passed")
     finally:
         engine.dispose()
 
