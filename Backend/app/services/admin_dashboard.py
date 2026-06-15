@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+from threading import RLock
+from time import monotonic
 
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
@@ -25,6 +27,9 @@ REFUND_STATUS_LABELS = {
     "resolved": "已解决",
     "rejected": "已驳回",
 }
+_ADMIN_DASHBOARD_STATS_CACHE_SECONDS = 10.0
+_admin_dashboard_stats_cache: tuple[AdminDashboardStatsResponse, float] | None = None
+_admin_dashboard_stats_cache_lock = RLock()
 
 
 def utc_now() -> datetime:
@@ -152,6 +157,25 @@ def build_admin_dashboard_stats(db_session: Session | None) -> AdminDashboardSta
     if db_session is None:
         return empty_dashboard_stats(database_ready=False)
 
+    global _admin_dashboard_stats_cache
+    now = monotonic()
+    with _admin_dashboard_stats_cache_lock:
+        if _admin_dashboard_stats_cache is not None and _admin_dashboard_stats_cache[1] > now:
+            return _admin_dashboard_stats_cache[0].model_copy(deep=True)
+
+    payload = _build_admin_dashboard_stats_uncached(db_session)
+    with _admin_dashboard_stats_cache_lock:
+        _admin_dashboard_stats_cache = (payload.model_copy(deep=True), monotonic() + _ADMIN_DASHBOARD_STATS_CACHE_SECONDS)
+    return payload.model_copy(deep=True)
+
+
+def clear_admin_dashboard_stats_cache() -> None:
+    global _admin_dashboard_stats_cache
+    with _admin_dashboard_stats_cache_lock:
+        _admin_dashboard_stats_cache = None
+
+
+def _build_admin_dashboard_stats_uncached(db_session: Session) -> AdminDashboardStatsResponse:
     labels = recent_day_labels()
     today_start = datetime.combine(utc_now().date(), datetime.min.time())
     total_users = count_scalar(db_session, select(func.count()).select_from(User))

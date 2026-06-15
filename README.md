@@ -2,6 +2,10 @@
 
 面霸练习生是一个面向真实面试场景的 AI 语音模拟训练平台，覆盖工作面试、研究生复试、考公面试和雅思口语四类训练。产品以语音对话为核心，用户按场景进入训练，AI 负责开场提问、继续追问、生成复盘报告，管理员负责用户管理、次数发放、AI 服务状态检查和审计追溯。
 
+## 线上访问
+
+- 官网：https://sakuracianna.icu/
+
 ## 核心功能
 
 - 四类训练模块：工作面试、研究生复试、考公面试、雅思口语。
@@ -254,6 +258,8 @@ Docker 部署默认启用以下单机容量保护：
 - 数据库连接池通过 `DATABASE_POOL_SIZE`、`DATABASE_MAX_OVERFLOW`、`DATABASE_POOL_TIMEOUT_SECONDS`、`DATABASE_POOL_RECYCLE_SECONDS` 控制。
 - LLM 追问通过 Redis 全局容量闸门限制，达到 `LLM_CONCURRENCY_LIMIT` 后退回预设下一题，避免请求长时间阻塞。
 - 实时 ASR 通过 Redis 全局容量闸门限制，达到 `REALTIME_ASR_CONCURRENCY_LIMIT` 后返回“语音训练席位繁忙”。
+- `/api/health/readiness` 和 `/api/health/interview-core` 会对数据库表检查和核心面试观测使用 5 秒进程内缓存，降低健康探测重复触发聚合检查和向量表统计的压力。
+- 管理后台 `/api/admin/stats` 会对聚合统计使用 10 秒进程内缓存，减少管理员反复刷新时的多表聚合查询压力；用户、次数、面试记录等写操作本身不走该缓存，统计读数最多会有 10 秒滞后。
 - Docker 日志已配置 `json-file` 轮转，默认单文件 100MB，保留 3 份。
 
 ## 面试题库与音色

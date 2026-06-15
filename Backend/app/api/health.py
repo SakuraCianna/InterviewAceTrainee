@@ -1,3 +1,8 @@
+from collections.abc import Callable
+from copy import deepcopy
+from threading import RLock
+from time import monotonic
+
 from fastapi import APIRouter
 from sqlalchemy import inspect
 from sqlalchemy.exc import SQLAlchemyError
@@ -26,6 +31,9 @@ REQUIRED_TABLES = (
     "admin_audit_logs",
     "system_configs",
 )
+_HEALTH_CHECK_CACHE_SECONDS = 5.0
+_health_check_cache: dict[str, tuple[dict[str, object], float]] = {}
+_health_check_cache_lock = RLock()
 
 
 @router.get("")
@@ -57,6 +65,10 @@ def read_interview_core_readiness() -> dict[str, object]:
 
 
 def check_database() -> dict[str, object]:
+    return _cached_health_check("database", _run_database_check)
+
+
+def _run_database_check() -> dict[str, object]:
     try:
         inspector = inspect(engine)
         missing_tables = [table for table in REQUIRED_TABLES if not inspector.has_table(table)]
@@ -114,8 +126,30 @@ def check_auth(settings) -> dict[str, object]:
 
 
 def check_interview_core() -> dict[str, object]:
+    return _cached_health_check("interview_core", _run_interview_core_check)
+
+
+def _run_interview_core_check() -> dict[str, object]:
     try:
         with engine.connect() as connection:
             return observe_interview_core_readiness(connection).to_dict()
     except SQLAlchemyError as exc:
         return observe_interview_core_readiness(database_error=str(exc)).to_dict()
+
+
+def _cached_health_check(cache_key: str, builder: Callable[[], dict[str, object]]) -> dict[str, object]:
+    now = monotonic()
+    with _health_check_cache_lock:
+        cached = _health_check_cache.get(cache_key)
+        if cached is not None and cached[1] > now:
+            return deepcopy(cached[0])
+
+    payload = builder()
+    with _health_check_cache_lock:
+        _health_check_cache[cache_key] = (deepcopy(payload), monotonic() + _HEALTH_CHECK_CACHE_SECONDS)
+    return deepcopy(payload)
+
+
+def clear_health_check_cache() -> None:
+    with _health_check_cache_lock:
+        _health_check_cache.clear()

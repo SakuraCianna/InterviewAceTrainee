@@ -75,6 +75,39 @@ const adminSectionNavItems: { key: AdminSectionKey; label: string; icon: string 
   { key: "audit", label: "审计", icon: "lucide:shield-check" },
 ];
 
+const adminSectionMeta: Record<AdminSectionKey, { title: string; description: string; icon: string }> = {
+  overview: {
+    title: "运营控制台",
+    description: "集中查看用户、训练、报告、面试核心和服务稳定性。",
+    icon: "lucide:layout-dashboard",
+  },
+  credits: {
+    title: "次数与体验券",
+    description: "处理人工开通、补偿、体验券发放和售后追溯。",
+    icon: "lucide:badge-dollar-sign",
+  },
+  users: {
+    title: "用户运营",
+    description: "检索用户、复核训练记录、处理客服备注和退款纠纷。",
+    icon: "lucide:user-round-search",
+  },
+  ai: {
+    title: "AI 服务",
+    description: "检查模型路由、供应商状态和最近的模型调用质量。",
+    icon: "lucide:bot-message-square",
+  },
+  system: {
+    title: "系统参数",
+    description: "维护后台可配置项，保存后会进入审计日志。",
+    icon: "lucide:sliders-horizontal",
+  },
+  audit: {
+    title: "审计与风控",
+    description: "追踪管理员操作、登录、退款、内容安全和调用异常。",
+    icon: "lucide:shield-check",
+  },
+};
+
 const creditReasonOptions = [
   { value: "manual_grant", label: "人工开通", help: "用户购买或人工确认后增加次数。" },
   { value: "trial_bonus", label: "试用赠送", help: "新用户、活动或人工试用赠送。" },
@@ -83,6 +116,87 @@ const creditReasonOptions = [
   { value: "manual_correction", label: "余额修正", help: "管理员核对账本后修正异常余额。" },
   { value: "manual_deduction", label: "人工扣减", help: "误发、滥用或人工确认后扣减次数。" },
 ];
+
+const voucherReasonOptions = [
+  { value: "manual_voucher_grant", label: "人工发放体验券", help: "用于内测、客服补偿或人工确认后的体验券发放。" },
+  { value: "launch_bonus", label: "上线活动赠送", help: "用于首批内测、上线活动或推广批次。" },
+  { value: "service_compensation", label: "服务补偿", help: "因服务异常、沟通承诺或售后处理补发体验券。" },
+  { value: "beta_user_reward", label: "内测用户奖励", help: "感谢内测用户反馈或配合验证。" },
+];
+
+const noteCategoryOptions = [
+  { value: "general", label: "常规备注" },
+  { value: "refund_request", label: "退款沟通" },
+  { value: "service_dispute", label: "服务争议" },
+  { value: "service_compensation", label: "补偿记录" },
+];
+
+const refundReasonOptions = [
+  { value: "refund_request", label: "退款申请" },
+  { value: "service_dispute", label: "服务争议" },
+  { value: "service_compensation", label: "服务补偿" },
+  { value: "manual_correction", label: "人工修正" },
+];
+
+const businessCodeLabels: Record<string, string> = {
+  manual_grant: "人工开通",
+  trial_bonus: "试用赠送",
+  service_compensation: "服务补偿",
+  refund_adjustment: "退款退回",
+  manual_correction: "余额修正",
+  manual_deduction: "人工扣减",
+  manual_adjustment: "人工调整",
+  admin_manual_adjustment: "管理员人工调整",
+  manual_voucher_grant: "人工发放体验券",
+  launch_bonus: "上线活动赠送",
+  beta_user_reward: "内测用户奖励",
+  refund_request: "退款申请",
+  service_dispute: "服务争议",
+  general: "常规备注",
+  processing: "处理中",
+  resolved: "已解决",
+  rejected: "已驳回",
+  open: "待处理",
+  allowed: "已放行",
+  blocked: "已拦截",
+  high: "高风险",
+  medium: "中风险",
+  low: "低风险",
+  password: "密码登录",
+  email_code: "邮箱验证码",
+  admin: "管理员",
+  user: "普通用户",
+  completed: "已完成",
+  created: "已创建",
+  in_progress: "进行中",
+  failed: "失败",
+  canceled: "已取消",
+  credit_adjust: "次数调整",
+  voucher_issue: "体验券发放",
+  user_status_update: "用户状态变更",
+  user_role_update: "用户角色变更",
+  customer_service_note_create: "客服备注创建",
+  refund_case_create: "退款纠纷创建",
+  refund_case_update: "退款纠纷更新",
+  system_config_update: "系统参数更新",
+  provider_config_update: "供应商配置更新",
+  user_credit: "用户次数",
+  interview_voucher: "体验券",
+  customer_service_note: "客服备注",
+  refund_case: "退款纠纷",
+  system_config: "系统参数",
+  provider_config: "供应商配置",
+  llm: "大模型",
+  asr: "语音识别",
+  tts: "语音合成",
+  embedding: "向量模型",
+  chat: "对话生成",
+  report: "报告生成",
+  feedback: "面试反馈",
+  interview_question: "面试提问",
+  interview_feedback: "面试反馈",
+  report_generation: "报告生成",
+};
 
 function adminSectionFromHash(hash: string): AdminSectionKey | null {
   const key = hash.replace(/^#admin-/, "") as AdminSectionKey;
@@ -223,7 +337,28 @@ export function AdminShell() {
     return interviewTypeLabels[value] ?? value;
   }
 
+  function businessLabel(value?: string | null) {
+    if (!value) {
+      return "未记录";
+    }
+    return businessCodeLabels[value] ?? value;
+  }
+
+  function formatLedgerReason(entry: CreditLedgerEntry) {
+    const parts = [businessLabel(entry.reason), `余额 ${entry.balance_after}`];
+    if (entry.note) {
+      parts.push(businessLabel(entry.note));
+    }
+    return parts.join(" · ");
+  }
+
   const selectedCreditReason = creditReasonOptions.find((option) => option.value === creditReason) ?? creditReasonOptions[0];
+  const selectedVoucherReason = voucherReasonOptions.find((option) => option.value === voucherReason) ?? voucherReasonOptions[0];
+  const activeSectionMeta = adminSectionMeta[activeAdminSection];
+  const databaseStatusClass = dashboardStats?.database_ready ? "is-ready" : "is-muted";
+  const databaseStatusLabel = !dashboardStats ? "数据待同步" : dashboardStats.database_ready ? "数据库在线" : "等待数据库迁移";
+  const coreStatusBadgeClass = !interviewCoreHealth ? "is-muted" : interviewCoreHealth.ready ? "is-ready" : "is-danger";
+  const coreStatusBadgeLabel = !interviewCoreHealth ? "核心待检查" : interviewCoreHealth.ready ? "核心正常" : "核心退化";
 
   const consoleLayoutRef = useRef<HTMLDivElement | null>(null);
 
@@ -804,12 +939,38 @@ export function AdminShell() {
         onLogout={() => void logout()}
       />
       <div className="admin-console-layout" ref={consoleLayoutRef}>
+        <header className="admin-console-topbar">
+          <div className="admin-console-title">
+            <span className="admin-console-title-icon">
+              <AppIcon icon={activeSectionMeta.icon} size={24} />
+            </span>
+            <div>
+              <p>管理员工作台</p>
+              <h1>{activeSectionMeta.title}</h1>
+              <span>{activeSectionMeta.description}</span>
+            </div>
+          </div>
+          <div className="admin-console-commandbar">
+            <span className={`admin-console-status ${databaseStatusClass}`}>
+              <AppIcon icon={dashboardStats?.database_ready ? "lucide:database-zap" : "lucide:database"} size={17} />
+              {databaseStatusLabel}
+            </span>
+            <span className={`admin-console-status ${coreStatusBadgeClass}`}>
+              <AppIcon icon={interviewCoreHealth?.ready ? "lucide:shield-check" : "lucide:shield-alert"} size={17} />
+              {coreStatusBadgeLabel}
+            </span>
+            <button type="button" onClick={() => void refreshAdminData()}>
+              <AppIcon icon="lucide:refresh-cw" size={18} />
+              刷新
+            </button>
+          </div>
+        </header>
         <section className="admin-console-main">
           {dashboardStats && dashboardChartOptions && (
             <section className="admin-dashboard admin-section-view admin-section-view--overview" id="admin-overview">
               <div className="admin-section-heading admin-dashboard-heading">
                 <div>
-                  <span className="eyebrow">Data Dashboard</span>
+                  <span className="eyebrow">数据看板</span>
                   <h2>运营数据看板</h2>
                   <p>聚合数据库里的用户、训练、报告、登录、AI 调用和售后纠纷数据，用来判断推广效果和服务稳定性。</p>
                 </div>
@@ -875,9 +1036,9 @@ export function AdminShell() {
                           </em>
                         </div>
                         <strong>{formatCoreCount(interviewCoreHealth.capability_cards.total_seed_count)}</strong>
-                        <p>
-                          {interviewCoreHealth.capability_cards.source_version ? `版本 ${interviewCoreHealth.capability_cards.source_version}` : "未记录版本"}
-                          {interviewCoreHealth.capability_cards.source_policy ? ` · ${interviewCoreHealth.capability_cards.source_policy}` : ""}
+                        <p className="admin-core-source">
+                          <span>{interviewCoreHealth.capability_cards.source_version ? `版本 ${interviewCoreHealth.capability_cards.source_version}` : "未记录版本"}</span>
+                          {interviewCoreHealth.capability_cards.source_policy && <span>{interviewCoreHealth.capability_cards.source_policy}</span>}
                         </p>
                         <div className="admin-core-breakdown">
                           {Object.entries(interviewCoreHealth.capability_cards.counts_by_interview_type).map(([type, count]) => {
@@ -1038,7 +1199,7 @@ export function AdminShell() {
 
                   <section className="admin-top-users">
                     <div>
-                      <span className="eyebrow">User Usage</span>
+                      <span className="eyebrow">用户排行</span>
                       <h3>用户使用情况排行</h3>
                     </div>
                     {dashboardStats.top_users.length === 0 ? (
@@ -1096,7 +1257,7 @@ export function AdminShell() {
                 {creditLedger.slice(0, 4).map((entry) => (
                   <div className="admin-ledger-item" key={entry.id}>
                     <strong>{entry.change_amount > 0 ? `+${entry.change_amount}` : entry.change_amount}</strong>
-                    <span>{entry.reason} · 余额 {entry.balance_after}{entry.note ? ` · ${entry.note}` : ""}</span>
+                    <span>{formatLedgerReason(entry)}</span>
                   </div>
                 ))}
               </div>
@@ -1127,8 +1288,12 @@ export function AdminShell() {
               </label>
               <label>
                 发放原因
-                <input value={voucherReason} onChange={(event) => setVoucherReason(event.target.value)} placeholder="manual_voucher_grant / launch_bonus" required maxLength={120} />
-                <small className="admin-field-help">体验券优先抵扣下一场模拟面试，不改变用户的训练次数余额。</small>
+                <select value={voucherReason} onChange={(event) => setVoucherReason(event.target.value)} required>
+                  {voucherReasonOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <small className="admin-field-help">{selectedVoucherReason.help} 体验券优先抵扣下一场模拟面试，不改变用户的训练次数余额。</small>
               </label>
               <label>
                 处理备注
@@ -1166,7 +1331,7 @@ export function AdminShell() {
 
           <section className="admin-provider-table admin-user-table admin-section-view admin-section-view--users" id="admin-users">
             <div className="admin-section-heading">
-              <span className="eyebrow">User Operations</span>
+              <span className="eyebrow">用户运营</span>
               <h2>用户检索与训练追踪</h2>
             </div>
             <form className="admin-search-form" onSubmit={searchUsers}>
@@ -1196,7 +1361,7 @@ export function AdminShell() {
                     >
                       <span>
                         <strong>{user.email}</strong>
-                        <em>{user.role} / {user.is_active ? "启用中" : "已禁用"} / 余额 {user.credit_balance} 次</em>
+                        <em>{businessLabel(user.role)} / {user.is_active ? "启用中" : "已禁用"} / 余额 {user.credit_balance} 次</em>
                       </span>
                       <b>{user.completed_interviews}/{user.total_interviews}</b>
                     </button>
@@ -1230,8 +1395,8 @@ export function AdminShell() {
                   selectedUserHistory.slice(0, 8).map((item) => (
                     <article className={selectedReport?.session_id === item.session_id ? "is-active-report" : ""} key={item.session_id}>
                       <div>
-                        <strong>{item.interview_type}</strong>
-                        <span>{item.status} / {item.current_step_index + 1}-{item.total_steps}</span>
+                        <strong>{interviewTypeLabel(item.interview_type)}</strong>
+                        <span>{businessLabel(item.status)} / 第 {item.current_step_index + 1} 步，共 {item.total_steps} 步</span>
                       </div>
                       <em>{item.report_total_score ?? "未出分"}</em>
                       <small>{new Date(item.created_at).toLocaleString("zh-CN")}</small>
@@ -1252,8 +1417,8 @@ export function AdminShell() {
               <div className="admin-report-detail">
                 <div className="admin-report-detail-head">
                   <div>
-                    <span className="eyebrow">Report Review</span>
-                    <h3>{selectedReport ? `${selectedReport.user_email} · ${selectedReport.interview_type}` : "报告复核"}</h3>
+                    <span className="eyebrow">报告复核</span>
+                    <h3>{selectedReport ? `${selectedReport.user_email} · ${interviewTypeLabel(selectedReport.interview_type)}` : "报告复核"}</h3>
                   </div>
                   {selectedReport && <strong>{selectedReport.total_score}</strong>}
                 </div>
@@ -1329,13 +1494,17 @@ export function AdminShell() {
                   <div className="admin-ops-card-head">
                     <AppIcon icon="lucide:notebook-pen" size={22} />
                     <div>
-                      <span className="eyebrow">Service Notes</span>
+                      <span className="eyebrow">客服备注</span>
                       <h3>客服备注</h3>
                     </div>
                   </div>
                   <label>
                     备注类型
-                    <input value={noteCategory} onChange={(event) => setNoteCategory(event.target.value)} placeholder="general / refund / complaint" />
+                    <select value={noteCategory} onChange={(event) => setNoteCategory(event.target.value)}>
+                      {noteCategoryOptions.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
                   </label>
                   <label>
                     关联训练 ID
@@ -1355,7 +1524,7 @@ export function AdminShell() {
                     {customerServiceNotes.length === 0 && <p className="admin-empty-text">暂无客服备注。</p>}
                     {customerServiceNotes.slice(0, 5).map((note) => (
                       <article key={note.id}>
-                        <strong>{note.category}</strong>
+                        <strong>{businessLabel(note.category)}</strong>
                         <p>{note.content}</p>
                         <span>{note.admin_email} · {formatDateTime(note.created_at)}{note.related_session_id ? ` · ${note.related_session_id}` : ""}</span>
                       </article>
@@ -1367,14 +1536,18 @@ export function AdminShell() {
                   <div className="admin-ops-card-head">
                     <AppIcon icon="lucide:receipt-text" size={22} />
                     <div>
-                      <span className="eyebrow">Refund Cases</span>
+                      <span className="eyebrow">退款纠纷</span>
                       <h3>退款纠纷</h3>
                     </div>
                   </div>
                   <div className="admin-form-grid">
                     <label>
                       原因
-                      <input value={refundReason} onChange={(event) => setRefundReason(event.target.value)} placeholder="refund_request / service_dispute" />
+                      <select value={refundReason} onChange={(event) => setRefundReason(event.target.value)}>
+                        {refundReasonOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
                     </label>
                     <label>
                       退款金额
@@ -1404,8 +1577,8 @@ export function AdminShell() {
                     {refundCases.slice(0, 5).map((refundCase) => (
                       <article key={refundCase.id}>
                         <div className="admin-note-row">
-                          <strong>{refundCase.reason}</strong>
-                          <em>{refundCase.status}</em>
+                          <strong>{businessLabel(refundCase.reason)}</strong>
+                          <em>{businessLabel(refundCase.status)}</em>
                         </div>
                         <p>{refundCase.description}</p>
                         <span>
@@ -1428,7 +1601,7 @@ export function AdminShell() {
 
           <section className="admin-provider-table admin-section-view admin-section-view--ai" id="admin-ai">
             <div className="admin-section-heading">
-              <span className="eyebrow">Model Router</span>
+              <span className="eyebrow">模型路由</span>
               <h2>AI 服务状态</h2>
             </div>
             <div className="admin-provider-list">
@@ -1438,7 +1611,7 @@ export function AdminShell() {
                     <strong>{provider.id}</strong>
                     <span>{provider.provider_name} / {provider.model_name}</span>
                   </div>
-                  <em>{provider.provider_type} · {provider.purpose} · {provider.region} · priority {provider.priority}</em>
+                  <em>{businessLabel(provider.provider_type)} · {businessLabel(provider.purpose)} · {provider.region} · 优先级 {provider.priority}</em>
                   <div className="provider-row-actions">
                     <button type="button" onClick={() => void testProvider(provider)}>
                       测试
@@ -1455,7 +1628,7 @@ export function AdminShell() {
 
           <section className="admin-provider-table admin-section-view admin-section-view--system" id="admin-system">
             <div className="admin-section-heading">
-              <span className="eyebrow">System Config</span>
+              <span className="eyebrow">系统参数</span>
               <h2>系统参数</h2>
             </div>
             <div className="admin-config-list">
@@ -1489,7 +1662,7 @@ export function AdminShell() {
 
           <section className="admin-provider-table admin-audit-table admin-section-view admin-section-view--audit" id="admin-audit">
             <div className="admin-section-heading">
-              <span className="eyebrow">Audit Trail</span>
+              <span className="eyebrow">操作审计</span>
               <h2>操作审计日志</h2>
             </div>
             <div className="admin-provider-list">
@@ -1497,8 +1670,8 @@ export function AdminShell() {
               {auditLogs.slice(0, 12).map((entry) => (
                 <article className="provider-row" key={entry.id}>
                   <div>
-                    <strong>{entry.action}</strong>
-                    <span>{entry.admin_email} · {entry.target_type}</span>
+                    <strong>{businessLabel(entry.action)}</strong>
+                    <span>{entry.admin_email} · {businessLabel(entry.target_type)}</span>
                   </div>
                   <em>{entry.target_id}</em>
                   <span>{entry.created_at}</span>
@@ -1509,7 +1682,7 @@ export function AdminShell() {
 
           <section className="admin-provider-table admin-audit-table admin-section-view admin-section-view--audit">
             <div className="admin-section-heading">
-              <span className="eyebrow">Account Trace</span>
+              <span className="eyebrow">账户追踪</span>
               <h2>{selectedUserEmail ? `${selectedUserEmail} 的认证与售后记录` : "最近认证与售后记录"}</h2>
             </div>
             <div className="admin-trace-grid">
@@ -1520,7 +1693,7 @@ export function AdminShell() {
                   <article key={entry.id}>
                     <div>
                       <strong>{entry.email}</strong>
-                      <span>{entry.auth_method} · {entry.role} · {entry.ip_address ?? "unknown-ip"}</span>
+                      <span>{businessLabel(entry.auth_method)} · {businessLabel(entry.role)} · {entry.ip_address ?? "未知 IP"}</span>
                     </div>
                     <em className={entry.success ? "is-success" : "is-failed"}>
                       {entry.success ? "成功" : getApiErrorMessage({ detail: entry.failure_reason ?? undefined }, "失败")}
@@ -1536,9 +1709,9 @@ export function AdminShell() {
                   <article key={entry.id}>
                     <div>
                       <strong>{entry.user_email}</strong>
-                      <span>{entry.reason} · {formatCents(entry.amount_cents, entry.currency)}</span>
+                      <span>{businessLabel(entry.reason)} · {formatCents(entry.amount_cents, entry.currency)}</span>
                     </div>
-                    <em className={entry.status === "resolved" ? "is-success" : "is-failed"}>{entry.status}</em>
+                    <em className={entry.status === "resolved" ? "is-success" : "is-failed"}>{businessLabel(entry.status)}</em>
                     <small>{formatDateTime(entry.updated_at)}</small>
                   </article>
                 ))}
@@ -1548,7 +1721,7 @@ export function AdminShell() {
 
           <section className="admin-provider-table admin-audit-table admin-section-view admin-section-view--audit">
             <div className="admin-section-heading">
-              <span className="eyebrow">Content Safety</span>
+              <span className="eyebrow">内容安全</span>
               <h2>内容安全拦截记录</h2>
             </div>
             <div className="admin-provider-list">
@@ -1556,15 +1729,15 @@ export function AdminShell() {
               {contentSafetyLogs.slice(0, 12).map((entry) => (
                 <article className="provider-row" key={entry.id}>
                   <div>
-                    <strong>{entry.user_email ?? "unknown-user"} / {entry.source}</strong>
+                    <strong>{entry.user_email ?? "未知用户"} / {entry.source}</strong>
                     <span>
-                      {entry.session_id ?? "no-session"} · {entry.categories.join(" / ")}
+                      {entry.session_id ?? "无会话"} · {entry.categories.map((item) => businessLabel(item)).join(" / ")}
                       {entry.matched_terms.length > 0 ? ` · 命中 ${entry.matched_terms.slice(0, 3).join(" / ")}` : ""}
                     </span>
                     {entry.content_excerpt && <span>{entry.content_excerpt}</span>}
                   </div>
                   <em className={entry.risk_level === "high" ? "is-failed" : "is-warning"}>
-                    {entry.action} / {entry.risk_level}
+                    {businessLabel(entry.action)} / {businessLabel(entry.risk_level)}
                   </em>
                   <span>{formatDateTime(entry.created_at)}</span>
                 </article>
@@ -1574,7 +1747,7 @@ export function AdminShell() {
 
           <section className="admin-provider-table admin-audit-table admin-section-view admin-section-view--ai">
             <div className="admin-section-heading">
-              <span className="eyebrow">AI Call Logs</span>
+              <span className="eyebrow">模型调用</span>
               <h2>模型调用记录</h2>
             </div>
             <div className="admin-provider-list">
@@ -1584,7 +1757,7 @@ export function AdminShell() {
                   <div>
                     <strong>{entry.provider_name} / {entry.model_name}</strong>
                     <span>
-                      {entry.session_id ?? "no-session"} · {entry.purpose}
+                      {entry.session_id ?? "无会话"} · {businessLabel(entry.purpose)}
                       {entry.provider_request_id ? ` · ${entry.provider_request_id}` : ""}
                     </span>
                   </div>
@@ -1592,12 +1765,12 @@ export function AdminShell() {
                     {entry.success ? "成功" : getApiErrorMessage({ detail: entry.error_message ?? undefined }, "调用失败")}
                   </em>
                   <span>
-                    {entry.latency_ms != null ? `${entry.latency_ms}ms` : "no-latency"}
+                    {entry.latency_ms != null ? `${entry.latency_ms}ms` : "未记录延迟"}
                     {entry.input_tokens != null || entry.output_tokens != null
                       ? ` · ${entry.input_tokens ?? 0}/${entry.output_tokens ?? 0} tokens`
                       : ""}
-                    {entry.audio_duration_ms != null ? ` · ${Math.round(entry.audio_duration_ms / 1000)}s audio` : ""}
-                    {entry.characters != null ? ` · ${entry.characters} chars` : ""}
+                    {entry.audio_duration_ms != null ? ` · 音频 ${Math.round(entry.audio_duration_ms / 1000)} 秒` : ""}
+                    {entry.characters != null ? ` · ${entry.characters} 字` : ""}
                     {entry.estimated_cost_cents != null ? ` · ${formatCents(entry.estimated_cost_cents)}` : ""}
                     {" · "}
                     {formatDateTime(entry.created_at)}
