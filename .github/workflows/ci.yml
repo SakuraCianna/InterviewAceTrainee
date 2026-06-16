@@ -21,6 +21,20 @@ jobs:
     name: Backend tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_DB: mianba_admin_users_test
+          POSTGRES_USER: mianba
+          POSTGRES_PASSWORD: mianba
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mianba -d mianba_admin_users_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout
@@ -43,6 +57,8 @@ jobs:
 
       - name: Run backend unit tests
         working-directory: Backend
+        env:
+          MIANBA_ADMIN_USERS_POSTGRES_TEST_URL: postgresql+psycopg://mianba:mianba@127.0.0.1:5432/mianba_admin_users_test
         run: uv run python -m unittest discover -s tests
 
   frontend:

@@ -1,9 +1,11 @@
+import os
 import unittest
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
 from app.api import admin as admin_api
@@ -13,6 +15,11 @@ from app.models.entities import InterviewSession, User
 from app.services.credit_balances import InMemoryCreditBalanceStore, _memory_balances
 from app.services.interview_runtime import InterviewHistoryRecord
 from app.services.user_credentials import InMemoryUserCredentialStore, UserAccountRecord, _memory_users
+
+POSTGRES_TEST_DATABASE_URL_ENV = "MIANBA_ADMIN_USERS_POSTGRES_TEST_URL"
+POSTGRES_TEST_DATABASE_NAME = "mianba_admin_users_test"
+POSTGRES_TEST_DATABASE_USER = "mianba"
+POSTGRES_TEST_DATABASE_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 class FakeInterviewStore:
@@ -41,6 +48,153 @@ class AdminUsersTests(unittest.TestCase):
     def tearDown(self) -> None:
         _memory_users.clear()
         _memory_balances.clear()
+
+    def seed_database_user_fixture(self, session) -> None:
+        session.add_all(
+            [
+                User(
+                    email="alpha@example.com",
+                    role="user",
+                    credit_balance=7,
+                    is_active=True,
+                    created_at=datetime(2026, 6, 15, 9, 0, 0),
+                ),
+                User(
+                    email="beta@example.com",
+                    role="admin",
+                    credit_balance=3,
+                    is_active=False,
+                    created_at=datetime(2026, 6, 15, 10, 0, 0),
+                ),
+                User(
+                    email="gamma@example.com",
+                    role="user",
+                    credit_balance=0,
+                    is_active=True,
+                    created_at=datetime(2026, 6, 15, 10, 0, 0),
+                ),
+            ]
+        )
+        session.add_all(
+            [
+                InterviewSession(
+                    id="alpha-1",
+                    user_email="alpha@example.com",
+                    interview_type="job",
+                    status="completed",
+                    current_step_index=3,
+                    total_steps=3,
+                    created_at=datetime(2026, 6, 15, 12, 0, 0),
+                ),
+                InterviewSession(
+                    id="alpha-2",
+                    user_email="alpha@example.com",
+                    interview_type="ielts",
+                    status="in_progress",
+                    current_step_index=1,
+                    total_steps=4,
+                    created_at=datetime(2026, 6, 15, 13, 0, 0),
+                ),
+                InterviewSession(
+                    id="beta-1",
+                    user_email="beta@example.com",
+                    interview_type="postgraduate",
+                    status="completed",
+                    current_step_index=3,
+                    total_steps=3,
+                    created_at=datetime(2026, 6, 15, 14, 0, 0),
+                ),
+            ]
+        )
+        session.commit()
+
+    def assert_database_aggregate_pagination(self, session) -> None:
+        first_page = admin_api.read_users(
+            query=None,
+            limit=2,
+            offset=0,
+            _admin_claims={"sub": "admin@example.com", "role": "admin", "session_id": "session"},
+            credit_store=ExplodingCreditStore(),
+            interview_store=ExplodingInterviewStore(),
+            db_session=session,
+            user_store=InMemoryUserCredentialStore(),
+        )
+
+        self.assertEqual([user.email for user in first_page.items], ["beta@example.com", "gamma@example.com"])
+        self.assertEqual(first_page.total, 3)
+        self.assertEqual(first_page.limit, 2)
+        self.assertEqual(first_page.offset, 0)
+        self.assertTrue(first_page.has_more)
+        self.assertFalse(first_page.total_is_estimated)
+        self.assertEqual(first_page.items[0].credit_balance, 3)
+        self.assertEqual(first_page.items[0].total_interviews, 1)
+        self.assertEqual(first_page.items[0].completed_interviews, 1)
+        self.assertEqual(first_page.items[0].last_interview_at, "2026-06-15T14:00:00")
+        self.assertEqual(first_page.items[1].credit_balance, 0)
+        self.assertEqual(first_page.items[1].total_interviews, 0)
+
+        second_page = admin_api.read_users(
+            query=None,
+            limit=2,
+            offset=2,
+            _admin_claims={"sub": "admin@example.com", "role": "admin", "session_id": "session"},
+            credit_store=ExplodingCreditStore(),
+            interview_store=ExplodingInterviewStore(),
+            db_session=session,
+            user_store=InMemoryUserCredentialStore(),
+        )
+
+        self.assertEqual([user.email for user in second_page.items], ["alpha@example.com"])
+        self.assertEqual(second_page.total, 3)
+        self.assertEqual(second_page.limit, 2)
+        self.assertEqual(second_page.offset, 2)
+        self.assertFalse(second_page.has_more)
+        self.assertFalse(second_page.total_is_estimated)
+        self.assertEqual(second_page.items[0].credit_balance, 7)
+        self.assertEqual(second_page.items[0].total_interviews, 2)
+        self.assertEqual(second_page.items[0].completed_interviews, 1)
+        self.assertEqual(second_page.items[0].last_interview_at, "2026-06-15T13:00:00")
+
+        filtered = admin_api.read_users(
+            query="alpha",
+            limit=10,
+            offset=0,
+            _admin_claims={"sub": "admin@example.com", "role": "admin", "session_id": "session"},
+            credit_store=ExplodingCreditStore(),
+            interview_store=ExplodingInterviewStore(),
+            db_session=session,
+            user_store=InMemoryUserCredentialStore(),
+        )
+
+        self.assertEqual([user.email for user in filtered.items], ["alpha@example.com"])
+        self.assertEqual(filtered.total, 1)
+        self.assertEqual(filtered.limit, 10)
+        self.assertEqual(filtered.offset, 0)
+        self.assertFalse(filtered.has_more)
+        self.assertFalse(filtered.total_is_estimated)
+        self.assertEqual(filtered.items[0].credit_balance, 7)
+        self.assertEqual(filtered.items[0].total_interviews, 2)
+        self.assertEqual(filtered.items[0].completed_interviews, 1)
+        self.assertEqual(filtered.items[0].last_interview_at, "2026-06-15T13:00:00")
+
+    def assert_safe_postgres_test_database_url(self, database_url: str) -> None:
+        parsed_url = make_url(database_url)
+        self.assertEqual(parsed_url.get_backend_name(), "postgresql")
+        self.assertIn(
+            parsed_url.host,
+            POSTGRES_TEST_DATABASE_HOSTS,
+            f"{POSTGRES_TEST_DATABASE_URL_ENV} must point to a local test database",
+        )
+        self.assertEqual(
+            parsed_url.username,
+            POSTGRES_TEST_DATABASE_USER,
+            f"{POSTGRES_TEST_DATABASE_URL_ENV} must use the dedicated test database user",
+        )
+        self.assertEqual(
+            parsed_url.database,
+            POSTGRES_TEST_DATABASE_NAME,
+            f"{POSTGRES_TEST_DATABASE_URL_ENV} must point to the dedicated test database",
+        )
 
     def test_read_users_returns_recent_user_summaries_without_query(self) -> None:
         _memory_users["alpha@example.com"] = UserAccountRecord(email="alpha@example.com", role="user")
@@ -184,131 +338,40 @@ class AdminUsersTests(unittest.TestCase):
         SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
         with SessionLocal() as session:
-            session.add_all(
-                [
-                    User(
-                        email="alpha@example.com",
-                        role="user",
-                        credit_balance=7,
-                        is_active=True,
-                        created_at=datetime(2026, 6, 15, 9, 0, 0),
-                    ),
-                    User(
-                        email="beta@example.com",
-                        role="admin",
-                        credit_balance=3,
-                        is_active=False,
-                        created_at=datetime(2026, 6, 15, 10, 0, 0),
-                    ),
-                    User(
-                        email="gamma@example.com",
-                        role="user",
-                        credit_balance=0,
-                        is_active=True,
-                        created_at=datetime(2026, 6, 15, 10, 0, 0),
-                    ),
-                ]
-            )
-            session.add_all(
-                [
-                    InterviewSession(
-                        id="alpha-1",
-                        user_email="alpha@example.com",
-                        interview_type="job",
-                        status="completed",
-                        current_step_index=3,
-                        total_steps=3,
-                        created_at=datetime(2026, 6, 15, 12, 0, 0),
-                    ),
-                    InterviewSession(
-                        id="alpha-2",
-                        user_email="alpha@example.com",
-                        interview_type="ielts",
-                        status="in_progress",
-                        current_step_index=1,
-                        total_steps=4,
-                        created_at=datetime(2026, 6, 15, 13, 0, 0),
-                    ),
-                    InterviewSession(
-                        id="beta-1",
-                        user_email="beta@example.com",
-                        interview_type="postgraduate",
-                        status="completed",
-                        current_step_index=3,
-                        total_steps=3,
-                        created_at=datetime(2026, 6, 15, 14, 0, 0),
-                    ),
-                ]
-            )
-            session.commit()
+            self.seed_database_user_fixture(session)
+            self.assert_database_aggregate_pagination(session)
 
-            first_page = admin_api.read_users(
-                query=None,
-                limit=2,
-                offset=0,
-                _admin_claims={"sub": "admin@example.com", "role": "admin", "session_id": "session"},
-                credit_store=ExplodingCreditStore(),
-                interview_store=ExplodingInterviewStore(),
-                db_session=session,
-                user_store=InMemoryUserCredentialStore(),
-            )
+    def test_postgresql_database_url_guard_rejects_unsafe_targets(self) -> None:
+        unsafe_urls = [
+            "postgresql+psycopg://mianba:mianba@example.com:5432/mianba_admin_users_test",
+            "postgresql+psycopg://mianba:mianba@127.0.0.1:5432/mianba_test",
+            "postgresql+psycopg://postgres:mianba@127.0.0.1:5432/mianba_admin_users_test",
+            "sqlite:///:memory:",
+        ]
 
-            self.assertEqual([user.email for user in first_page.items], ["beta@example.com", "gamma@example.com"])
-            self.assertEqual(first_page.total, 3)
-            self.assertEqual(first_page.limit, 2)
-            self.assertEqual(first_page.offset, 0)
-            self.assertTrue(first_page.has_more)
-            self.assertFalse(first_page.total_is_estimated)
-            self.assertEqual(first_page.items[0].credit_balance, 3)
-            self.assertEqual(first_page.items[0].total_interviews, 1)
-            self.assertEqual(first_page.items[0].completed_interviews, 1)
-            self.assertEqual(first_page.items[0].last_interview_at, "2026-06-15T14:00:00")
-            self.assertEqual(first_page.items[1].credit_balance, 0)
-            self.assertEqual(first_page.items[1].total_interviews, 0)
+        for database_url in unsafe_urls:
+            with self.subTest(database_url=database_url):
+                with self.assertRaises(AssertionError):
+                    self.assert_safe_postgres_test_database_url(database_url)
 
-            second_page = admin_api.read_users(
-                query=None,
-                limit=2,
-                offset=2,
-                _admin_claims={"sub": "admin@example.com", "role": "admin", "session_id": "session"},
-                credit_store=ExplodingCreditStore(),
-                interview_store=ExplodingInterviewStore(),
-                db_session=session,
-                user_store=InMemoryUserCredentialStore(),
-            )
+    def test_read_users_uses_postgresql_database_aggregates(self) -> None:
+        database_url = os.environ.get(POSTGRES_TEST_DATABASE_URL_ENV)
+        if not database_url:
+            self.skipTest(f"{POSTGRES_TEST_DATABASE_URL_ENV} is not configured")
 
-            self.assertEqual([user.email for user in second_page.items], ["alpha@example.com"])
-            self.assertEqual(second_page.total, 3)
-            self.assertEqual(second_page.limit, 2)
-            self.assertEqual(second_page.offset, 2)
-            self.assertFalse(second_page.has_more)
-            self.assertFalse(second_page.total_is_estimated)
-            self.assertEqual(second_page.items[0].credit_balance, 7)
-            self.assertEqual(second_page.items[0].total_interviews, 2)
-            self.assertEqual(second_page.items[0].completed_interviews, 1)
-            self.assertEqual(second_page.items[0].last_interview_at, "2026-06-15T13:00:00")
+        self.assert_safe_postgres_test_database_url(database_url)
+        engine = create_engine(database_url)
+        try:
+            Base.metadata.drop_all(engine)
+            Base.metadata.create_all(engine)
+            SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
-            filtered = admin_api.read_users(
-                query="alpha",
-                limit=10,
-                offset=0,
-                _admin_claims={"sub": "admin@example.com", "role": "admin", "session_id": "session"},
-                credit_store=ExplodingCreditStore(),
-                interview_store=ExplodingInterviewStore(),
-                db_session=session,
-                user_store=InMemoryUserCredentialStore(),
-            )
-
-            self.assertEqual([user.email for user in filtered.items], ["alpha@example.com"])
-            self.assertEqual(filtered.total, 1)
-            self.assertEqual(filtered.limit, 10)
-            self.assertEqual(filtered.offset, 0)
-            self.assertFalse(filtered.has_more)
-            self.assertFalse(filtered.total_is_estimated)
-            self.assertEqual(filtered.items[0].credit_balance, 7)
-            self.assertEqual(filtered.items[0].total_interviews, 2)
-            self.assertEqual(filtered.items[0].completed_interviews, 1)
-            self.assertEqual(filtered.items[0].last_interview_at, "2026-06-15T13:00:00")
+            with SessionLocal() as session:
+                self.seed_database_user_fixture(session)
+                self.assert_database_aggregate_pagination(session)
+        finally:
+            Base.metadata.drop_all(engine)
+            engine.dispose()
 
 
 if __name__ == "__main__":
