@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: Backend/uv.lock
+
+      - name: Install backend dependencies
+        working-directory: Backend
+        run: uv sync --locked
+
+      - name: Run backend unit tests
+        working-directory: Backend
+        run: uv run python -m unittest discover -s tests
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: Frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: Frontend
+        run: npm ci
+
+      - name: Type-check and build frontend
+        working-directory: Frontend
+        run: npm run build
+
+  docker:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs:
+      - backend
+      - frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: Backend
+          file: Backend/Dockerfile
+          push: false
+          tags: mianba-backend:ci
+          cache-from: type=gha,scope=mianba-backend
+          cache-to: type=gha,mode=max,scope=mianba-backend
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: Frontend
+          file: Frontend/Dockerfile
+          push: false
+          tags: mianba-frontend:ci
+          build-args: |
+            VITE_ADMIN_ENTRY_PATH=/sakuracianna
+            VITE_ICP_NUMBER=湘ICP备2025151258号-1
+          cache-from: type=gha,scope=mianba-frontend
+          cache-to: type=gha,mode=max,scope=mianba-frontend
+
+  compose:
+    name: Compose validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs:
+      - backend
+      - frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create CI-only local config files
+        shell: bash
+        run: |
+          cat > Backend/.env <<'ENV'
+          ACCESS_TOKEN_SECRET=ci-only-secret-value-with-at-least-32-characters
+          DEEPSEEK_API_KEY=ci-placeholder
+          TENCENT_CLOUD_APP_ID=ci-placeholder
+          TENCENT_CLOUD_SECRET_ID=ci-placeholder
+          TENCENT_CLOUD_SECRET_KEY=ci-placeholder
+          EMAIL_PROVIDER=dev
+          ENV
+          : > Frontend/.env
+          : > nginx/sakuracianna.icu_bundle.pem
+          : > nginx/sakuracianna.icu.key
+
+      - name: Validate docker compose config
+        run: docker compose config --quiet

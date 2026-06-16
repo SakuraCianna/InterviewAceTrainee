@@ -1,0 +1,157 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "输入 deploy 确认发布到生产环境"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Preflight checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: ${{ github.event.inputs.confirm == 'deploy' }}
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: Backend/uv.lock
+
+      - name: Install backend dependencies
+        working-directory: Backend
+        run: uv sync --locked
+
+      - name: Run backend unit tests
+        working-directory: Backend
+        run: uv run python -m unittest discover -s tests
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: Frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: Frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: Frontend
+        run: npm run build
+
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: preflight
+    environment:
+      name: production
+      url: https://sakuracianna.icu/
+
+    steps:
+      - name: Validate production secrets
+        shell: bash
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+          PRODUCTION_KNOWN_HOSTS: ${{ secrets.PRODUCTION_KNOWN_HOSTS }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+        run: |
+          missing=0
+          for name in PRODUCTION_HOST PRODUCTION_USER PRODUCTION_SSH_KEY PRODUCTION_KNOWN_HOSTS PRODUCTION_PATH; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is required for production deployment"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+          PRODUCTION_KNOWN_HOSTS: ${{ secrets.PRODUCTION_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$PRODUCTION_SSH_KEY" > ~/.ssh/mianba_deploy_key
+          printf '%s\n' "$PRODUCTION_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/mianba_deploy_key
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Run data-safe production rollout
+        shell: bash
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PORT: ${{ secrets.PRODUCTION_PORT }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+        run: |
+          port="${PRODUCTION_PORT:-22}"
+          remote_path_b64="$(printf '%s' "$PRODUCTION_PATH" | base64 -w0)"
+          ssh -i ~/.ssh/mianba_deploy_key -p "$port" "$PRODUCTION_USER@$PRODUCTION_HOST" "REMOTE_PATH_B64='$remote_path_b64' bash -se" <<'REMOTE'
+          set -Eeuo pipefail
+
+          deploy_path="$(printf '%s' "$REMOTE_PATH_B64" | base64 -d)"
+          cd "$deploy_path"
+
+          # Keep production-only edits out of the Git worktree. Runtime config must live in .env,
+          # mounted certificates, Docker volumes, or database_backups/ so this fast-forward pull is data-safe.
+          git fetch --prune origin main
+          git checkout main
+          git pull --ff-only origin main
+
+          # Data-safe rollout only: build images, run the backup-aware migration gate, then refresh services.
+          # Do not remove Compose volumes, Redis/PostgreSQL data, or database_backups/ in this workflow.
+          docker compose build
+          docker compose --profile migrate run --rm migrate
+          docker compose up -d
+          docker compose ps
+          REMOTE
+
+      - name: Verify production health
+        shell: bash
+        env:
+          PRODUCTION_HEALTH_URL: ${{ secrets.PRODUCTION_HEALTH_URL }}
+          PRODUCTION_READINESS_URL: ${{ secrets.PRODUCTION_READINESS_URL }}
+        run: |
+          health_url="${PRODUCTION_HEALTH_URL:-https://sakuracianna.icu/api/health}"
+          readiness_url="${PRODUCTION_READINESS_URL:-https://sakuracianna.icu/api/health/readiness}"
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error "$health_url"; then
+              echo
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "::error::Production health check did not become ready"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          curl --fail --silent --show-error "$readiness_url"
