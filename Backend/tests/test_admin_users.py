@@ -75,6 +75,8 @@ class AdminUsersTests(unittest.TestCase):
 
         self.assertEqual([user.email for user in users.items], ["alpha@example.com", "beta@example.com"])
         self.assertEqual(users.total, 2)
+        self.assertEqual(users.limit, 20)
+        self.assertEqual(users.offset, 0)
         self.assertFalse(users.has_more)
         self.assertFalse(users.total_is_estimated)
         self.assertEqual(users.items[0].credit_balance, 7)
@@ -100,9 +102,35 @@ class AdminUsersTests(unittest.TestCase):
         )
 
         self.assertEqual(len(users.items), 1)
+        self.assertEqual(users.total, 2)
+        self.assertEqual(users.limit, 1)
+        self.assertEqual(users.offset, 0)
         self.assertTrue(users.has_more)
         self.assertTrue(users.total_is_estimated)
         self.assertIn("beta", users.items[0].email)
+
+    def test_read_users_fallback_end_page_returns_known_total(self) -> None:
+        _memory_users["alpha@example.com"] = UserAccountRecord(email="alpha@example.com")
+        _memory_users["beta@example.com"] = UserAccountRecord(email="beta@example.com")
+        _memory_users["gamma@example.com"] = UserAccountRecord(email="gamma@example.com")
+
+        users = admin_api.read_users(
+            query=None,
+            limit=2,
+            offset=2,
+            _admin_claims={"sub": "admin@example.com", "role": "admin", "session_id": "session"},
+            credit_store=InMemoryCreditBalanceStore(),
+            interview_store=FakeInterviewStore(),
+            db_session=None,
+            user_store=InMemoryUserCredentialStore(),
+        )
+
+        self.assertEqual([user.email for user in users.items], ["gamma@example.com"])
+        self.assertEqual(users.total, 3)
+        self.assertEqual(users.limit, 2)
+        self.assertEqual(users.offset, 2)
+        self.assertFalse(users.has_more)
+        self.assertFalse(users.total_is_estimated)
 
     def test_admin_users_routes_keep_auth_and_specific_paths(self) -> None:
         _memory_users["admin@example.com"] = UserAccountRecord(email="admin@example.com", role="admin")
@@ -136,7 +164,9 @@ class AdminUsersTests(unittest.TestCase):
         self.assertEqual(users_response.status_code, 200)
         users_payload = users_response.json()
         self.assertEqual(len(users_payload["items"]), 1)
+        self.assertEqual(users_payload["total"], 2)
         self.assertEqual(users_payload["limit"], 1)
+        self.assertEqual(users_payload["offset"], 0)
         self.assertTrue(users_payload["has_more"])
         self.assertTrue(users_payload["total_is_estimated"])
 
@@ -175,7 +205,7 @@ class AdminUsersTests(unittest.TestCase):
                         role="user",
                         credit_balance=0,
                         is_active=True,
-                        created_at=datetime(2026, 6, 15, 11, 0, 0),
+                        created_at=datetime(2026, 6, 15, 10, 0, 0),
                     ),
                 ]
             )
@@ -223,16 +253,40 @@ class AdminUsersTests(unittest.TestCase):
                 user_store=InMemoryUserCredentialStore(),
             )
 
-            self.assertEqual([user.email for user in first_page.items], ["gamma@example.com", "beta@example.com"])
+            self.assertEqual([user.email for user in first_page.items], ["beta@example.com", "gamma@example.com"])
             self.assertEqual(first_page.total, 3)
+            self.assertEqual(first_page.limit, 2)
+            self.assertEqual(first_page.offset, 0)
             self.assertTrue(first_page.has_more)
             self.assertFalse(first_page.total_is_estimated)
-            self.assertEqual(first_page.items[0].credit_balance, 0)
-            self.assertEqual(first_page.items[0].total_interviews, 0)
-            self.assertEqual(first_page.items[1].credit_balance, 3)
-            self.assertEqual(first_page.items[1].total_interviews, 1)
-            self.assertEqual(first_page.items[1].completed_interviews, 1)
-            self.assertEqual(first_page.items[1].last_interview_at, "2026-06-15T14:00:00")
+            self.assertEqual(first_page.items[0].credit_balance, 3)
+            self.assertEqual(first_page.items[0].total_interviews, 1)
+            self.assertEqual(first_page.items[0].completed_interviews, 1)
+            self.assertEqual(first_page.items[0].last_interview_at, "2026-06-15T14:00:00")
+            self.assertEqual(first_page.items[1].credit_balance, 0)
+            self.assertEqual(first_page.items[1].total_interviews, 0)
+
+            second_page = admin_api.read_users(
+                query=None,
+                limit=2,
+                offset=2,
+                _admin_claims={"sub": "admin@example.com", "role": "admin", "session_id": "session"},
+                credit_store=ExplodingCreditStore(),
+                interview_store=ExplodingInterviewStore(),
+                db_session=session,
+                user_store=InMemoryUserCredentialStore(),
+            )
+
+            self.assertEqual([user.email for user in second_page.items], ["alpha@example.com"])
+            self.assertEqual(second_page.total, 3)
+            self.assertEqual(second_page.limit, 2)
+            self.assertEqual(second_page.offset, 2)
+            self.assertFalse(second_page.has_more)
+            self.assertFalse(second_page.total_is_estimated)
+            self.assertEqual(second_page.items[0].credit_balance, 7)
+            self.assertEqual(second_page.items[0].total_interviews, 2)
+            self.assertEqual(second_page.items[0].completed_interviews, 1)
+            self.assertEqual(second_page.items[0].last_interview_at, "2026-06-15T13:00:00")
 
             filtered = admin_api.read_users(
                 query="alpha",
@@ -246,6 +300,11 @@ class AdminUsersTests(unittest.TestCase):
             )
 
             self.assertEqual([user.email for user in filtered.items], ["alpha@example.com"])
+            self.assertEqual(filtered.total, 1)
+            self.assertEqual(filtered.limit, 10)
+            self.assertEqual(filtered.offset, 0)
+            self.assertFalse(filtered.has_more)
+            self.assertFalse(filtered.total_is_estimated)
             self.assertEqual(filtered.items[0].credit_balance, 7)
             self.assertEqual(filtered.items[0].total_interviews, 2)
             self.assertEqual(filtered.items[0].completed_interviews, 1)

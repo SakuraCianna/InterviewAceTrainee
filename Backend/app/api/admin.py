@@ -241,9 +241,14 @@ def search_database_users(query: str, db_session: Session | None, limit: int = 2
     if db_session is None:
         return []
     normalized_query = query.strip().lower()
-    statement = select(User).order_by(User.created_at.desc()).limit(limit)
+    statement = select(User).order_by(User.created_at.desc(), User.email.asc()).limit(limit)
     if normalized_query:
-        statement = select(User).where(User.email.ilike(f"%{normalized_query}%")).order_by(User.created_at.desc()).limit(limit)
+        statement = (
+            select(User)
+            .where(User.email.ilike(f"%{normalized_query}%"))
+            .order_by(User.created_at.desc(), User.email.asc())
+            .limit(limit)
+        )
     return list(db_session.execute(statement).scalars())
 
 
@@ -255,10 +260,10 @@ def list_database_users(query: str, db_session: Session | None, limit: int, offs
     total = db_session.execute(select(func.count()).select_from(User).where(*filters)).scalar_one()
     users = list(
         db_session.execute(
-            select(User).where(*filters).order_by(User.created_at.desc()).offset(offset).limit(limit)
+            select(User).where(*filters).order_by(User.created_at.desc(), User.email.asc()).offset(offset).limit(limit)
         ).scalars()
     )
-    return users, total
+    return users, int(total)
 
 
 @router.get("/stats", response_model=AdminDashboardStatsResponse)
@@ -319,10 +324,10 @@ def read_users(
     page_records = user_records[offset : offset + limit]
     items = [summarize_user_record(record, credit_store, interview_store) for record in page_records]
     has_more = len(user_records) > offset + limit
-    fallback_total = len(user_records) if not has_more else offset + limit + 1
+    fallback_total_lower_bound = len(user_records) if not has_more else offset + limit + 1
     return AdminUserListResponse(
         items=items,
-        total=fallback_total,
+        total=fallback_total_lower_bound,
         limit=limit,
         offset=offset,
         has_more=has_more,
