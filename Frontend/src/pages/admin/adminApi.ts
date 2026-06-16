@@ -6,6 +6,7 @@ import type {
   AdminInterviewHistoryItem,
   AdminInterviewReport,
   AdminLoginResponse,
+  AdminUserListResponse,
   AdminUserSearchItem,
   AuthLoginLogEntry,
   ContentSafetyLogEntry,
@@ -102,6 +103,19 @@ export function listSystemConfigs() {
 
 export function getDashboardStats() {
   return requestJson<AdminDashboardStats>("/api/admin/stats", credentials);
+}
+
+export function listAdminUsers(query = "", limit = 50, offset = 0) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  const normalizedQuery = query.trim();
+  if (normalizedQuery) {
+    params.set("query", normalizedQuery);
+  }
+  return requestJson<AdminUserListResponse>(
+    `/api/admin/users?${params.toString()}`,
+    credentials,
+    { items: [], total: 0, limit, offset, has_more: false, total_is_estimated: false },
+  );
 }
 
 export function getInterviewCoreHealth() {

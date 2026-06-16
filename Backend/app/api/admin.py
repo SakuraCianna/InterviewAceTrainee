@@ -1,12 +1,12 @@
 from collections.abc import Generator
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import TokenClaims, require_admin_user
 from app.db.session import get_optional_db_session
-from app.models.entities import User
+from app.models.entities import InterviewSession, User
 from app.schemas.admin import (
     AdminAICallLogResponse,
     AdminAuthLoginLogResponse,
@@ -17,6 +17,7 @@ from app.schemas.admin import (
     AdminCreditLedgerResponse,
     AdminDashboardStatsResponse,
     AdminUserDetailResponse,
+    AdminUserListResponse,
     AdminUserInterviewReportResponse,
     AdminUserRoleResponse,
     AdminUserRoleUpdateRequest,
@@ -76,6 +77,7 @@ from app.services.user_credentials import UserAccountRecord, UserCredentialStore
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 ADMIN_INTERVIEW_REQUIRED_TABLES = ("interview_sessions", "interview_turns", "interview_reports", "interview_materials")
+ADMIN_USER_LIST_REQUIRED_TABLES = ("users", "interview_sessions")
 ADMIN_CREDIT_ADJUSTMENT_REQUIRED_TABLES = ("users", "credit_ledger", "admin_audit_logs")
 ADMIN_VOUCHER_REQUIRED_TABLES = ("users", "interview_vouchers", "admin_audit_logs")
 ADMIN_STATS_REQUIRED_TABLES = (
@@ -91,6 +93,10 @@ ADMIN_STATS_REQUIRED_TABLES = (
 
 def get_optional_admin_db_session() -> Generator[Session | None, None, None]:
     yield from get_optional_db_session(("users",))
+
+
+def get_optional_admin_user_list_db_session() -> Generator[Session | None, None, None]:
+    yield from get_optional_db_session(ADMIN_USER_LIST_REQUIRED_TABLES)
 
 
 def get_optional_admin_interview_db_session() -> Generator[Session | None, None, None]:
@@ -165,6 +171,44 @@ def summarize_user_record(
     )
 
 
+def summarize_database_users(users: list[User], db_session: Session) -> list[AdminUserSearchItem]:
+    if not users:
+        return []
+
+    user_emails = [normalize_user_email(user.email) for user in users]
+    completed_case = case((InterviewSession.status == "completed", 1), else_=0)
+    usage_by_email = {
+        normalize_user_email(user_email): {
+            "total_interviews": int(total_interviews or 0),
+            "completed_interviews": int(completed_interviews or 0),
+            "last_interview_at": last_interview_at.isoformat() if last_interview_at else None,
+        }
+        for user_email, total_interviews, completed_interviews, last_interview_at in db_session.execute(
+            select(
+                InterviewSession.user_email,
+                func.count(),
+                func.coalesce(func.sum(completed_case), 0),
+                func.max(InterviewSession.created_at),
+            )
+            .where(InterviewSession.user_email.in_(user_emails))
+            .group_by(InterviewSession.user_email)
+        ).all()
+    }
+
+    return [
+        AdminUserSearchItem(
+            email=normalize_user_email(user.email),
+            role=user.role,
+            is_active=user.is_active,
+            credit_balance=int(user.credit_balance or 0),
+            total_interviews=usage_by_email.get(normalize_user_email(user.email), {}).get("total_interviews", 0),
+            completed_interviews=usage_by_email.get(normalize_user_email(user.email), {}).get("completed_interviews", 0),
+            last_interview_at=usage_by_email.get(normalize_user_email(user.email), {}).get("last_interview_at"),
+        )
+        for user in users
+    ]
+
+
 def system_config_to_response(config: SystemConfig) -> SystemConfigResponse:
     return SystemConfigResponse(
         key=config.key,
@@ -193,15 +237,28 @@ def client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
-def search_database_users(query: str, db_session: Session | None) -> list[User]:
+def search_database_users(query: str, db_session: Session | None, limit: int = 20) -> list[User]:
     if db_session is None:
         return []
-    normalized_query = f"%{query.strip().lower()}%"
-    return list(
+    normalized_query = query.strip().lower()
+    statement = select(User).order_by(User.created_at.desc()).limit(limit)
+    if normalized_query:
+        statement = select(User).where(User.email.ilike(f"%{normalized_query}%")).order_by(User.created_at.desc()).limit(limit)
+    return list(db_session.execute(statement).scalars())
+
+
+def list_database_users(query: str, db_session: Session | None, limit: int, offset: int) -> tuple[list[User], int]:
+    if db_session is None:
+        return [], 0
+    normalized_query = query.strip().lower()
+    filters = [User.email.ilike(f"%{normalized_query}%")] if normalized_query else []
+    total = db_session.execute(select(func.count()).select_from(User).where(*filters)).scalar_one()
+    users = list(
         db_session.execute(
-            select(User).where(User.email.ilike(normalized_query)).order_by(User.created_at.desc()).limit(20)
+            select(User).where(*filters).order_by(User.created_at.desc()).offset(offset).limit(limit)
         ).scalars()
     )
+    return users, total
 
 
 @router.get("/stats", response_model=AdminDashboardStatsResponse)
@@ -218,28 +275,59 @@ def search_users(
     _admin_claims: TokenClaims = Depends(require_admin_user),
     credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
     interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_admin_interview_store),
-    db_session: Session | None = Depends(get_optional_admin_db_session),
+    db_session: Session | None = Depends(get_optional_admin_user_list_db_session),
     user_store: UserCredentialStore = Depends(get_user_credential_store),
 ) -> list[AdminUserSearchItem]:
     normalized_query = normalize_user_email(query)
     database_users = search_database_users(normalized_query, db_session)
     if database_users:
-        return [
-            summarize_user(
-                user_email=user.email,
-                role=user.role,
-                is_active=user.is_active,
-                credit_store=credit_store,
-                interview_store=interview_store,
-            )
-            for user in database_users
-        ]
+        return summarize_database_users(database_users, db_session)
 
     user_records = user_store.search_users(normalized_query)
     if user_records:
         return [summarize_user_record(record, credit_store, interview_store) for record in user_records]
 
     return []
+
+
+@router.get("/users", response_model=AdminUserListResponse)
+def read_users(
+    query: str | None = Query(default=None, max_length=255),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    _admin_claims: TokenClaims = Depends(require_admin_user),
+    credit_store: CreditBalanceStore = Depends(get_credit_balance_store),
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore = Depends(get_admin_interview_store),
+    db_session: Session | None = Depends(get_optional_admin_user_list_db_session),
+    user_store: UserCredentialStore = Depends(get_user_credential_store),
+) -> AdminUserListResponse:
+    normalized_query = normalize_user_email(query or "")
+    database_users, database_total = list_database_users(normalized_query, db_session, limit=limit, offset=offset)
+    if db_session is not None:
+        items = summarize_database_users(database_users, db_session)
+        return AdminUserListResponse(
+            items=items,
+            total=database_total,
+            limit=limit,
+            offset=offset,
+            has_more=offset + len(items) < database_total,
+            total_is_estimated=False,
+        )
+
+    requested_count = offset + limit + 1
+    user_records = user_store.search_users(normalized_query, limit=requested_count)
+    page_records = user_records[offset : offset + limit]
+    items = [summarize_user_record(record, credit_store, interview_store) for record in page_records]
+    has_more = len(user_records) > offset + limit
+    fallback_total = len(user_records) if not has_more else offset + limit + 1
+    return AdminUserListResponse(
+        items=items,
+        total=fallback_total,
+        limit=limit,
+        offset=offset,
+        has_more=has_more,
+        total_is_estimated=has_more,
+    )
 
 
 @router.get("/users/{user_id}", response_model=AdminUserDetailResponse)

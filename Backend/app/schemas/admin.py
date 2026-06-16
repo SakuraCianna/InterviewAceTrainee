@@ -216,6 +216,15 @@ class AdminUserSearchItem(BaseModel):
     last_interview_at: str | None = None
 
 
+class AdminUserListResponse(BaseModel):
+    items: list[AdminUserSearchItem]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    total_is_estimated: bool = False
+
+
 class AdminUserDetailResponse(BaseModel):
     email: str
     role: str

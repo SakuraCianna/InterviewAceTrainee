@@ -137,6 +137,15 @@ export type AdminUserSearchItem = {
   last_interview_at?: string | null;
 };
 
+export type AdminUserListResponse = {
+  items: AdminUserSearchItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  total_is_estimated: boolean;
+};
+
 export type AdminInterviewHistoryItem = {
   session_id: string;
   interview_type: string;
@@ -279,4 +288,4 @@ export type AdminDashboardStats = {
   top_users: AdminTopUserUsage[];
 };
 
-export type AdminSectionKey = "overview" | "credits" | "users" | "ai" | "system" | "audit";
+export type AdminSectionKey = "overview" | "users" | "credits" | "quality" | "ai" | "audit" | "system";
