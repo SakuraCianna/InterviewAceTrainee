@@ -1,5 +1,7 @@
+from contextlib import contextmanager
 import unittest
 from datetime import datetime
+from unittest.mock import patch
 
 from app.api.interviews import answer_interview_question, build_next_question_override
 from app.core.config import Settings
@@ -10,7 +12,13 @@ from app.services.content_safety_logs import InMemoryContentSafetyLogStore
 from app.services.interview_material_context import InterviewMaterialContext
 from app.services.interview_ai import assess_answer_quality
 from app.services.interview_question_bank import _select_steps, question_bank_inventory, postgraduate_school_tier
-from app.services.interview_runtime import InMemoryInterviewRuntimeStore, build_interview_steps
+from app.services.interview_runtime import (
+    DatabaseInterviewRuntimeStore,
+    InMemoryInterviewRuntimeStore,
+    InterviewState,
+    InterviewStep,
+    build_interview_steps,
+)
 from app.services.provider_configs import InMemoryProviderConfigStore
 
 
@@ -375,6 +383,196 @@ class InterviewFlowTests(unittest.TestCase):
         self.assertIsNotNone(followup_question)
         self.assertIn(expected_next_question.text[:36], followup_question or "")
 
+    def test_adaptive_followup_passes_db_connection_to_capability_context(self) -> None:
+        store = InMemoryInterviewRuntimeStore()
+        material_context = self.job_context(
+            job_title="AI 全栈开发工程师",
+            job_requirements="负责 React、FastAPI、RAG 检索、Agent 工具调用、评测集建设和提示词注入防护。",
+            resume_text="智能面试 Agent 项目：我负责向量库召回、工具调用编排、DeepSeek 调用和安全评测。",
+            keywords=["RAG", "Agent", "FastAPI", "提示词注入"],
+        )
+        state = store.create_session(
+            "candidate@example.com",
+            "db-backed-followup-session",
+            InterviewType.JOB,
+            material_context,
+        )
+        capability_db_connection = object()
+
+        with patch(
+            "app.api.interviews.build_capability_prompt_context",
+            return_value="## 能力卡片：数据库召回上下文",
+        ) as build_capability_context:
+            followup_question = build_next_question_override(
+                current_state=state,
+                answer_text="我负责 RAG 召回、Agent 工具调用和提示词注入防护评测，主要目标是让回答更稳定。",
+                provider_store=self.disabled_provider_store(),
+                ai_call_log_store=InMemoryAICallLogStore(),
+                content_safety_log_store=InMemoryContentSafetyLogStore(),
+                settings=Settings(),
+                user_email="candidate@example.com",
+                capability_db_connection=capability_db_connection,
+            )
+
+        self.assertIsNotNone(followup_question)
+        self.assertIs(build_capability_context.call_args.kwargs["db_connection"], capability_db_connection)
+
+    def test_answer_api_passes_database_store_connection_to_capability_context(self) -> None:
+        inner_store = InMemoryInterviewRuntimeStore()
+        material_context = self.job_context(
+            job_title="AI 全栈开发工程师",
+            job_requirements="负责 React、FastAPI、RAG 检索、Agent 工具调用、评测集建设和提示词注入防护。",
+            resume_text="智能面试 Agent 项目：我负责向量库召回、工具调用编排、DeepSeek 调用和安全评测。",
+            keywords=["RAG", "Agent", "FastAPI", "提示词注入"],
+        )
+        inner_store.create_session(
+            "candidate@example.com",
+            "db-store-followup-session",
+            InterviewType.JOB,
+            material_context,
+        )
+        capability_db_connection = object()
+        store = _DatabaseBackedTestInterviewStore(inner_store, capability_db_connection)
+        claims = {"sub": "candidate@example.com", "role": "user", "session_id": "auth-session"}
+
+        with patch(
+            "app.api.interviews.build_capability_prompt_context",
+            return_value="## 能力卡片：数据库召回上下文",
+        ) as build_capability_context:
+            response = answer_interview_question(
+                session_id="db-store-followup-session",
+                payload=InterviewAnswerRequest(
+                    answer_text="我负责 RAG 召回、Agent 工具调用和提示词注入防护评测，主要目标是让回答更稳定。"
+                ),
+                claims=claims,
+                interview_store=store,
+                provider_store=self.disabled_provider_store(),
+                ai_call_log_store=InMemoryAICallLogStore(),
+                content_safety_log_store=InMemoryContentSafetyLogStore(),
+                settings=Settings(),
+            )
+
+        self.assertEqual(response.current_step_index, 1)
+        self.assertIs(build_capability_context.call_args.kwargs["db_connection"], capability_db_connection)
+
+    def test_adaptive_followup_rebuilds_missing_next_question_with_db_connection(self) -> None:
+        store = InMemoryInterviewRuntimeStore()
+        material_context = self.job_context(
+            job_title="AI 全栈开发工程师",
+            job_requirements="负责 React、FastAPI、RAG 检索、Agent 工具调用、评测集建设和提示词注入防护。",
+            resume_text="智能面试 Agent 项目：我负责向量库召回、工具调用编排、DeepSeek 调用和安全评测。",
+            keywords=["RAG", "Agent", "FastAPI", "提示词注入"],
+        )
+        state = store.create_session(
+            "candidate@example.com",
+            "rebuild-followup-session",
+            InterviewType.JOB,
+            material_context,
+        )
+        state.next_question = None
+        capability_db_connection = object()
+
+        with (
+            patch(
+                "app.services.interview_runtime.build_interview_steps",
+                return_value=[
+                    InterviewStep("岗位理解", state.current_question.text),
+                    InterviewStep("项目证据", "请结合你的 RAG 召回经验，说明一次向量库召回效果不稳定时的定位过程。"),
+                ],
+            ) as build_steps,
+            patch("app.api.interviews.build_capability_prompt_context", return_value="## 能力卡片：数据库召回上下文"),
+        ):
+            followup_question = build_next_question_override(
+                current_state=state,
+                answer_text="我负责 RAG 召回、Agent 工具调用和提示词注入防护评测，主要目标是让回答更稳定。",
+                provider_store=self.disabled_provider_store(),
+                ai_call_log_store=InMemoryAICallLogStore(),
+                content_safety_log_store=InMemoryContentSafetyLogStore(),
+                settings=Settings(),
+                user_email="candidate@example.com",
+                capability_db_connection=capability_db_connection,
+            )
+
+        self.assertIsNotNone(followup_question)
+        self.assertIs(build_steps.call_args.kwargs["capability_db_connection"], capability_db_connection)
+
+    def test_adaptive_followup_closes_capability_connection_before_llm_call(self) -> None:
+        store = InMemoryInterviewRuntimeStore()
+        material_context = self.job_context(
+            job_title="AI 全栈开发工程师",
+            job_requirements="负责 React、FastAPI、RAG 检索、Agent 工具调用、评测集建设和提示词注入防护。",
+            resume_text="智能面试 Agent 项目：我负责向量库召回、工具调用编排、DeepSeek 调用和安全评测。",
+            keywords=["RAG", "Agent", "FastAPI", "提示词注入"],
+        )
+        state = store.create_session(
+            "candidate@example.com",
+            "close-capability-before-llm-session",
+            InterviewType.JOB,
+            material_context,
+        )
+        capability_db_connection = object()
+        events: list[str] = []
+
+        @contextmanager
+        def capability_db_connection_factory():
+            events.append("open")
+            try:
+                yield capability_db_connection
+            finally:
+                events.append("close")
+
+        def build_capability_context(*args, **kwargs) -> str:
+            events.append("context")
+            self.assertIs(kwargs["db_connection"], capability_db_connection)
+            return "## 能力卡片：数据库召回上下文"
+
+        def generate_question(*args, **kwargs) -> str:
+            events.append("llm")
+            return "请说明你如何评估 RAG 召回效果并处理提示词注入风险？"
+
+        with (
+            patch("app.api.interviews.build_capability_prompt_context", side_effect=build_capability_context),
+            patch("app.api.interviews.generate_next_interview_question", side_effect=generate_question),
+        ):
+            followup_question = build_next_question_override(
+                current_state=state,
+                answer_text="我负责 RAG 召回、Agent 工具调用和提示词注入防护评测，主要目标是让回答更稳定。",
+                provider_store=self.disabled_provider_store(),
+                ai_call_log_store=InMemoryAICallLogStore(),
+                content_safety_log_store=InMemoryContentSafetyLogStore(),
+                settings=Settings(),
+                user_email="candidate@example.com",
+                capability_db_connection_factory=capability_db_connection_factory,
+            )
+
+        self.assertEqual(followup_question, "请说明你如何评估 RAG 召回效果并处理提示词注入风险？")
+        self.assertEqual(events, ["open", "context", "close", "llm"])
+
+    def test_database_store_create_session_uses_isolated_capability_connection(self) -> None:
+        capability_db_connection = object()
+        store = _CreateSessionCapabilityStore(capability_db_connection)
+        material_context = self.job_context(
+            job_title="AI 全栈开发工程师",
+            job_requirements="负责 React、FastAPI、RAG 检索、Agent 工具调用、评测集建设和提示词注入防护。",
+            resume_text="智能面试 Agent 项目：我负责向量库召回、工具调用编排、DeepSeek 调用和安全评测。",
+            keywords=["RAG", "Agent", "FastAPI", "提示词注入"],
+        )
+
+        with patch(
+            "app.services.interview_runtime.build_interview_steps",
+            return_value=[InterviewStep("岗位理解", "请介绍一个最能证明你能胜任这个岗位的项目。")],
+        ) as build_steps:
+            state = store.create_session(
+                "candidate@example.com",
+                "create-session-isolated-capability",
+                InterviewType.JOB,
+                material_context,
+            )
+
+        self.assertEqual(state.session_id, "create-session-isolated-capability")
+        self.assertIs(build_steps.call_args.kwargs["capability_db_connection"], capability_db_connection)
+        self.assertIsNot(build_steps.call_args.kwargs["capability_db_connection"], store.runtime_session)
+
     def test_answer_api_requires_supplement_before_advancing(self) -> None:
         store = InMemoryInterviewRuntimeStore()
         store.create_session("student@example.com", "retry-session", InterviewType.POSTGRADUATE)
@@ -463,6 +661,79 @@ class InterviewFlowTests(unittest.TestCase):
         self.assertEqual(len(response.report.turns), initial_state.total_steps)
         normalized_questions = ["".join(question.split()).lower() for question in seen_questions]
         self.assertEqual(len(normalized_questions), len(set(normalized_questions)))
+
+
+class _DatabaseBackedTestInterviewStore(DatabaseInterviewRuntimeStore):
+    def __init__(self, inner_store: InMemoryInterviewRuntimeStore, capability_db_connection: object) -> None:
+        self._inner_store = inner_store
+        self._capability_db_connection = capability_db_connection
+
+    @contextmanager
+    def open_capability_db_connection(self):
+        yield self._capability_db_connection
+
+    def get_session(self, user_email: str, session_id: str) -> InterviewState | None:
+        return self._inner_store.get_session(user_email, session_id)
+
+    def answer_current_question(
+        self,
+        user_email: str,
+        session_id: str,
+        answer_text: str,
+        next_question_override: str | None = None,
+        retry_question_override: str | None = None,
+    ) -> InterviewState:
+        return self._inner_store.answer_current_question(
+            user_email,
+            session_id,
+            answer_text,
+            next_question_override=next_question_override,
+            retry_question_override=retry_question_override,
+        )
+
+
+class _CreateSessionCapabilityStore(DatabaseInterviewRuntimeStore):
+    def __init__(self, capability_db_connection: object) -> None:
+        self.runtime_session = _RecordingRuntimeSession()
+        self._session = self.runtime_session
+        self._commit_on_write = False
+        self._capability_db_connection = capability_db_connection
+
+    @contextmanager
+    def open_capability_db_connection(self):
+        yield self._capability_db_connection
+
+    def session_id_exists(self, session_id: str) -> bool:
+        return False
+
+    def _to_state(self, session_model) -> InterviewState:
+        return InterviewState(
+            session_id=session_model.id,
+            user_email=session_model.user_email,
+            interview_type=InterviewType(session_model.interview_type),
+            status=session_model.status,
+            current_step_index=session_model.current_step_index,
+            total_steps=session_model.total_steps,
+            current_question=None,
+            next_question=None,
+            material_context=None,
+        )
+
+
+class _RecordingRuntimeSession:
+    def __init__(self) -> None:
+        self.added: list[object] = []
+        self.flushed = False
+        self.committed = False
+
+    def add(self, model: object) -> None:
+        self.added.append(model)
+
+    def flush(self) -> None:
+        self.flushed = True
+
+    def commit(self) -> None:
+        self.committed = True
 
 
 if __name__ == "__main__":

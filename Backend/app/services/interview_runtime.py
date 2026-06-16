@@ -1,9 +1,11 @@
+from collections.abc import Generator
 from dataclasses import dataclass
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.models.entities import InterviewMaterial, InterviewReport, InterviewSession, InterviewTurn
 from app.schemas.interviews import (
@@ -778,6 +780,22 @@ class DatabaseInterviewRuntimeStore:
         self._session = session
         self._commit_on_write = commit_on_write
 
+    @contextmanager
+    def open_capability_db_connection(self) -> Generator[Session, None, None]:
+        bind = self._session.get_bind()
+        engine = getattr(bind, "engine", bind)
+        capability_session_factory = sessionmaker(
+            bind=engine,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+        )
+        capability_session = capability_session_factory()
+        try:
+            yield capability_session
+        finally:
+            capability_session.close()
+
     def session_id_exists(self, session_id: str) -> bool:
         return (
             self._session.execute(
@@ -813,12 +831,13 @@ class DatabaseInterviewRuntimeStore:
     ) -> InterviewState:
         if self.session_id_exists(session_id):
             raise InterviewSessionConflictError("interview session id already exists")
-        steps = build_interview_steps(
-            interview_type,
-            material_context,
-            session_id=session_id,
-            capability_db_connection=self._session,
-        )
+        with self.open_capability_db_connection() as capability_db_connection:
+            steps = build_interview_steps(
+                interview_type,
+                material_context,
+                session_id=session_id,
+                capability_db_connection=capability_db_connection,
+            )
         session_model = InterviewSession(
             id=session_id,
             user_email=user_email,

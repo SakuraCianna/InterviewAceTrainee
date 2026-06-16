@@ -1,6 +1,7 @@
-from collections.abc import Generator
+from collections.abc import Callable, Generator
+from contextlib import contextmanager, nullcontext
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
 from sqlalchemy.orm import Session
@@ -351,6 +352,7 @@ def answer_interview_question(
                 content_safety_log_store=content_safety_log_store,
                 settings=settings,
                 user_email=claims["sub"],
+                capability_db_connection_factory=lambda: capability_db_connection_for_store(interview_store),
             )
         except Exception:
             logger.warning("Failed to generate adaptive follow-up for session_id=%s", session_id, exc_info=True)
@@ -387,27 +389,34 @@ def build_next_question_override(
     content_safety_log_store: ContentSafetyLogStore,
     settings: Settings,
     user_email: str,
+    capability_db_connection: Any | None = None,
+    capability_db_connection_factory: Callable[[], Any] | None = None,
 ) -> str | None:
     if current_state.current_step_index + 1 >= current_state.total_steps:
         return None
-    if current_state.next_question is not None:
-        next_round_name = current_state.next_question.round_name
-        next_static_question = current_state.next_question.text
-    else:
-        steps = build_interview_steps_for_state(current_state)
-        next_step = steps[current_state.current_step_index + 1]
-        next_round_name = next_step.round_name
-        next_static_question = next_step.question_text
-    preset_context = build_preset_prompt_context(
-        current_state.interview_type,
-        current_state.material_context,
-        round_name=next_round_name,
-    )
-    capability_context = build_capability_prompt_context(
-        current_state.interview_type,
-        current_state.material_context,
-        round_name=next_round_name,
-    )
+    with open_capability_db_connection_context(
+        capability_db_connection_factory,
+        capability_db_connection,
+    ) as db_connection:
+        if current_state.next_question is not None:
+            next_round_name = current_state.next_question.round_name
+            next_static_question = current_state.next_question.text
+        else:
+            steps = build_interview_steps_for_state(current_state, db_connection)
+            next_step = steps[current_state.current_step_index + 1]
+            next_round_name = next_step.round_name
+            next_static_question = next_step.question_text
+        preset_context = build_preset_prompt_context(
+            current_state.interview_type,
+            current_state.material_context,
+            round_name=next_round_name,
+        )
+        capability_context = build_capability_prompt_context(
+            current_state.interview_type,
+            current_state.material_context,
+            round_name=next_round_name,
+            db_connection=db_connection,
+        )
     trusted_context = "\n\n".join(context for context in (preset_context, capability_context) if context)
     with acquire_capacity(
         "llm:interview_followup",
@@ -444,7 +453,31 @@ def build_next_question_override(
         )
 
 
-def build_interview_steps_for_state(current_state: InterviewState):
+def build_interview_steps_for_state(current_state: InterviewState, capability_db_connection: Any | None = None):
     from app.services.interview_runtime import build_interview_steps
 
-    return build_interview_steps(current_state.interview_type, current_state.material_context)
+    return build_interview_steps(
+        current_state.interview_type,
+        current_state.material_context,
+        capability_db_connection=capability_db_connection,
+    )
+
+
+def open_capability_db_connection_context(
+    capability_db_connection_factory: Callable[[], Any] | None,
+    capability_db_connection: Any | None,
+):
+    if capability_db_connection_factory is not None:
+        return capability_db_connection_factory()
+    return nullcontext(capability_db_connection)
+
+
+@contextmanager
+def capability_db_connection_for_store(
+    interview_store: DatabaseInterviewRuntimeStore | InMemoryInterviewRuntimeStore,
+) -> Generator[Any | None, None, None]:
+    if isinstance(interview_store, DatabaseInterviewRuntimeStore):
+        with interview_store.open_capability_db_connection() as capability_db_connection:
+            yield capability_db_connection
+        return
+    yield None
