@@ -217,7 +217,7 @@ API 对每个用户执行以下材料配额和内容擦除规则：
 6. 生成 runtime allowlist 包，仅含 Compose、Nginx 和部署脚本；构建阶段拒绝任何 test/spec 文件
 7. 服务器在唯一 staging 内校验包与脚本 SHA-256，只创建不存在的 `releases/<SHA>`，不覆盖同 SHA、不创建 Git 仓库、不接收源码或测试
 8. 候选 release 先通过 Compose/Nginx 配置、API/Worker 深度 readiness 和 HTTPS 边缘探测，然后才原子切换 `current`；失败会恢复 `previous`
-9. 生产只执行 `docker load` 与 `docker compose ... --no-build --pull never`，逐个确认六个 commit 专属本地镜像存在，不现场运行 Maven、npm、测试、Docker build 或隐式 registry pull；精确清理本次 staging、最多保留 5 个 release，不执行全局 prune
+9. 生产只执行 `docker load`；常驻服务的 `docker compose up --no-build --pull never` 与一次性迁移的 `docker compose run --pull never` 都只使用六个 commit 专属本地镜像，不现场运行 Maven、npm、测试、Docker build 或隐式 registry pull；精确清理本次 staging、最多保留 5 个 release，不执行全局 prune
 
 生产工作流还会通过 GitHub Actions API 要求同一 commit 已在 `sakuracianna` 完整 CI 中成功，历史 SHA 不能绕过 Compose 拓扑和业务烟测直接发布。
 生产观察命令统一通过 runtime 包内的 `deploy/production-compose.sh` 解析 `current`、固定 project 名和六个镜像标签；该入口不开放 `up`、`down`、`pull`、`rm` 等状态变更，避免手工环境变量漂移。

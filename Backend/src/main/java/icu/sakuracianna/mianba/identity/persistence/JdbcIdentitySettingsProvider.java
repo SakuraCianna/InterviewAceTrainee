@@ -7,9 +7,12 @@ import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** 从 PostgreSQL system_configs 读取身份业务设置，不缓存以保证管理员变更即时生效。 */
+/**
+ * 从 PostgreSQL system_configs 读取身份业务设置，不缓存以保证管理员变更即时生效。
+ * 类必须保持可继承，以便 Spring 为 Repository 创建 CGLIB 类代理并执行持久化异常转换。
+ */
 @Repository
-public final class JdbcIdentitySettingsProvider implements IdentitySettingsProvider {
+public class JdbcIdentitySettingsProvider implements IdentitySettingsProvider {
     private final JdbcTemplate jdbc;
 
     public JdbcIdentitySettingsProvider(JdbcTemplate jdbc) {

@@ -229,7 +229,7 @@ jobs:
           docker compose -f docker-compose.yml -f deploy/docker-compose.ci.yml \
             up -d --no-build --wait --wait-timeout 240 postgres redis rabbitmq
           docker compose -f docker-compose.yml -f deploy/docker-compose.ci.yml \
-            run --rm --no-deps --no-build migrate
+            run --rm --no-deps migrate
           docker compose -f docker-compose.yml -f deploy/docker-compose.ci.yml \
             up -d --no-build --no-deps --wait --wait-timeout 240 material-parser api frontend
           docker compose -f docker-compose.yml -f deploy/docker-compose.ci.yml \

@@ -739,7 +739,7 @@ candidate_started=1
 compose_for "$release_dir" "$deploy_sha" up -d --no-build --no-recreate --pull never \
   --wait --wait-timeout 240 \
   postgres redis rabbitmq
-compose_for "$release_dir" "$deploy_sha" run --rm --no-deps --no-build --pull never migrate
+compose_for "$release_dir" "$deploy_sha" run --rm --no-deps --pull never migrate
 start_material_parser_if_present "$release_dir" "$deploy_sha"
 compose_for "$release_dir" "$deploy_sha" up -d --no-build --no-deps --pull never \
   --wait --wait-timeout 240 \

@@ -280,7 +280,7 @@ export MIANBA_PRODUCTION_ROOT="$PRODUCTION_PATH"
 bash "$PRODUCTION_PATH/current/deploy/production-compose.sh" ps
 ```
 
-生产发布命令必须包含 `--no-build --pull never`。PostgreSQL 初始化脚本、Redis 入口和 RabbitMQ 配置首次安装到固定 `shared/runtime-config`；后续应用发布要求候选文件与固定副本完全一致，并以 `--no-recreate` 保持数据层生命周期，基础设施配置升级必须走独立维护流程。Flyway 仅使用 `run --rm --no-deps --no-build --pull never migrate` 以 `mianba_owner` 执行；API 与 Worker 分别使用非所有者 `mianba_api`、`mianba_worker`，数据库与 RabbitMQ 权限互相隔离。Material Parser 在独立受限容器中使用同一 JAR 的轻量主类，不挂载数据库、Redis、RabbitMQ 或 Provider Secret，也不接入公网网络；8 秒硬截止触发时进程退出并由 Compose 自动恢复。
+生产常驻服务发布命令必须包含 `--no-build --pull never`。PostgreSQL 初始化脚本、Redis 入口和 RabbitMQ 配置首次安装到固定 `shared/runtime-config`；后续应用发布要求候选文件与固定副本完全一致，并以 `--no-recreate` 保持数据层生命周期，基础设施配置升级必须走独立维护流程。Flyway 仅使用 `run --rm --no-deps --pull never migrate` 以 `mianba_owner` 执行；API 与 Worker 分别使用非所有者 `mianba_api`、`mianba_worker`，数据库与 RabbitMQ 权限互相隔离。Material Parser 在独立受限容器中使用同一 JAR 的轻量主类，不挂载数据库、Redis、RabbitMQ 或 Provider Secret，也不接入公网网络；8 秒硬截止触发时进程退出并由 Compose 自动恢复。
 
 首次重建会停止并删除旧拓扑、创建新卷和运行 Flyway，因此是明确维护窗口，不是零停机发布。后续仅应用发布才复用稳定数据层；任何 PostgreSQL/Redis/RabbitMQ 镜像或配置升级仍需要单独维护窗口和回滚评估。
 

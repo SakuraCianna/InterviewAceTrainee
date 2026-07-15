@@ -17,6 +17,40 @@ fail() {
   exit 1
 }
 
+python3 - \
+  "$workspace/.github/workflows/ci.yml" \
+  "$activate" \
+  "$workspace/README.md" \
+  "$workspace/docs/operations/production-rebuild-runbook.md" <<'PY'
+import sys
+from pathlib import Path
+
+
+ci_path, activate_path, readme_path, runbook_path = map(Path, sys.argv[1:])
+ci_lines = ci_path.read_text(encoding="utf-8").splitlines()
+ci_run_line = "            run --rm --no-deps migrate"
+ci_compose_line = "          docker compose -f docker-compose.yml -f deploy/docker-compose.ci.yml \\"
+ci_indices = [index for index, line in enumerate(ci_lines) if line == ci_run_line]
+if len(ci_indices) != 1 or ci_indices[0] == 0 or ci_lines[ci_indices[0] - 1] != ci_compose_line:
+    raise SystemExit("CI must contain exactly one canonical docker compose run migration command")
+
+activate_lines = activate_path.read_text(encoding="utf-8").splitlines()
+activate_command = (
+    'compose_for "$release_dir" "$deploy_sha" '
+    "run --rm --no-deps --pull never migrate"
+)
+if activate_lines.count(activate_command) != 1:
+    raise SystemExit("release activation must contain exactly one canonical migration command")
+
+readme = readme_path.read_text(encoding="utf-8")
+if readme.count("`docker compose run --pull never`") != 1:
+    raise SystemExit("README must document the supported one-off migration command exactly once")
+
+runbook = runbook_path.read_text(encoding="utf-8")
+if runbook.count("`run --rm --no-deps --pull never migrate`") != 1:
+    raise SystemExit("runbook must document the supported Flyway command exactly once")
+PY
+
 grep -Fq 'test "${#runtime_images[@]}" -eq 6' "$workflow" \
   || fail "Compose image inventory is not closed to exactly six images"
 grep -Fq 'unexpected = sorted(tags - expected_tags)' "$workflow" \
