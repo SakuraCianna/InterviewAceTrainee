@@ -1,14 +1,25 @@
-name: Deploy Production
+name: Prepare or Deploy Production
 
 on:
   workflow_dispatch:
     inputs:
+      commit_sha:
+        description: "sakuracianna 分支上的完整 40 位 commit SHA"
+        required: true
+        type: string
+      action:
+        description: "仅生成运行时包, 或生成后部署"
+        required: true
+        default: prepare
+        type: choice
+        options: [prepare, deploy]
       confirm:
-        description: "输入 deploy 确认发布到生产环境"
+        description: "输入 deploy 确认生成生产候选包"
         required: true
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -16,142 +27,526 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  preflight:
-    name: Preflight checks
+  release:
+    name: Test and build runtime-only bundle
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    if: ${{ github.event.inputs.confirm == 'deploy' }}
+    timeout-minutes: 60
+    if: ${{ inputs.confirm == 'deploy' }}
+    outputs:
+      commit_sha: ${{ steps.commit.outputs.sha }}
 
     steps:
-      - name: Checkout main
-        uses: actions/checkout@v4
+      - name: Checkout sakuracianna on the CI runner only
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: main
+          ref: sakuracianna
+          fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Lock release to requested commit
+        id: commit
+        shell: bash
+        env:
+          REQUESTED_SHA: ${{ inputs.commit_sha }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::commit_sha must be a full lowercase SHA"; exit 1; }
+          git fetch --no-tags origin sakuracianna
+          git merge-base --is-ancestor "$REQUESTED_SHA" origin/sakuracianna || {
+            echo "::error::Requested commit is not contained in origin/sakuracianna"; exit 1;
+          }
+          git checkout --detach "$REQUESTED_SHA"
+          test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
+          echo "sha=$REQUESTED_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Require successful full CI for the exact commit
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ steps.commit.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          response_file="$RUNNER_TEMP/mianba-ci-runs.json"
+          curl --fail --silent --show-error --retry 3 --get \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --data-urlencode "head_sha=$DEPLOY_SHA" \
+            --data-urlencode 'branch=sakuracianna' \
+            --data-urlencode 'status=success' \
+            --data-urlencode 'per_page=100' \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            > "$response_file"
+          python - "$response_file" "$DEPLOY_SHA" <<'PY'
+          import json
+          import sys
+
+          response_path, deploy_sha = sys.argv[1:]
+          with open(response_path, encoding="utf-8") as stream:
+              runs = json.load(stream).get("workflow_runs", [])
+          accepted = any(
+              run.get("head_sha") == deploy_sha
+              and run.get("head_branch") == "sakuracianna"
+              and run.get("conclusion") == "success"
+              for run in runs
+          )
+          if not accepted:
+              raise SystemExit("the exact commit has no successful sakuracianna CI run")
+          PY
+
+      - name: Set up Java 21
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
-          python-version: "3.12"
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: Backend/pom.xml
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-          cache-dependency-glob: Backend/uv.lock
-
-      - name: Install backend dependencies
+      - name: Test and package Java
         working-directory: Backend
-        run: uv sync --locked
+        run: |
+          mvn --batch-mode --no-transfer-progress test
+          mvn --batch-mode --no-transfer-progress -DskipTests package
 
-      - name: Run backend unit tests
-        working-directory: Backend
-        run: uv run python -m unittest discover -s tests
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Set up Node.js 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: Frontend/package-lock.json
 
-      - name: Install frontend dependencies
+      - name: Test and build frontend
         working-directory: Frontend
-        run: npm ci
+        run: |
+          npm ci
+          npm audit --audit-level=high
+          npm test -- --run
+          npm run typecheck
+          npm run build
 
-      - name: Build frontend
-        working-directory: Frontend
-        run: npm run build
+      - name: Build final runtime images
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          docker build --tag "mianba-java:$DEPLOY_SHA" Backend
+          docker build \
+            --tag "mianba-frontend:$DEPLOY_SHA" Frontend
+
+      - name: Assemble explicit runtime allowlist
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release/runtime/deploy/postgres-init release/runtime/nginx
+          install -m 0644 docker-compose.yml release/runtime/docker-compose.yml
+          install -m 0755 deploy/redis-entrypoint.sh release/runtime/deploy/redis-entrypoint.sh
+          install -m 0755 deploy/prepare-server-secrets.sh release/runtime/deploy/prepare-server-secrets.sh
+          install -m 0755 deploy/promote-first-admin.sh release/runtime/deploy/promote-first-admin.sh
+          install -m 0755 deploy/production-compose.sh release/runtime/deploy/production-compose.sh
+          install -m 0755 deploy/validate-compose-env.sh release/runtime/deploy/validate-compose-env.sh
+          install -m 0755 deploy/activate-release.sh release/runtime/deploy/activate-release.sh
+          install -m 0755 deploy/rollback-release.sh release/runtime/deploy/rollback-release.sh
+          install -m 0755 deploy/postgres-init/001-create-app-role.sh release/runtime/deploy/postgres-init/001-create-app-role.sh
+          install -m 0644 deploy/rabbitmq.conf release/runtime/deploy/rabbitmq.conf
+          install -m 0644 nginx/main.conf nginx/nginx.conf nginx/security-headers.conf release/runtime/nginx/
+          printf '%s\n' "$DEPLOY_SHA" > release/runtime/commit.txt
+
+          if find release/runtime -type f \( -iname '*test*' -o -iname '*spec*' \) -print -quit | grep -q .; then
+            echo "::error::Runtime bundle unexpectedly contains a test/spec file"
+            exit 1
+          fi
+
+          runtime_config_root="$(mktemp -d "$RUNNER_TEMP/mianba-runtime-config.XXXXXX")"
+          cleanup_runtime_config() {
+            rm -rf -- "$runtime_config_root"
+          }
+          trap cleanup_runtime_config EXIT
+          install -d -m 0700 "$runtime_config_root/secrets" "$runtime_config_root/certs"
+          for name in \
+            postgres_owner_password postgres_api_password postgres_worker_password \
+            redis_app_password rabbitmq_api_password rabbitmq_worker_password jwt_secret \
+            material-parser-token deepseek_api_key resend_api_key mail_from \
+            tencent_app_id tencent_secret_id tencent_secret_key \
+            hcaptcha-site-key hcaptcha-secret rabbitmq-definitions.json; do
+            : > "$runtime_config_root/secrets/$name"
+          done
+          : > "$runtime_config_root/certs/sakuracianna.icu_bundle.pem"
+          : > "$runtime_config_root/certs/sakuracianna.icu.key"
+
+          mapfile -t runtime_images < <(
+            MIANBA_APP_IMAGE="mianba-java:$DEPLOY_SHA" \
+            MIANBA_FRONTEND_IMAGE="mianba-frontend:$DEPLOY_SHA" \
+              MIANBA_SECRETS_DIR="$runtime_config_root/secrets" \
+              MIANBA_CERTS_DIR="$runtime_config_root/certs" \
+              docker compose --env-file deploy/compose.env.example config --images | sort -u
+          )
+          test "${#runtime_images[@]}" -eq 6 || {
+            echo "::error::Compose runtime image inventory must contain exactly six images"
+            exit 1
+          }
+          printf '%s\n' "${runtime_images[@]}" | grep -Fx "mianba-java:$DEPLOY_SHA" >/dev/null
+          printf '%s\n' "${runtime_images[@]}" | grep -Fx "mianba-frontend:$DEPLOY_SHA" >/dev/null
+          select_runtime_image() {
+            local pattern="$1"
+            local -a matches=()
+            mapfile -t matches < <(printf '%s\n' "${runtime_images[@]}" | grep -E "$pattern")
+            test "${#matches[@]}" -eq 1 || {
+              echo "::error::Expected exactly one runtime image matching $pattern" >&2
+              return 1
+            }
+            printf '%s' "${matches[0]}"
+          }
+          postgres_source="$(select_runtime_image '^pgvector/pgvector:')"
+          redis_source="$(select_runtime_image '^redis:')"
+          rabbitmq_source="$(select_runtime_image '^rabbitmq:')"
+          nginx_source="$(select_runtime_image '^nginx:')"
+          vendor_sources=("$postgres_source" "$redis_source" "$rabbitmq_source" "$nginx_source")
+          for image in "${vendor_sources[@]}"; do
+            case "$image" in
+              *@sha256:*) docker pull --quiet "$image" >/dev/null ;;
+              *)
+                echo "::error::Third-party runtime image is not digest pinned: $image"
+                exit 1
+                ;;
+            esac
+          done
+          docker image inspect "mianba-java:$DEPLOY_SHA" "mianba-frontend:$DEPLOY_SHA" >/dev/null
+          docker tag "$postgres_source" "mianba-postgres:$DEPLOY_SHA"
+          docker tag "$redis_source" "mianba-redis:$DEPLOY_SHA"
+          docker tag "$rabbitmq_source" "mianba-rabbitmq:$DEPLOY_SHA"
+          docker tag "$nginx_source" "mianba-nginx:$DEPLOY_SHA"
+          archive_images=(
+            "mianba-java:$DEPLOY_SHA"
+            "mianba-frontend:$DEPLOY_SHA"
+            "mianba-postgres:$DEPLOY_SHA"
+            "mianba-redis:$DEPLOY_SHA"
+            "mianba-rabbitmq:$DEPLOY_SHA"
+            "mianba-nginx:$DEPLOY_SHA"
+          )
+          image_archive="release/mianba-images-$DEPLOY_SHA.tar"
+          docker save --output "$image_archive" "${archive_images[@]}"
+          python - "$image_archive" "${archive_images[@]}" <<'PY'
+          import json
+          import sys
+          import tarfile
+
+          archive, *expected = sys.argv[1:]
+          with tarfile.open(archive, mode="r") as image_tar:
+              manifest_file = image_tar.extractfile("manifest.json")
+              if manifest_file is None:
+                  raise SystemExit("image archive has no manifest.json")
+              manifest = json.load(manifest_file)
+          tags = {tag for entry in manifest for tag in (entry.get("RepoTags") or [])}
+          expected_tags = set(expected)
+          missing = sorted(expected_tags - tags)
+          unexpected = sorted(tags - expected_tags)
+          if missing or unexpected:
+              raise SystemExit(
+                  f"image archive tag set differs from release inventory; "
+                  f"missing={missing}, unexpected={unexpected}"
+              )
+          PY
+          cleanup_runtime_config
+          trap - EXIT
+          install -m 0755 deploy/activate-release.sh release/activate-release.sh
+          install -m 0755 deploy/rollback-release.sh release/rollback-release.sh
+          (cd release && sha256sum "mianba-images-$DEPLOY_SHA.tar" > "mianba-images-$DEPLOY_SHA.tar.sha256")
+          tar -C release/runtime -czf "release/mianba-runtime-$DEPLOY_SHA.tar.gz" .
+          (cd release && sha256sum "mianba-runtime-$DEPLOY_SHA.tar.gz" > "mianba-runtime-$DEPLOY_SHA.tar.gz.sha256")
+          (cd release && sha256sum activate-release.sh rollback-release.sh > deployment-scripts.sha256)
+          rm -rf release/runtime
+
+      - name: Upload immutable runtime bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mianba-production-${{ steps.commit.outputs.sha }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 7
 
   deploy:
-    name: Deploy to production
+    name: Deploy bundle without server source checkout
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: preflight
+    timeout-minutes: 60
+    needs: release
+    if: ${{ inputs.action == 'deploy' }}
     environment:
       name: production
       url: https://sakuracianna.icu/
 
     steps:
-      - name: Validate production secrets
-        shell: bash
-        env:
-          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
-          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
-          PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
-          PRODUCTION_KNOWN_HOSTS: ${{ secrets.PRODUCTION_KNOWN_HOSTS }}
-          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
-        run: |
-          missing=0
-          for name in PRODUCTION_HOST PRODUCTION_USER PRODUCTION_SSH_KEY PRODUCTION_KNOWN_HOSTS PRODUCTION_PATH; do
-            if [ -z "${!name}" ]; then
-              echo "::error::$name is required for production deployment"
-              missing=1
-            fi
-          done
-          exit "$missing"
+      - name: Download exact runtime bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mianba-production-${{ needs.release.outputs.commit_sha }}
+          path: release
 
-      - name: Configure SSH
-        shell: bash
-        env:
-          PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
-          PRODUCTION_KNOWN_HOSTS: ${{ secrets.PRODUCTION_KNOWN_HOSTS }}
-        run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s\n' "$PRODUCTION_SSH_KEY" > ~/.ssh/mianba_deploy_key
-          printf '%s\n' "$PRODUCTION_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/mianba_deploy_key
-          chmod 600 ~/.ssh/known_hosts
-
-      - name: Run data-safe production rollout
+      - name: Validate deployment settings and target host
         shell: bash
         env:
           PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
           PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
           PRODUCTION_PORT: ${{ secrets.PRODUCTION_PORT }}
+          PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+          PRODUCTION_KNOWN_HOSTS: ${{ secrets.PRODUCTION_KNOWN_HOSTS }}
           PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
         run: |
-          port="${PRODUCTION_PORT:-22}"
-          remote_path_b64="$(printf '%s' "$PRODUCTION_PATH" | base64 -w0)"
-          ssh -i ~/.ssh/mianba_deploy_key -p "$port" "$PRODUCTION_USER@$PRODUCTION_HOST" "REMOTE_PATH_B64='$remote_path_b64' bash -se" <<'REMOTE'
           set -Eeuo pipefail
+          for name in PRODUCTION_HOST PRODUCTION_USER PRODUCTION_SSH_KEY PRODUCTION_KNOWN_HOSTS PRODUCTION_PATH; do
+            test -n "${!name}" || { echo "::error::$name is required"; exit 1; }
+          done
+          test "$PRODUCTION_HOST" = "118.195.193.66" || {
+            echo "::error::Production host does not match the explicitly authorized server"; exit 1;
+          }
+          [[ "$PRODUCTION_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || {
+            echo "::error::Production user contains unsupported characters"; exit 1;
+          }
+          port="${PRODUCTION_PORT:-22}"
+          [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || {
+            echo "::error::Production port is invalid"; exit 1;
+          }
+          [[ "$PRODUCTION_PATH" =~ ^(/[A-Za-z0-9][A-Za-z0-9._-]*){2,}$ ]] || {
+            echo "::error::Production path must be an absolute path with at least two safe components"; exit 1;
+          }
+          test "$(realpath -m -- "$PRODUCTION_PATH")" = "$PRODUCTION_PATH" || {
+            echo "::error::Production path must already be normalized"; exit 1;
+          }
 
-          deploy_path="$(printf '%s' "$REMOTE_PATH_B64" | base64 -d)"
-          cd "$deploy_path"
+      - name: Configure pinned SSH host verification
+        shell: bash
+        env:
+          PRODUCTION_SSH_KEY: ${{ secrets.PRODUCTION_SSH_KEY }}
+          PRODUCTION_KNOWN_HOSTS: ${{ secrets.PRODUCTION_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PRODUCTION_SSH_KEY" > ~/.ssh/mianba_deploy_key
+          printf '%s\n' "$PRODUCTION_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/mianba_deploy_key ~/.ssh/known_hosts
 
-          # Keep production-only edits out of the Git worktree. Runtime config must live in .env,
-          # mounted certificates, Docker volumes, or database_backups/ so this fast-forward pull is data-safe.
-          git fetch --prune origin main
-          git checkout main
-          git pull --ff-only origin main
-
-          # Data-safe rollout only: build images, run the backup-aware migration gate, then refresh services.
-          # Do not remove Compose volumes, Redis/PostgreSQL data, or database_backups/ in this workflow.
-          docker compose build
-          docker compose --profile migrate run --rm migrate
-          docker compose up -d
-          docker compose ps
+      - name: Upload runtime-only bundle to unique release staging
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ needs.release.outputs.commit_sha }}
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PORT: ${{ secrets.PRODUCTION_PORT }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+        run: |
+          set -Eeuo pipefail
+          port="${PRODUCTION_PORT:-22}"
+          stage_id="$DEPLOY_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          remote_path_b64="$(printf '%s' "$PRODUCTION_PATH" | base64 -w0)"
+          ssh_options=(-i ~/.ssh/mianba_deploy_key -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
+          scp_options=(-i ~/.ssh/mianba_deploy_key -P "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
+          ssh "${ssh_options[@]}" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+            "REMOTE_PATH_B64='$remote_path_b64' STAGE_ID='$stage_id' bash -se" <<'REMOTE'
+          set -Eeuo pipefail
+          root="$(printf '%s' "$REMOTE_PATH_B64" | base64 -d)"
+          [[ "$root" =~ ^(/[A-Za-z0-9][A-Za-z0-9._-]*){2,}$ ]]
+          test "$(realpath -m -- "$root")" = "$root"
+          if test -e "$root" || test -L "$root"; then
+            test -d "$root"
+            test ! -L "$root"
+          else
+            install -d -m 0750 -- "$root"
+          fi
+          for directory in "$root/.incoming" "$root/releases"; do
+            if test -e "$directory" || test -L "$directory"; then
+              test -d "$directory"
+              test ! -L "$directory"
+            else
+              install -d -m 0750 -- "$directory"
+            fi
+          done
+          for directory in "$root/shared" "$root/shared/secrets" "$root/shared/certs"; do
+            if test -e "$directory" || test -L "$directory"; then
+              test -d "$directory"
+              test ! -L "$directory"
+            else
+              install -d -m 0700 -- "$directory"
+            fi
+          done
+          chmod 0750 "$root" "$root/.incoming" "$root/releases"
+          chmod 0700 "$root/shared" "$root/shared/secrets" "$root/shared/certs"
+          [[ "$STAGE_ID" =~ ^[0-9a-f]{40}-[0-9]+-[0-9]+$ ]]
+          stage="$root/.incoming/$STAGE_ID"
+          test ! -e "$stage"
+          test ! -L "$stage"
+          mkdir -m 0700 -- "$stage"
           REMOTE
 
-      - name: Verify production health
+          if ! scp "${scp_options[@]}" -r release/. \
+            "$PRODUCTION_USER@$PRODUCTION_HOST:$PRODUCTION_PATH/.incoming/$stage_id/"; then
+            ssh "${ssh_options[@]}" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+              "REMOTE_PATH_B64='$remote_path_b64' STAGE_ID='$stage_id' bash -se" <<'REMOTE_CLEANUP'
+            set -Eeuo pipefail
+            root="$(printf '%s' "$REMOTE_PATH_B64" | base64 -d)"
+            [[ "$root" =~ ^(/[A-Za-z0-9][A-Za-z0-9._-]*){2,}$ ]]
+            test "$(realpath -m -- "$root")" = "$root"
+            [[ "$STAGE_ID" =~ ^[0-9a-f]{40}-[0-9]+-[0-9]+$ ]]
+            stage="$root/.incoming/$STAGE_ID"
+            test "$(realpath -m -- "$stage")" = "$stage"
+            rm -rf -- "$stage"
+            REMOTE_CLEANUP
+            exit 1
+          fi
+
+      - name: Validate and activate exact runtime release
+        id: activate
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ needs.release.outputs.commit_sha }}
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PORT: ${{ secrets.PRODUCTION_PORT }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+        run: |
+          set -Eeuo pipefail
+          port="${PRODUCTION_PORT:-22}"
+          stage_id="$DEPLOY_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          remote_path_b64="$(printf '%s' "$PRODUCTION_PATH" | base64 -w0)"
+          ssh_options=(-i ~/.ssh/mianba_deploy_key -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
+          ssh "${ssh_options[@]}" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+            "REMOTE_PATH_B64='$remote_path_b64' DEPLOY_SHA='$DEPLOY_SHA' STAGE_ID='$stage_id' bash -se" <<'REMOTE'
+          set -Eeuo pipefail
+          root="$(printf '%s' "$REMOTE_PATH_B64" | base64 -d)"
+          [[ "$root" =~ ^(/[A-Za-z0-9][A-Za-z0-9._-]*){2,}$ ]]
+          test "$(realpath -m -- "$root")" = "$root"
+          [[ "$STAGE_ID" =~ ^${DEPLOY_SHA}-[0-9]+-[0-9]+$ ]]
+          stage="$root/.incoming/$STAGE_ID"
+          test -d "$stage"
+          test ! -L "$stage"
+          (cd "$stage" && sha256sum --check deployment-scripts.sha256)
+
+          set +e
+          MIANBA_PRODUCTION_ROOT="$root" \
+          MIANBA_DEPLOY_SHA="$DEPLOY_SHA" \
+          MIANBA_STAGE_ID="$STAGE_ID" \
+            bash "$stage/activate-release.sh"
+          status=$?
+          set -e
+          if (( status != 0 )); then
+            if test -d "$stage" && test ! -L "$stage" \
+              && test "$(realpath -m -- "$stage")" = "$stage"; then
+              rm -rf -- "$stage"
+            fi
+            exit "$status"
+          fi
+          REMOTE
+
+      - name: Verify public liveness and readiness
+        id: public_verify
         shell: bash
         env:
           PRODUCTION_HEALTH_URL: ${{ secrets.PRODUCTION_HEALTH_URL }}
           PRODUCTION_READINESS_URL: ${{ secrets.PRODUCTION_READINESS_URL }}
         run: |
+          set -Eeuo pipefail
           health_url="${PRODUCTION_HEALTH_URL:-https://sakuracianna.icu/api/health}"
           readiness_url="${PRODUCTION_READINESS_URL:-https://sakuracianna.icu/api/health/readiness}"
+          strict_json_probe() {
+            local url="$1"
+            local probe="$2"
+            local response_file http_status
+            response_file="$(mktemp)"
+            if ! http_status="$(curl --silent --show-error --connect-timeout 5 --max-time 10 \
+              --max-filesize 65536 \
+              --output "$response_file" --write-out '%{http_code}' "$url")"; then
+              rm -f -- "$response_file"
+              return 1
+            fi
+            if ! test "$http_status" = "200"; then
+              rm -f -- "$response_file"
+              return 1
+            fi
+            if python - "$response_file" "$probe" <<'PY'
+          import json
+          import sys
 
+          def reject_duplicate_keys(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise ValueError("duplicate JSON key")
+                  result[key] = value
+              return result
+
+          def reject_non_standard_constant(_value):
+              raise ValueError("non-standard JSON constant")
+
+          response_path, probe = sys.argv[1:]
+          try:
+              with open(response_path, encoding="utf-8") as stream:
+                  payload = json.load(
+                      stream,
+                      object_pairs_hook=reject_duplicate_keys,
+                      parse_constant=reject_non_standard_constant,
+                  )
+          except (OSError, UnicodeError, ValueError) as error:
+              raise SystemExit(f"invalid health JSON: {error}") from error
+          if not isinstance(payload, dict):
+              raise SystemExit("health response must be a JSON object")
+          if probe == "liveness":
+              accepted = payload.get("status") == "ok"
+          elif probe == "readiness":
+              accepted = (
+                  payload.get("ready") is True
+                  and payload.get("database_ready") is True
+                  and payload.get("redis_ready") is True
+                  and payload.get("rabbit_ready") is True
+                  and payload.get("worker_ready") is True
+                  and payload.get("parser_ready") is True
+              )
+          else:
+              raise SystemExit("unknown health probe")
+          if not accepted:
+              raise SystemExit(f"unexpected {probe} health payload")
+          PY
+            then
+              rm -f -- "$response_file"
+              return 0
+            fi
+            rm -f -- "$response_file"
+            return 1
+          }
           for attempt in $(seq 1 30); do
-            if curl --fail --silent --show-error "$health_url"; then
-              echo
-              break
-            fi
-            if [ "$attempt" -eq 30 ]; then
-              echo "::error::Production health check did not become ready"
-              exit 1
-            fi
+            strict_json_probe "$health_url" liveness && break
+            test "$attempt" -lt 30 || { echo "::error::Production liveness did not become ready"; exit 1; }
+            sleep 5
+          done
+          for attempt in $(seq 1 12); do
+            strict_json_probe "$readiness_url" readiness && break
+            test "$attempt" -lt 12 || { echo "::error::Production readiness did not become healthy"; exit 1; }
             sleep 5
           done
 
-          curl --fail --silent --show-error "$readiness_url"
+      - name: Restore previous release when external verification fails
+        if: ${{ failure() && steps.activate.outcome == 'success' }}
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ needs.release.outputs.commit_sha }}
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          PRODUCTION_USER: ${{ secrets.PRODUCTION_USER }}
+          PRODUCTION_PORT: ${{ secrets.PRODUCTION_PORT }}
+          PRODUCTION_PATH: ${{ secrets.PRODUCTION_PATH }}
+        run: |
+          set -Eeuo pipefail
+          port="${PRODUCTION_PORT:-22}"
+          remote_path_b64="$(printf '%s' "$PRODUCTION_PATH" | base64 -w0)"
+          ssh_options=(-i ~/.ssh/mianba_deploy_key -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
+          ssh "${ssh_options[@]}" "$PRODUCTION_USER@$PRODUCTION_HOST" \
+            "REMOTE_PATH_B64='$remote_path_b64' DEPLOY_SHA='$DEPLOY_SHA' bash -se" <<'REMOTE'
+          set -Eeuo pipefail
+          root="$(printf '%s' "$REMOTE_PATH_B64" | base64 -d)"
+          [[ "$root" =~ ^(/[A-Za-z0-9][A-Za-z0-9._-]*){2,}$ ]]
+          test "$(realpath -m -- "$root")" = "$root"
+          rollback_script="$root/releases/$DEPLOY_SHA/deploy/rollback-release.sh"
+          test -f "$rollback_script"
+          test ! -L "$rollback_script"
+          MIANBA_PRODUCTION_ROOT="$root" \
+          MIANBA_FAILED_DEPLOY_SHA="$DEPLOY_SHA" \
+            bash "$rollback_script"
+          REMOTE

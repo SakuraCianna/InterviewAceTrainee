@@ -17,7 +17,8 @@ export type ProviderConfig = {
 };
 
 export type AdminLoginResponse = {
-  access_token?: string;
+  email?: string;
+  role?: string;
   detail?: string;
   message?: string;
   dev_code?: string;
@@ -70,7 +71,7 @@ export type AICallLogEntry = {
   audio_duration_ms?: number | null;
   characters?: number | null;
   estimated_cost_cents?: number | null;
-  error_message?: string | null;
+  error_code?: string | null;
   created_at: string;
 };
 

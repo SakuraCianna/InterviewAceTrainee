@@ -1,0 +1,7 @@
+# 仅供 GitHub CI 完整拓扑烟测使用。生产部署不得加载此覆盖文件。
+services:
+  worker:
+    environment:
+      MIANBA_RUNTIME_PRODUCTION: "false"
+      MIANBA_AI_RUNTIME_STUB_ENABLED: "true"
+      SPRING_AI_MODEL_CHAT: none

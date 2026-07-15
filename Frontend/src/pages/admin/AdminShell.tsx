@@ -1,10 +1,21 @@
 import { FocusEvent, FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { AppIcon } from "../../components/AppIcon";
-import { CSRF_COOKIE_NAME, getApiErrorMessage, getCookie } from "../../lib/api";
+import {
+  CSRF_COOKIE_NAME,
+  createIdempotencyKey,
+  getApiErrorMessage,
+  getCookie,
+  listAdminTasks,
+  retryTask,
+  type AiTask,
+} from "../../lib/api";
 import { useEmailCodeCooldown } from "../../hooks/useEmailCodeCooldown";
 import { normalizeEmail, retryAfterSeconds } from "../../lib/emailCooldown";
 import { AdminLoginView } from "./AdminLoginView";
 import { AdminSidebar } from "./AdminSidebar";
+import { AdminTaskMonitor } from "./AdminTaskMonitor";
+import { useAdminWriteLock } from "./hooks/useAdminWriteLock";
+import { useVisiblePolling } from "./hooks/useVisiblePolling";
 import {
   adjustUserCredits,
   createCustomerServiceNote,
@@ -37,6 +48,15 @@ import {
 } from "./adminApi";
 import { AdminChart, barDashboardOption, donutDashboardOption, lineDashboardOption } from "./dashboardCharts";
 import { configInputValue, parseConfigInput, parseOptionalAmountCents, parseOptionalInteger } from "./formUtils";
+import { adminClasses } from "./adminStyles";
+import {
+  buildRefundCaseConfirmation,
+  REFUND_ACCOUNTING_BOUNDARY_ITEMS,
+  REFUND_CREATED_BOUNDARY,
+  REFUND_CREDIT_FIELD_LABEL,
+  REFUND_RESOLVED_NOTE,
+  REFUND_STATUS_BOUNDARY,
+} from "./refundAccounting";
 import type {
   AICallLogEntry,
   AdminAuditLog,
@@ -192,7 +212,7 @@ type AdminSelectProps = {
 
 function StatusChip({ tone = "neutral", icon, children }: { tone?: StatusTone; icon?: string; children: ReactNode }) {
   return (
-    <span className={`admin2-chip admin2-chip--${tone}`}>
+    <span className={adminClasses("admin2-chip", `admin2-chip--${tone}`)}>
       {icon && <AppIcon icon={icon} size={15} />}
       {children}
     </span>
@@ -213,8 +233,8 @@ function MetricCard({
   tone?: StatusTone;
 }) {
   return (
-    <article className={`admin2-metric admin2-metric--${tone}`}>
-      <span className="admin2-metric-icon">
+    <article className={adminClasses("admin2-metric", `admin2-metric--${tone}`)}>
+      <span className={adminClasses("admin2-metric-icon")}>
         <AppIcon icon={icon} size={20} />
       </span>
       <span>{label}</span>
@@ -321,11 +341,11 @@ function AdminSelect({ value, options, ariaLabel, onChange }: AdminSelectProps) 
   }
 
   return (
-    <div className={isOpen ? "admin-select is-open" : "admin-select"} onBlur={closeWhenFocusLeaves}>
+    <div className={adminClasses("admin-select", isOpen && "is-open")} onBlur={closeWhenFocusLeaves}>
       <button
         type="button"
         ref={triggerRef}
-        className="admin-select-trigger"
+        className={adminClasses("admin-select-trigger")}
         aria-expanded={isOpen}
         aria-haspopup="listbox"
         aria-label={ariaLabel}
@@ -342,13 +362,13 @@ function AdminSelect({ value, options, ariaLabel, onChange }: AdminSelectProps) 
         <AppIcon icon="lucide:chevron-down" size={20} />
       </button>
       {isOpen && (
-        <div className="admin-select-menu" role="listbox" aria-label={ariaLabel}>
+        <div className={adminClasses("admin-select-menu")} role="listbox" aria-label={ariaLabel}>
           {options.map((option, index) => (
             <button
               type="button"
               role="option"
               aria-selected={option.value === value}
-              className={option.value === value ? "is-selected" : ""}
+              className={adminClasses(option.value === value && "is-selected")}
               key={option.value}
               ref={(element) => {
                 optionRefs.current[index] = element;
@@ -482,6 +502,10 @@ export function AdminShell() {
   const [interviewCoreHealthMessage, setInterviewCoreHealthMessage] = useState("面试核心健康检查尚未读取。");
   const [isLoading, setIsLoading] = useState(false);
   const [activeAdminSection, setActiveAdminSection] = useState<AdminSectionKey>("overview");
+  const [aiTasks, setAiTasks] = useState<AiTask[]>([]);
+  const [areAiTasksLoading, setAreAiTasksLoading] = useState(false);
+  const loadedSectionsRef = useRef(new Set<AdminSectionKey>());
+  const { isLocked, runLocked } = useAdminWriteLock();
 
   const dashboardChartOptions = useMemo(() => {
     if (!dashboardStats) {
@@ -533,6 +557,7 @@ export function AdminShell() {
     const tasks: AdminTask[] = [];
     const openRefundCount = refundCases.filter((entry) => entry.status === "open" || entry.status === "processing").length;
     const failedAiCount = aiCallLogs.filter((entry) => !entry.success).length;
+    const failedTaskCount = aiTasks.filter((task) => task.status === "FAILED").length;
     const failedLoginCount = authLoginLogs.filter((entry) => !entry.success).length;
     const blockedSafetyCount = contentSafetyLogs.filter((entry) => entry.action !== "allowed").length;
 
@@ -575,6 +600,16 @@ export function AdminShell() {
         section: "ai",
       });
     }
+    if (failedTaskCount > 0) {
+      tasks.push({
+        id: "worker-failures",
+        title: `${failedTaskCount} 个 Worker 任务需处理`,
+        detail: "查看错误码与自动重试次数，必要时人工重新入队。",
+        icon: "lucide:server-cog",
+        tone: "danger",
+        section: "ai",
+      });
+    }
     if (blockedSafetyCount > 0) {
       tasks.push({
         id: "content-safety",
@@ -606,7 +641,7 @@ export function AdminShell() {
       });
     }
     return tasks;
-  }, [aiCallLogs, authLoginLogs, contentSafetyLogs, interviewCoreHealth, interviewCoreHealthMessage, refundCases]);
+  }, [aiCallLogs, aiTasks, authLoginLogs, contentSafetyLogs, interviewCoreHealth, interviewCoreHealthMessage, refundCases]);
 
   const groupedSystemConfigs = useMemo(() => {
     const groups = new Map<string, SystemConfig[]>();
@@ -644,6 +679,18 @@ export function AdminShell() {
       document.documentElement.style.overflow = previousHtmlOverflow;
     };
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+    void loadSectionData(activeAdminSection);
+  }, [activeAdminSection, currentUser]);
+
+  useVisiblePolling({
+    enabled: Boolean(currentUser && (activeAdminSection === "overview" || activeAdminSection === "ai")),
+    poll: (signal) => loadAiTasks(signal, true),
+  });
 
   function formatDateTime(value: string) {
     return new Date(value).toLocaleString("zh-CN");
@@ -746,18 +793,7 @@ export function AdminShell() {
     setCurrentUser(user);
     setIsLoading(false);
     setMessage(`已进入后台：${user.email}`);
-    await Promise.allSettled([
-      loadProviders(),
-      loadDashboardStats(),
-      loadInterviewCoreHealth(),
-      loadSystemConfigs(),
-      loadAuditLogs(),
-      loadAiCallLogs(),
-      loadContentSafetyLogs(),
-      loadAuthLoginLogs(),
-      loadRefundCases(),
-      loadUsers(),
-    ]);
+    loadedSectionsRef.current.clear();
   }
 
   async function loadProviders() {
@@ -767,6 +803,66 @@ export function AdminShell() {
       return;
     }
     setProviders(data);
+  }
+
+  async function loadAiTasks(signal?: AbortSignal, silent = false) {
+    if (!silent) {
+      setAreAiTasksLoading(true);
+    }
+    try {
+      const page = await listAdminTasks({ limit: 25, signal });
+      setAiTasks(page.items);
+    } catch {
+      if (signal?.aborted) {
+        return;
+      }
+      setMessage("AI 任务队列读取失败，请检查 API 与 Worker 状态。");
+    } finally {
+      if (!silent && !signal?.aborted) {
+        setAreAiTasksLoading(false);
+      }
+    }
+  }
+
+  /** 每个分区首次进入时才请求其数据；force 仅供用户主动刷新使用。 */
+  async function loadSectionData(section: AdminSectionKey, force = false) {
+    if (!force && loadedSectionsRef.current.has(section)) {
+      return;
+    }
+    const loaders: Record<AdminSectionKey, Array<() => Promise<unknown>>> = {
+      overview: [loadDashboardStats, loadInterviewCoreHealth, () => loadRefundCases(), loadAiTasks],
+      users: [() => loadUsers()],
+      credits: [() => loadRefundCases(), () => loadUsers()],
+      quality: [loadInterviewCoreHealth],
+      ai: [loadProviders, loadAiCallLogs, loadAiTasks, loadDashboardStats],
+      audit: [loadAuditLogs, loadContentSafetyLogs, () => loadAuthLoginLogs(), () => loadRefundCases()],
+      system: [loadSystemConfigs],
+    };
+    await Promise.allSettled(loaders[section].map((load) => load()));
+    loadedSectionsRef.current.add(section);
+  }
+
+  async function runAdminWrite<T>(
+    lockKey: string,
+    networkErrorMessage: string,
+    operation: (idempotencyKey: string) => Promise<T>,
+  ) {
+    return runLocked(lockKey, async () => {
+      try {
+        return await operation(createIdempotencyKey());
+      } catch {
+        setMessage(networkErrorMessage);
+        return undefined;
+      }
+    });
+  }
+
+  async function retryAiTask(task: AiTask) {
+    await runAdminWrite(`task-retry:${task.id}`, "任务重新入队失败，请刷新后确认任务状态。", async (operationKey) => {
+      await retryTask(task, undefined, operationKey);
+      setMessage(`任务 ${task.id} 已重新入队。`);
+      await loadAiTasks();
+    });
   }
 
   async function loadAuditLogs() {
@@ -947,7 +1043,7 @@ export function AdminShell() {
     setReportMessage("报告已读取，可用于售后复核和争议追溯。");
   }
 
-  async function requestAdminCode() {
+  async function requestAdminCode(captchaToken: string) {
     if (!loginEmail) {
       setMessage("请先填写管理员邮箱。");
       return;
@@ -961,7 +1057,7 @@ export function AdminShell() {
     setMessage("正在发送管理员验证码...");
     let result: Awaited<ReturnType<typeof requestAdminEmailCode>>;
     try {
-      result = await requestAdminEmailCode(normalizeEmail(loginEmail));
+      result = await requestAdminEmailCode(normalizeEmail(loginEmail), captchaToken);
     } catch {
       setIsRequestingAdminCode(false);
       setMessage("网络连接异常, 请稍后再试");
@@ -985,7 +1081,7 @@ export function AdminShell() {
     setMessage(data.dev_code ? `开发验证码: ${data.dev_code}` : "验证码已发送, 5 分钟内有效, 请查看邮箱");
   }
 
-  async function submitAdminLogin(event: FormEvent<HTMLFormElement>) {
+  async function submitAdminLogin(event: FormEvent<HTMLFormElement>, captchaToken: string) {
     event.preventDefault();
     if (isSubmittingAdminLogin) {
       return;
@@ -993,14 +1089,14 @@ export function AdminShell() {
     setIsSubmittingAdminLogin(true);
     let result: Awaited<ReturnType<typeof loginAdmin>>;
     try {
-      result = await loginAdmin(loginEmail, loginPassword, loginCode);
+      result = await loginAdmin(loginEmail, loginPassword, loginCode, captchaToken);
     } catch {
       setIsSubmittingAdminLogin(false);
       setMessage("网络连接异常, 请稍后再试");
       return;
     }
     const { response, data } = result;
-    if (!response.ok || !data.access_token) {
+    if (!response.ok || !data.email || data.role !== "admin") {
       setIsSubmittingAdminLogin(false);
       setMessage(`后台登录失败：${getApiErrorMessage(data, "请检查邮箱、密码和验证码。")}`);
       return;
@@ -1030,21 +1126,23 @@ export function AdminShell() {
       return;
     }
 
-    const { response, data } = await adjustUserCredits(normalizedCreditUser, {
-      change_amount: amount,
-      reason,
-      note: note || undefined,
-    });
-    if (!response.ok) {
-      setMessage(`次数调整失败：${getApiErrorMessage(data, "请检查用户邮箱和次数。")}`);
-      return;
-    }
+    await runAdminWrite("credit-adjust", "次数调整请求失败，请检查网络后确认用户流水。", async (operationKey) => {
+      const { response, data } = await adjustUserCredits(normalizedCreditUser, {
+        change_amount: amount,
+        reason,
+        note: note || undefined,
+      }, operationKey);
+      if (!response.ok) {
+        setMessage(`次数调整失败：${getApiErrorMessage(data, "请检查用户邮箱和次数。")}`);
+        return;
+      }
 
-    setMessage(`${normalizedCreditUser} 已调整 ${amount} 次，当前余额 ${data.balance_after}。`);
-    setCreditAmount("1");
-    setCreditReason("manual_grant");
-    setCreditNote("");
-    await Promise.all([loadDashboardStats(), loadAuditLogs(), loadCreditLedger(normalizedCreditUser), loadUsers(userSearchQuery.trim())]);
+      setMessage(`${normalizedCreditUser} 已调整 ${amount} 次，当前余额 ${data.balance_after}。`);
+      setCreditAmount("1");
+      setCreditReason("manual_grant");
+      setCreditNote("");
+      await Promise.allSettled([loadDashboardStats(), loadAuditLogs(), loadCreditLedger(normalizedCreditUser), loadUsers(userSearchQuery.trim())]);
+    });
   }
 
   async function submitVoucherIssue(event: FormEvent<HTMLFormElement>) {
@@ -1075,26 +1173,28 @@ export function AdminShell() {
       return;
     }
 
-    const { response, data } = await issueVouchers({
-      user_emails: voucherAllUsers ? [] : userEmails,
-      issue_all_active_users: voucherAllUsers,
-      quantity,
-      voucher_type: "admin_grant",
-      reason,
-      note: note || undefined,
-    });
-    if (!response.ok) {
-      setMessage(`体验券发放失败：${getApiErrorMessage(data, "请检查用户邮箱和发放数量。")}`);
-      return;
-    }
+    await runAdminWrite("voucher-issue", "体验券发放请求失败，请检查网络后确认审计日志。", async (operationKey) => {
+      const { response, data } = await issueVouchers({
+        user_emails: voucherAllUsers ? [] : userEmails,
+        issue_all_active_users: voucherAllUsers,
+        quantity,
+        voucher_type: "admin_grant",
+        reason,
+        note: note || undefined,
+      }, operationKey);
+      if (!response.ok) {
+        setMessage(`体验券发放失败：${getApiErrorMessage(data, "请检查用户邮箱和发放数量。")}`);
+        return;
+      }
 
-    setMessage(`已发放 ${data.total_vouchers} 张体验券，覆盖 ${data.total_recipients} 个用户。`);
-    setVoucherEmails("");
-    setVoucherQuantity("1");
-    setVoucherAllUsers(false);
-    setVoucherReason("manual_voucher_grant");
-    setVoucherNote("");
-    await Promise.all([loadDashboardStats(), loadAuditLogs()]);
+      setMessage(`已发放 ${data.total_vouchers} 张体验券，覆盖 ${data.total_recipients} 个用户。`);
+      setVoucherEmails("");
+      setVoucherQuantity("1");
+      setVoucherAllUsers(false);
+      setVoucherReason("manual_voucher_grant");
+      setVoucherNote("");
+      await Promise.allSettled([loadDashboardStats(), loadAuditLogs()]);
+    });
   }
 
   async function submitCustomerServiceNote(event: FormEvent<HTMLFormElement>) {
@@ -1110,21 +1210,24 @@ export function AdminShell() {
       return;
     }
 
-    const { response, data } = await createCustomerServiceNote(selectedUserEmail, {
-      category,
-      content,
-      related_session_id: noteSessionId.trim() || undefined,
-    });
-    if (!response.ok) {
-      setMessage(`客服备注保存失败：${getApiErrorMessage(data, "请检查备注内容。")}`);
-      return;
-    }
+    const targetUserEmail = selectedUserEmail;
+    await runAdminWrite(`note-create:${targetUserEmail}`, "客服备注保存请求失败，请检查网络后确认备注列表。", async (operationKey) => {
+      const { response, data } = await createCustomerServiceNote(targetUserEmail, {
+        category,
+        content,
+        related_session_id: noteSessionId.trim() || undefined,
+      }, operationKey);
+      if (!response.ok) {
+        setMessage(`客服备注保存失败：${getApiErrorMessage(data, "请检查备注内容。")}`);
+        return;
+      }
 
-    setNoteCategory("general");
-    setNoteContent("");
-    setNoteSessionId("");
-    setMessage(`已为 ${selectedUserEmail} 添加客服备注。`);
-    await Promise.all([loadCustomerServiceNotes(selectedUserEmail), loadAuditLogs()]);
+      setNoteCategory("general");
+      setNoteContent("");
+      setNoteSessionId("");
+      setMessage(`已为 ${targetUserEmail} 添加客服备注。`);
+      await Promise.allSettled([loadCustomerServiceNotes(targetUserEmail), loadAuditLogs()]);
+    });
   }
 
   async function submitRefundCase(event: FormEvent<HTMLFormElement>) {
@@ -1146,39 +1249,45 @@ export function AdminShell() {
       return;
     }
     if (creditAdjustment === null) {
-      setMessage("次数补偿需要填写整数，例如 1、0 或 -1。");
+      setMessage(`${REFUND_CREDIT_FIELD_LABEL}需要填写整数，例如 1、0 或 -1。`);
       return;
     }
     if (
       !window.confirm(
-        `确认为 ${selectedUserEmail} 创建退款纠纷记录？\n原因：${businessLabel(reason)} · 金额：${formatCents(amountCents)} · 次数调整：${
-          creditAdjustment ?? 0
-        }`,
+        buildRefundCaseConfirmation({
+          email: selectedUserEmail,
+          reasonLabel: businessLabel(reason),
+          amountLabel: formatCents(amountCents),
+          proposedCreditAdjustment: creditAdjustment ?? 0,
+        }),
       )
     ) {
       return;
     }
 
-    const { response, data } = await createRefundCase(selectedUserEmail, {
-      reason,
-      description,
-      amount_cents: amountCents,
-      currency: "CNY",
-      credit_adjustment: creditAdjustment,
-      related_session_id: refundSessionId.trim() || undefined,
-    });
-    if (!response.ok) {
-      setMessage(`退款纠纷记录创建失败：${getApiErrorMessage(data, "请检查纠纷记录内容。")}`);
-      return;
-    }
+    const targetUserEmail = selectedUserEmail;
+    await runAdminWrite(`refund-create:${targetUserEmail}`, "退款纠纷创建请求失败，请检查网络后确认售后记录。", async (operationKey) => {
+      const { response, data } = await createRefundCase(targetUserEmail, {
+        reason,
+        description,
+        amount_cents: amountCents,
+        currency: "CNY",
+        credit_adjustment: creditAdjustment,
+        related_session_id: refundSessionId.trim() || undefined,
+      }, operationKey);
+      if (!response.ok) {
+        setMessage(`退款纠纷记录创建失败：${getApiErrorMessage(data, "请检查纠纷记录内容。")}`);
+        return;
+      }
 
-    setRefundReason("refund_request");
-    setRefundDescription("");
-    setRefundAmountYuan("");
-    setRefundCreditAdjustment("");
-    setRefundSessionId("");
-    setMessage(`已创建 ${selectedUserEmail} 的退款纠纷记录。`);
-    await Promise.all([loadDashboardStats(), loadRefundCases(selectedUserEmail), loadAuditLogs()]);
+      setRefundReason("refund_request");
+      setRefundDescription("");
+      setRefundAmountYuan("");
+      setRefundCreditAdjustment("");
+      setRefundSessionId("");
+      setMessage(`已创建 ${targetUserEmail} 的退款纠纷记录；${REFUND_CREATED_BOUNDARY}`);
+      await Promise.allSettled([loadDashboardStats(), loadRefundCases(targetUserEmail), loadAuditLogs()]);
+    });
   }
 
   async function updateRefundCaseStatus(refundCase: RefundCaseEntry, statusValue: string) {
@@ -1193,71 +1302,88 @@ export function AdminShell() {
     ) {
       return;
     }
-    const { response, data } = await updateRefundCase(refundCase.id, {
-      status: statusValue,
-      resolution: statusValue === "resolved" ? refundCase.resolution || "已人工处理完成" : refundCase.resolution,
-    });
-    if (!response.ok) {
-      setMessage(`退款纠纷状态更新失败：${getApiErrorMessage(data, "请稍后重试。")}`);
-      return;
-    }
+    await runAdminWrite(`refund-status:${refundCase.id}`, "退款纠纷状态更新请求失败，请检查网络后确认记录。", async (operationKey) => {
+      const { response, data } = await updateRefundCase(refundCase.id, {
+        status: statusValue,
+        resolution:
+          statusValue === "resolved"
+            ? refundCase.resolution || REFUND_RESOLVED_NOTE
+            : refundCase.resolution,
+      }, operationKey);
+      if (!response.ok) {
+        setMessage(`退款纠纷状态更新失败：${getApiErrorMessage(data, "请稍后重试。")}`);
+        return;
+      }
 
-    setMessage(`退款纠纷 ${refundCase.id} 已更新为 ${businessLabel(statusValue)}。`);
-    await Promise.all([loadDashboardStats(), loadRefundCases(selectedUserEmail || undefined), loadAuditLogs()]);
+      setMessage(`退款纠纷 ${refundCase.id} 已更新为 ${businessLabel(statusValue)}；${REFUND_STATUS_BOUNDARY}`);
+      await Promise.allSettled([loadDashboardStats(), loadRefundCases(selectedUserEmail || undefined), loadAuditLogs()]);
+    });
   }
 
   async function toggleProvider(provider: ProviderConfig) {
     if (!window.confirm(`确认${provider.enabled ? "停用" : "启用"} ${provider.id}？这会影响对应 AI 服务路由。`)) {
       return;
     }
-    const { response } = await updateProviderEnabled(provider.id, !provider.enabled);
-    if (!response.ok) {
-      setMessage("模型启停更新失败。");
-      return;
-    }
-    await loadProviders();
-    await loadAuditLogs();
-    setMessage(`${provider.id} 已${provider.enabled ? "停用" : "启用"}。`);
+    await runAdminWrite(`provider-toggle:${provider.id}`, "模型启停请求失败，请检查网络后确认供应商状态。", async (operationKey) => {
+      const { response } = await updateProviderEnabled(provider.id, !provider.enabled, operationKey);
+      if (!response.ok) {
+        setMessage("模型启停更新失败。");
+        return;
+      }
+      await Promise.allSettled([loadProviders(), loadAuditLogs()]);
+      setMessage(`${provider.id} 已${provider.enabled ? "停用" : "启用"}。`);
+    });
   }
 
   async function testProvider(provider: ProviderConfig) {
-    setProviderTestResults((previous) => ({ ...previous, [provider.id]: "测试中" }));
-    const { response, data } = await testProviderConfig(provider.id);
-    const resultDetail = getApiErrorMessage(data, "服务测试未返回明确结果。");
-    const resultText = response.ok
-      ? `${data.success ? "通过" : "未通过"}：${resultDetail}`
-      : `测试失败：${resultDetail}`;
-    setProviderTestResults((previous) => ({ ...previous, [provider.id]: resultText }));
-    await loadAuditLogs();
+    await runAdminWrite(`provider-test:${provider.id}`, "供应商校验请求失败，请检查网络和服务状态。", async (operationKey) => {
+      setProviderTestResults((previous) => ({ ...previous, [provider.id]: "校验中" }));
+      try {
+        const { response, data } = await testProviderConfig(provider.id, operationKey);
+        const resultDetail = getApiErrorMessage(data, "服务测试未返回明确结果。");
+        const resultText = response.ok
+          ? `${data.success ? "通过" : "未通过"}：${resultDetail}`
+          : `测试失败：${resultDetail}`;
+        setProviderTestResults((previous) => ({ ...previous, [provider.id]: resultText }));
+        await Promise.allSettled([loadAuditLogs()]);
+      } catch (error) {
+        setProviderTestResults((previous) => ({ ...previous, [provider.id]: "测试失败：网络或供应商服务异常，请稍后重试。" }));
+        throw error;
+      }
+    });
   }
 
   async function updateUserStatus(user: AdminUserSearchItem, isActive: boolean) {
     if (!window.confirm(`确认${isActive ? "启用" : "禁用"}用户 ${user.email}？`)) {
       return;
     }
-    const { response, data } = await updateAdminUserStatus(user.email, isActive);
-    if (!response.ok) {
-      setMessage(`用户状态更新失败：${getApiErrorMessage(data, "请稍后重试。")}`);
-      return;
-    }
-    setMessage(`${user.email} 已${isActive ? "启用" : "禁用"}。`);
-    await Promise.all([loadDashboardStats(), loadUsers(userSearchQuery.trim()), loadAuditLogs()]);
+    await runAdminWrite(`user-status:${user.email}`, "用户状态更新请求失败，请检查网络后确认用户状态。", async (operationKey) => {
+      const { response, data } = await updateAdminUserStatus(user.email, isActive, operationKey);
+      if (!response.ok) {
+        setMessage(`用户状态更新失败：${getApiErrorMessage(data, "请稍后重试。")}`);
+        return;
+      }
+      setMessage(`${user.email} 已${isActive ? "启用" : "禁用"}。`);
+      await Promise.allSettled([loadDashboardStats(), loadUsers(userSearchQuery.trim()), loadAuditLogs()]);
+    });
   }
 
   async function updateUserRole(user: AdminUserSearchItem, role: "user" | "admin") {
     if (!window.confirm(`确认将 ${user.email} ${role === "admin" ? "设为管理员" : "撤销管理员权限"}？`)) {
       return;
     }
-    const { response, data } = await updateAdminUserRole(user.email, role);
-    if (!response.ok) {
-      setMessage(`用户角色更新失败：${getApiErrorMessage(data, "请稍后重试。")}`);
-      return;
-    }
-    setUserSearchResults((previous) =>
-      previous.map((item) => (item.email === user.email ? { ...item, role: data.role ?? role } : item)),
-    );
-    setMessage(`${user.email} 已${role === "admin" ? "设为管理员" : "撤销管理员"}，该账号需要重新登录后生效。`);
-    await Promise.all([loadDashboardStats(), loadAuditLogs()]);
+    await runAdminWrite(`user-role:${user.email}`, "用户角色更新请求失败，请检查网络后确认用户角色。", async (operationKey) => {
+      const { response, data } = await updateAdminUserRole(user.email, role, operationKey);
+      if (!response.ok) {
+        setMessage(`用户角色更新失败：${getApiErrorMessage(data, "请稍后重试。")}`);
+        return;
+      }
+      setUserSearchResults((previous) =>
+        previous.map((item) => (item.email === user.email ? { ...item, role: data.role ?? role } : item)),
+      );
+      setMessage(`${user.email} 已${role === "admin" ? "设为管理员" : "撤销管理员"}，该账号需要重新登录后生效。`);
+      await Promise.allSettled([loadDashboardStats(), loadAuditLogs()]);
+    });
   }
 
   async function updateSystemConfig(config: SystemConfig, rawValue: string) {
@@ -1268,30 +1394,19 @@ export function AdminShell() {
       setMessage(`${config.key} 需要合法 JSON。`);
       return;
     }
-    const { response, data } = await updateSystemConfigValue(config.key, value);
-    if (!response.ok) {
-      setMessage(`系统配置保存失败：${getApiErrorMessage(data, "请检查配置值。")}`);
-      return;
-    }
-    setMessage(`已更新系统配置：${data.key}`);
-    await Promise.all([loadSystemConfigs(), loadAuditLogs()]);
+    await runAdminWrite(`system-config:${config.key}`, "系统配置保存请求失败，请检查网络后确认配置值。", async (operationKey) => {
+      const { response, data } = await updateSystemConfigValue(config.key, value, operationKey);
+      if (!response.ok) {
+        setMessage(`系统配置保存失败：${getApiErrorMessage(data, "请检查配置值。")}`);
+        return;
+      }
+      setMessage(`已更新系统配置：${data.key}`);
+      await Promise.allSettled([loadSystemConfigs(), loadAuditLogs()]);
+    });
   }
 
   async function refreshAdminData() {
-    await Promise.allSettled([
-      loadProviders(),
-      loadDashboardStats(),
-      loadInterviewCoreHealth(),
-      loadSystemConfigs(),
-      loadAuditLogs(),
-      loadAiCallLogs(),
-      loadContentSafetyLogs(),
-      loadUsers(userSearchQuery.trim()),
-      loadCreditLedger(),
-      loadAuthLoginLogs(selectedUserEmail || undefined),
-      loadRefundCases(selectedUserEmail || undefined),
-      loadCustomerServiceNotes(selectedUserEmail || undefined),
-    ]);
+    await loadSectionData(activeAdminSection, true);
     setMessage("后台数据已刷新。");
   }
 
@@ -1311,6 +1426,8 @@ export function AdminShell() {
     setInterviewCoreHealth(null);
     setInterviewCoreHealthMessage("面试核心健康检查尚未读取。");
     setProviderTestResults({});
+    setAiTasks([]);
+    loadedSectionsRef.current.clear();
     setUserSearchResults([]);
     setSelectedUserHistory([]);
     setSelectedUserEmail("");
@@ -1332,7 +1449,7 @@ export function AdminShell() {
   function renderUserDrawer() {
     if (!selectedUserEmail) {
       return (
-        <aside className="admin2-drawer admin2-drawer--empty">
+        <aside className={adminClasses("admin2-drawer admin2-drawer--empty")}>
           <AppIcon icon="lucide:panel-right-open" size={28} />
           <h3>选择一个用户</h3>
           <p>右侧会汇总训练、报告、权益流水、客服备注、退款纠纷和登录记录。</p>
@@ -1341,10 +1458,10 @@ export function AdminShell() {
     }
 
     return (
-      <aside className="admin2-drawer">
-        <div className="admin2-drawer-head">
-          <div className="admin2-user-identity">
-            <span className="admin2-user-eyebrow">用户详情</span>
+      <aside className={adminClasses("admin2-drawer")}>
+        <div className={adminClasses("admin2-drawer-head")}>
+          <div className={adminClasses("admin2-user-identity")}>
+            <span className={adminClasses("admin2-user-eyebrow")}>用户详情</span>
             <h3>{selectedUserEmail}</h3>
             <p>
               {selectedUser
@@ -1354,35 +1471,35 @@ export function AdminShell() {
                 : "正在读取用户上下文"}
             </p>
           </div>
-          <button type="button" className="admin2-icon-button" onClick={clearSelectedUserContext} aria-label="关闭用户详情">
+          <button type="button" className={adminClasses("admin2-icon-button")} onClick={clearSelectedUserContext} aria-label="关闭用户详情">
             <AppIcon icon="lucide:x" size={18} />
           </button>
         </div>
 
-        <dl className="admin2-user-kpis" aria-label="用户概览指标">
-          <div className="admin2-user-kpi">
+        <dl className={adminClasses("admin2-user-kpis")} aria-label="用户概览指标">
+          <div className={adminClasses("admin2-user-kpi")}>
             <dt>剩余次数</dt>
             <dd>{selectedUser?.credit_balance ?? 0}</dd>
           </div>
-          <div className="admin2-user-kpi">
+          <div className={adminClasses("admin2-user-kpi")}>
             <dt>训练记录</dt>
             <dd>{selectedUserHistory.length}</dd>
           </div>
-          <div className="admin2-user-kpi">
+          <div className={adminClasses("admin2-user-kpi")}>
             <dt>客服备注</dt>
             <dd>{customerServiceNotes.length}</dd>
           </div>
-          <div className="admin2-user-kpi">
+          <div className={adminClasses("admin2-user-kpi")}>
             <dt>售后记录</dt>
             <dd>{refundCases.length}</dd>
           </div>
         </dl>
 
-        <section className="admin2-drawer-section">
+        <section className={adminClasses("admin2-drawer-section")}>
           <h4>最近训练</h4>
-          {selectedUserHistory.length === 0 && <p className="admin2-empty">暂无训练记录。</p>}
+          {selectedUserHistory.length === 0 && <p className={adminClasses("admin2-empty")}>暂无训练记录。</p>}
           {selectedUserHistory.slice(0, 6).map((item) => (
-            <article className="admin2-feed-item" key={item.session_id}>
+            <article className={adminClasses("admin2-feed-item")} key={item.session_id}>
               <div>
                 <strong>{interviewTypeLabel(item.interview_type)}</strong>
                 <span>{businessLabel(item.status)} · 第 {item.current_step_index + 1}/{item.total_steps} 步 · {formatDateTime(item.created_at)}</span>
@@ -1400,21 +1517,21 @@ export function AdminShell() {
         </section>
 
         {(reportMessage || selectedReport) && (
-          <section className="admin2-drawer-section admin2-report-panel">
-            <div className="admin2-report-title">
+          <section className={adminClasses("admin2-drawer-section admin2-report-panel")}>
+            <div className={adminClasses("admin2-report-title")}>
               <h4>报告复核</h4>
               {selectedReport && <strong>{selectedReport.total_score}</strong>}
             </div>
-            {reportMessage && <p className="admin2-note">{reportMessage}</p>}
+            {reportMessage && <p className={adminClasses("admin2-note")}>{reportMessage}</p>}
             {selectedReport && (
               <>
                 <p>{selectedReport.summary}</p>
-                <div className="admin2-mini-grid">
+                <div className={adminClasses("admin2-mini-grid")}>
                   <span><b>{selectedReport.readiness_level || "待复盘"}</b>准备度</span>
                   <span><b>{selectedReport.dimensions.length}</b>评分维度</span>
                   <span><b>{selectedReport.turns.length}</b>问答轮次</span>
                 </div>
-                <div className="admin2-report-columns">
+                <div className={adminClasses("admin2-report-columns")}>
                   <section>
                     <h5>风险提醒</h5>
                     {(selectedReport.risk_flags.length ? selectedReport.risk_flags : ["暂无风险提醒"]).slice(0, 4).map((item) => <p key={item}>{item}</p>)}
@@ -1429,11 +1546,11 @@ export function AdminShell() {
           </section>
         )}
 
-        <section className="admin2-drawer-section">
+        <section className={adminClasses("admin2-drawer-section")}>
           <h4>权益流水</h4>
-          {creditLedger.length === 0 && <p className="admin2-empty">暂无次数流水。</p>}
+          {creditLedger.length === 0 && <p className={adminClasses("admin2-empty")}>暂无次数流水。</p>}
           {creditLedger.slice(0, 5).map((entry) => (
-            <article className="admin2-feed-item" key={entry.id}>
+            <article className={adminClasses("admin2-feed-item")} key={entry.id}>
               <div>
                 <strong>{entry.change_amount > 0 ? `+${entry.change_amount}` : entry.change_amount}</strong>
                 <span>{formatLedgerReason(entry)}</span>
@@ -1443,19 +1560,19 @@ export function AdminShell() {
           ))}
         </section>
 
-        <section className="admin2-drawer-section">
+        <section className={adminClasses("admin2-drawer-section")}>
           <h4>客服与售后</h4>
-          <div className="admin2-report-columns">
+          <div className={adminClasses("admin2-report-columns")}>
             <section>
               <h5>客服备注</h5>
-              {customerServiceNotes.length === 0 && <p className="admin2-empty">暂无备注。</p>}
+              {customerServiceNotes.length === 0 && <p className={adminClasses("admin2-empty")}>暂无备注。</p>}
               {customerServiceNotes.slice(0, 3).map((note) => (
                 <p key={note.id}>{businessLabel(note.category)} · {note.content}</p>
               ))}
             </section>
             <section>
               <h5>退款纠纷</h5>
-              {refundCases.length === 0 && <p className="admin2-empty">暂无纠纷。</p>}
+              {refundCases.length === 0 && <p className={adminClasses("admin2-empty")}>暂无纠纷。</p>}
               {refundCases.slice(0, 3).map((entry) => (
                 <p key={entry.id}>{businessLabel(entry.status)} · {businessLabel(entry.reason)} · {formatCents(entry.amount_cents, entry.currency)}</p>
               ))}
@@ -1489,7 +1606,7 @@ export function AdminShell() {
   const adminStatusMessage = message.startsWith("已进入后台") ? "后台在线，操作会记录到审计日志" : message;
 
   return (
-    <main className="workspace-page admin-page admin-page--authed admin2-page" data-admin-section={activeAdminSection}>
+    <main className={adminClasses("workspace-page admin-page admin-page--authed admin2-page")} data-admin-section={activeAdminSection}>
       <AdminSidebar
         activeSection={activeAdminSection}
         currentUser={currentUser}
@@ -1499,11 +1616,11 @@ export function AdminShell() {
         onRefresh={() => void refreshAdminData()}
         onLogout={() => void logout()}
       />
-      <div className="admin-console-layout admin2-layout" ref={consoleLayoutRef}>
-        <section className="admin2-content">
+      <div className={adminClasses("admin-console-layout admin2-layout")} ref={consoleLayoutRef}>
+        <section className={adminClasses("admin2-content")}>
           {activeAdminSection === "overview" && (
-            <section className="admin2-section">
-              <div className="admin2-metrics-grid">
+            <section className={adminClasses("admin2-section")}>
+              <div className={adminClasses("admin2-metrics-grid")}>
                 <MetricCard label="总用户" value={dashboardStats?.overview.total_users.toLocaleString("zh-CN") ?? "暂无"} detail={`启用 ${dashboardStats?.overview.active_users ?? 0} / 停用 ${dashboardStats?.overview.disabled_users ?? 0}`} icon="lucide:users" />
                 <MetricCard label="今日训练" value={dashboardStats?.overview.today_sessions ?? "暂无"} detail={`总场次 ${dashboardStats?.overview.total_sessions ?? 0} / 进行中 ${dashboardStats?.overview.active_sessions ?? 0}`} icon="lucide:mic-2" />
                 <MetricCard label="报告产出" value={dashboardStats?.overview.total_reports.toLocaleString("zh-CN") ?? "暂无"} detail={`均分 ${dashboardStats?.overview.average_report_score ?? "暂无"}`} icon="lucide:file-check-2" tone="good" />
@@ -1512,17 +1629,17 @@ export function AdminShell() {
                 <MetricCard label="剩余次数" value={dashboardStats?.overview.total_credit_balance.toLocaleString("zh-CN") ?? "暂无"} detail={`累计发放 ${dashboardStats?.overview.total_credit_granted ?? 0}`} icon="lucide:coins" />
               </div>
 
-              <div className="admin2-grid admin2-grid--dashboard">
-                <section className="admin2-panel">
-                  <div className="admin2-panel-head">
+              <div className={adminClasses("admin2-grid admin2-grid--dashboard")}>
+                <section className={adminClasses("admin2-panel")}>
+                  <div className={adminClasses("admin2-panel-head")}>
                     <div>
                       <h3>待处理队列</h3>
                       <p>按风险优先级聚合后台现在需要看的事。</p>
                     </div>
                   </div>
-                  <div className="admin2-task-list">
+                  <div className={adminClasses("admin2-task-list")}>
                     {taskQueue.map((task) => (
-                      <button type="button" className={`admin2-task admin2-task--${task.tone}`} key={task.id} onClick={() => selectAdminSection(task.section)}>
+                      <button type="button" className={adminClasses("admin2-task", `admin2-task--${task.tone}`)} key={task.id} onClick={() => selectAdminSection(task.section)}>
                         <AppIcon icon={task.icon} size={20} />
                         <span>
                           <strong>{task.title}</strong>
@@ -1534,31 +1651,31 @@ export function AdminShell() {
                   </div>
                 </section>
 
-                <section className="admin2-panel admin2-panel--wide">
-                  <div className="admin2-panel-head">
+                <section className={adminClasses("admin2-panel admin2-panel--wide")}>
+                  <div className={adminClasses("admin2-panel-head")}>
                     <div>
                       <h3>近 14 天业务趋势</h3>
                       <p>新增用户、训练场次和报告产出放在同一张图里看转化闭环。</p>
                     </div>
                   </div>
-                  {dashboardChartOptions ? <AdminChart option={dashboardChartOptions.trend} height={320} /> : <p className="admin2-empty">暂无趋势数据。</p>}
+                  {dashboardChartOptions ? <AdminChart option={dashboardChartOptions.trend} height={320} /> : <p className={adminClasses("admin2-empty")}>暂无趋势数据。</p>}
                 </section>
 
-                <section className="admin2-panel">
-                  <div className="admin2-panel-head">
+                <section className={adminClasses("admin2-panel")}>
+                  <div className={adminClasses("admin2-panel-head")}>
                     <div>
                       <h3>高频使用用户</h3>
                       <p>优先回访高使用、高余额或最近活跃用户。</p>
                     </div>
                   </div>
-                  <div className="admin2-table admin2-table--compact">
+                  <div className={adminClasses("admin2-table admin2-table--compact")}>
                     {dashboardStats?.top_users.length ? dashboardStats.top_users.map((user) => (
-                      <button type="button" className="admin2-table-row" key={user.email} onClick={() => void loadUserHistory(user.email, dashboardUserToSnapshot(user))}>
+                      <button type="button" className={adminClasses("admin2-table-row")} key={user.email} onClick={() => void loadUserHistory(user.email, dashboardUserToSnapshot(user))}>
                         <span><strong>{user.email}</strong><em>{user.last_interview_at ? formatDateTime(user.last_interview_at) : "暂无训练"}</em></span>
                         <span>{user.completed_interviews}/{user.total_interviews}</span>
                         <span>{user.credit_balance} 次</span>
                       </button>
-                    )) : <p className="admin2-empty">暂无训练记录。</p>}
+                    )) : <p className={adminClasses("admin2-empty")}>暂无训练记录。</p>}
                   </div>
                 </section>
               </div>
@@ -1566,9 +1683,9 @@ export function AdminShell() {
           )}
 
           {activeAdminSection === "users" && (
-            <section className="admin2-section">
-              <div className="admin2-toolbar">
-                <form className="admin2-search" onSubmit={searchUsers}>
+            <section className={adminClasses("admin2-section")}>
+              <div className={adminClasses("admin2-toolbar")}>
+                <form className={adminClasses("admin2-search")} onSubmit={searchUsers}>
                   <AppIcon icon="lucide:search" size={18} />
                   <input
                     type="search"
@@ -1576,10 +1693,10 @@ export function AdminShell() {
                     onChange={(event) => setUserSearchQuery(event.target.value)}
                     placeholder="搜索邮箱或关键词；留空查看最近用户"
                   />
-                  <button type="submit" className="admin2-primary-button">搜索</button>
+                  <button type="submit" className={adminClasses("admin2-primary-button")}>搜索</button>
                   <button
                     type="button"
-                    className="admin2-secondary-button"
+                    className={adminClasses("admin2-secondary-button")}
                     onClick={() => {
                       setUserSearchQuery("");
                       void loadUsers("", true, 0);
@@ -1588,7 +1705,7 @@ export function AdminShell() {
                     全部用户
                   </button>
                 </form>
-                <div className="admin2-summary-strip">
+                <div className={adminClasses("admin2-summary-strip")}>
                   <span><b>{userListSummary.total}</b>{userListTotalIsEstimated ? "匹配以上" : "匹配用户"}</span>
                   <span><b>{userListSummary.active}</b>当前页启用</span>
                   <span><b>{userListSummary.disabled}</b>当前页停用</span>
@@ -1596,20 +1713,20 @@ export function AdminShell() {
                 </div>
               </div>
 
-              <div className="admin2-master-detail">
-                <section className="admin2-panel admin2-panel--list">
-                  <div className="admin2-panel-head admin2-panel-head--row">
+              <div className={adminClasses("admin2-master-detail")}>
+                <section className={adminClasses("admin2-panel admin2-panel--list")}>
+                  <div className={adminClasses("admin2-panel-head admin2-panel-head--row")}>
                     <div>
                       <h3>{userSearchQuery.trim() ? "搜索结果" : "最近用户"}</h3>
                       <p>{isUserListLoading ? "正在同步用户列表" : `${userListRange} · 当前页 ${userSearchResults.length} 个用户 · ${userListSummary.interviews} 场训练`}</p>
                     </div>
-                    <div className="admin2-pagination">
+                    <div className={adminClasses("admin2-pagination")}>
                       <button type="button" disabled={userListOffset === 0 || isUserListLoading} onClick={() => void loadUsers(userSearchQuery.trim(), true, Math.max(0, userListOffset - ADMIN_USER_PAGE_SIZE))}>上一页</button>
                       <button type="button" disabled={!userListHasMore || isUserListLoading} onClick={() => void loadUsers(userSearchQuery.trim(), true, userListOffset + ADMIN_USER_PAGE_SIZE)}>下一页</button>
                     </div>
                   </div>
-                  <div className="admin2-data-table">
-                    <div className="admin2-data-head">
+                  <div className={adminClasses("admin2-data-table")}>
+                    <div className={adminClasses("admin2-data-head")}>
                       <span>用户</span>
                       <span>状态</span>
                       <span>余额</span>
@@ -1617,20 +1734,32 @@ export function AdminShell() {
                       <span>最近活跃</span>
                       <span>操作</span>
                     </div>
-                    {isUserListLoading && <p className="admin2-empty">正在读取用户列表。</p>}
-                    {!isUserListLoading && userSearchResults.length === 0 && <p className="admin2-empty">暂无用户记录，或当前关键词没有匹配用户。</p>}
+                    {isUserListLoading && <p className={adminClasses("admin2-empty")}>正在读取用户列表。</p>}
+                    {!isUserListLoading && userSearchResults.length === 0 && <p className={adminClasses("admin2-empty")}>暂无用户记录，或当前关键词没有匹配用户。</p>}
                     {!isUserListLoading && userSearchResults.map((user) => (
-                      <article className={selectedUserEmail === user.email ? "admin2-data-row is-selected" : "admin2-data-row"} key={user.email}>
-                        <button type="button" className="admin2-data-main" onClick={() => void loadUserHistory(user.email, user)}>
+                      <article className={adminClasses("admin2-data-row", selectedUserEmail === user.email && "is-selected")} key={user.email}>
+                        <button type="button" className={adminClasses("admin2-data-main")} onClick={() => void loadUserHistory(user.email, user)}>
                           <span><strong>{user.email}</strong><em>{businessLabel(user.role)}</em></span>
                           <StatusChip tone={user.is_active ? "good" : "danger"}>{user.is_active ? "启用中" : "已停用"}</StatusChip>
                           <b>{user.credit_balance} 次</b>
                           <span>{user.completed_interviews}/{user.total_interviews}</span>
                           <span>{user.last_interview_at ? formatDateTime(user.last_interview_at) : "暂无"}</span>
                         </button>
-                        <div className="admin2-row-actions">
-                          <button type="button" onClick={() => void updateUserStatus(user, !user.is_active)}>{user.is_active ? "禁用" : "启用"}</button>
-                          <button type="button" onClick={() => void updateUserRole(user, user.role === "admin" ? "user" : "admin")}>{user.role === "admin" ? "撤销管理员" : "设为管理员"}</button>
+                        <div className={adminClasses("admin2-row-actions")}>
+                          <button
+                            type="button"
+                            disabled={isLocked(`user-status:${user.email}`)}
+                            onClick={() => void updateUserStatus(user, !user.is_active)}
+                          >
+                            {isLocked(`user-status:${user.email}`) ? "处理中" : user.is_active ? "禁用" : "启用"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isLocked(`user-role:${user.email}`)}
+                            onClick={() => void updateUserRole(user, user.role === "admin" ? "user" : "admin")}
+                          >
+                            {isLocked(`user-role:${user.email}`) ? "处理中" : user.role === "admin" ? "撤销管理员" : "设为管理员"}
+                          </button>
                         </div>
                       </article>
                     ))}
@@ -1642,10 +1771,10 @@ export function AdminShell() {
           )}
 
           {activeAdminSection === "credits" && (
-            <section className="admin2-section">
-              <div className="admin2-grid admin2-grid--ops">
-                <form className="admin2-panel admin2-form" onSubmit={submitCreditGrant}>
-                  <div className="admin2-panel-head">
+            <section className={adminClasses("admin2-section")}>
+              <div className={adminClasses("admin2-grid admin2-grid--ops")}>
+                <form className={adminClasses("admin2-panel admin2-form")} onSubmit={submitCreditGrant}>
+                  <div className={adminClasses("admin2-panel-head")}>
                     <div>
                       <h3>次数调整</h3>
                       <p>用于人工开通、售后补偿、退款退回和余额修正。</p>
@@ -1653,74 +1782,96 @@ export function AdminShell() {
                   </div>
                   <label>用户邮箱<input type="email" value={creditUser} onChange={(event) => setCreditUser(event.target.value)} placeholder="user@example.com" required /></label>
                   <label>次数变化<input type="number" value={creditAmount} onChange={(event) => setCreditAmount(event.target.value)} required /></label>
-                  <div className="admin2-field">
+                  <div className={adminClasses("admin2-field")}>
                     <span>调整原因</span>
                     <AdminSelect ariaLabel="选择次数调整原因" value={creditReason} options={creditReasonOptions} onChange={setCreditReason} />
                     <small>{selectedCreditReason.help}</small>
                   </div>
                   <label>处理备注<input value={creditNote} onChange={(event) => setCreditNote(event.target.value)} placeholder="例如：微信沟通后补发 1 次" maxLength={240} /></label>
-                  <div className="admin2-actions">
-                    <button type="submit" className="admin2-primary-button">提交调整</button>
-                    <button type="button" className="admin2-secondary-button" onClick={() => loadCreditLedger()}>查看流水</button>
+                  <div className={adminClasses("admin2-actions")}>
+                  <button type="submit" className={adminClasses("admin2-primary-button")} disabled={isLocked("credit-adjust")}>
+                    {isLocked("credit-adjust") ? "提交中" : "提交调整"}
+                  </button>
+                    <button type="button" className={adminClasses("admin2-secondary-button")} onClick={() => loadCreditLedger()}>查看流水</button>
                   </div>
                 </form>
 
-                <form className="admin2-panel admin2-form" onSubmit={submitVoucherIssue}>
-                  <div className="admin2-panel-head">
+                <form className={adminClasses("admin2-panel admin2-form")} onSubmit={submitVoucherIssue}>
+                  <div className={adminClasses("admin2-panel-head")}>
                     <div>
                       <h3>体验券发放</h3>
                       <p>适合内测激励、客服补偿和活动批次，不改变次数余额。</p>
                     </div>
                   </div>
-                  <label className="admin2-check"><input type="checkbox" checked={voucherAllUsers} onChange={(event) => setVoucherAllUsers(event.target.checked)} />发放给全部启用中的普通用户</label>
+                  <label className={adminClasses("admin2-check")}><input type="checkbox" checked={voucherAllUsers} onChange={(event) => setVoucherAllUsers(event.target.checked)} />发放给全部启用中的普通用户</label>
                   <label>用户邮箱<textarea value={voucherEmails} onChange={(event) => setVoucherEmails(event.target.value)} placeholder="多个邮箱可用换行、空格或逗号分隔" disabled={voucherAllUsers} rows={4} /></label>
                   <label>每人发放张数<input type="number" min={1} max={20} value={voucherQuantity} onChange={(event) => setVoucherQuantity(event.target.value)} required /></label>
-                  <div className="admin2-field">
+                  <div className={adminClasses("admin2-field")}>
                     <span>发放原因</span>
                     <AdminSelect ariaLabel="选择体验券发放原因" value={voucherReason} options={voucherReasonOptions} onChange={setVoucherReason} />
                     <small>{selectedVoucherReason.help}</small>
                   </div>
                   <label>处理备注<input value={voucherNote} onChange={(event) => setVoucherNote(event.target.value)} placeholder="例如：首批内测用户体验券" maxLength={240} /></label>
-                  <button type="submit" className="admin2-primary-button">发放体验券</button>
+                  <button type="submit" className={adminClasses("admin2-primary-button")} disabled={isLocked("voucher-issue")}>
+                    {isLocked("voucher-issue") ? "发放中" : "发放体验券"}
+                  </button>
                 </form>
 
-                <section className="admin2-panel admin2-form">
-                  <div className="admin2-panel-head">
+                <section className={adminClasses("admin2-panel admin2-form")}>
+                  <div className={adminClasses("admin2-panel-head")}>
                     <div>
                       <h3>客服备注</h3>
                       <p>{selectedUserEmail ? `当前用户：${selectedUserEmail}` : "先在用户中心选择用户，再写入售后备注。"}</p>
                     </div>
                   </div>
-                  <form className="admin2-nested-form" onSubmit={submitCustomerServiceNote}>
-                    <div className="admin2-field">
+                  <form className={adminClasses("admin2-nested-form")} onSubmit={submitCustomerServiceNote}>
+                    <div className={adminClasses("admin2-field")}>
                       <span>备注类型</span>
                       <AdminSelect ariaLabel="选择客服备注类型" value={noteCategory} options={noteCategoryOptions} onChange={setNoteCategory} />
                     </div>
                     <label>关联训练 ID<input value={noteSessionId} onChange={(event) => setNoteSessionId(event.target.value)} placeholder="可选，复制 session_id" /></label>
                     <label>沟通内容<textarea value={noteContent} onChange={(event) => setNoteContent(event.target.value)} placeholder="记录用户来源、沟通结论、补偿口径或后续跟进点" rows={5} /></label>
-                    <button type="submit" className="admin2-primary-button">保存备注</button>
+                    <button
+                      type="submit"
+                      className={adminClasses("admin2-primary-button")}
+                      disabled={Boolean(selectedUserEmail && isLocked(`note-create:${selectedUserEmail}`))}
+                    >
+                      {selectedUserEmail && isLocked(`note-create:${selectedUserEmail}`) ? "保存中" : "保存备注"}
+                    </button>
                   </form>
                 </section>
 
-                <section className="admin2-panel admin2-form">
-                  <div className="admin2-panel-head">
+                <section className={adminClasses("admin2-panel admin2-form")}>
+                  <div className={adminClasses("admin2-panel-head")}>
                     <div>
                       <h3>退款纠纷</h3>
-                      <p>{selectedUserEmail ? "创建后会进入审计与售后队列。" : "先在用户中心选择用户，再创建纠纷记录。"}</p>
+                      <p>{selectedUserEmail ? "创建后会进入审计与售后队列，仅用于记录和跟进。" : "先在用户中心选择用户，再创建纠纷记录。"}</p>
                     </div>
                   </div>
-                  <form className="admin2-nested-form" onSubmit={submitRefundCase}>
-                    <div className="admin2-field">
+                  <aside className={adminClasses("admin2-accounting-boundary")} role="note" aria-label="退款工单账务边界">
+                    <strong>账务边界</strong>
+                    <ul>
+                      {REFUND_ACCOUNTING_BOUNDARY_ITEMS.map((item) => <li key={item}>{item}</li>)}
+                    </ul>
+                  </aside>
+                  <form className={adminClasses("admin2-nested-form")} onSubmit={submitRefundCase}>
+                    <div className={adminClasses("admin2-field")}>
                       <span>原因</span>
                       <AdminSelect ariaLabel="选择退款纠纷原因" value={refundReason} options={refundReasonOptions} onChange={setRefundReason} />
                     </div>
-                    <div className="admin2-form-grid">
+                    <div className={adminClasses("admin2-form-grid")}>
                       <label>退款金额<input value={refundAmountYuan} onChange={(event) => setRefundAmountYuan(event.target.value)} placeholder="例如 19.90，可空" inputMode="decimal" /></label>
-                      <label>次数补偿<input value={refundCreditAdjustment} onChange={(event) => setRefundCreditAdjustment(event.target.value)} placeholder="例如 1，可空" inputMode="numeric" /></label>
+                      <label>{REFUND_CREDIT_FIELD_LABEL}<input value={refundCreditAdjustment} onChange={(event) => setRefundCreditAdjustment(event.target.value)} placeholder="例如 1，可空" inputMode="numeric" /></label>
                     </div>
                     <label>关联训练 ID<input value={refundSessionId} onChange={(event) => setRefundSessionId(event.target.value)} placeholder="可选" /></label>
                     <label>纠纷描述<textarea value={refundDescription} onChange={(event) => setRefundDescription(event.target.value)} placeholder="记录用户诉求、核对依据、处理口径和下一步动作" rows={5} /></label>
-                    <button type="submit" className="admin2-primary-button">创建纠纷记录</button>
+                    <button
+                      type="submit"
+                      className={adminClasses("admin2-primary-button")}
+                      disabled={Boolean(selectedUserEmail && isLocked(`refund-create:${selectedUserEmail}`))}
+                    >
+                      {selectedUserEmail && isLocked(`refund-create:${selectedUserEmail}`) ? "创建中" : "创建纠纷记录"}
+                    </button>
                   </form>
                 </section>
               </div>
@@ -1728,42 +1879,42 @@ export function AdminShell() {
           )}
 
           {activeAdminSection === "quality" && (
-            <section className="admin2-section">
-              <div className="admin2-metrics-grid admin2-metrics-grid--four">
+            <section className={adminClasses("admin2-section")}>
+              <div className={adminClasses("admin2-metrics-grid admin2-metrics-grid--four")}>
                 <MetricCard label="完成训练" value={dashboardStats?.overview.completed_sessions ?? "暂无"} detail={`总场次 ${dashboardStats?.overview.total_sessions ?? 0}`} icon="lucide:circle-check-big" tone="good" />
                 <MetricCard label="报告产出" value={dashboardStats?.overview.total_reports ?? "暂无"} detail={`平均分 ${dashboardStats?.overview.average_report_score ?? "暂无"}`} icon="lucide:file-check-2" />
                 <MetricCard label="进行中" value={dashboardStats?.overview.active_sessions ?? "暂无"} detail="可关注异常中断与恢复" icon="lucide:activity" tone="warning" />
                 <MetricCard label="核心状态" value={interviewCoreHealth?.ready ? "正常" : "待处理"} detail={interviewCoreHealthMessage} icon="lucide:shield-check" tone={interviewCoreHealth?.ready ? "good" : "danger"} />
               </div>
-              <div className="admin2-grid admin2-grid--quality">
-                <section className="admin2-panel admin2-panel--wide">
-                  <div className="admin2-panel-head">
+              <div className={adminClasses("admin2-grid admin2-grid--quality")}>
+                <section className={adminClasses("admin2-panel admin2-panel--wide")}>
+                  <div className={adminClasses("admin2-panel-head")}>
                     <div>
                       <h3>训练与报告趋势</h3>
                       <p>判断训练是否完成、报告是否稳定产出。</p>
                     </div>
                   </div>
-                  {dashboardChartOptions ? <AdminChart option={dashboardChartOptions.trend} height={320} /> : <p className="admin2-empty">暂无趋势数据。</p>}
+                  {dashboardChartOptions ? <AdminChart option={dashboardChartOptions.trend} height={320} /> : <p className={adminClasses("admin2-empty")}>暂无趋势数据。</p>}
                 </section>
-                <section className="admin2-panel">
-                  <div className="admin2-panel-head"><h3>训练模块占比</h3></div>
-                  {dashboardChartOptions ? <AdminChart option={dashboardChartOptions.moduleMix} /> : <p className="admin2-empty">暂无模块数据。</p>}
+                <section className={adminClasses("admin2-panel")}>
+                  <div className={adminClasses("admin2-panel-head")}><h3>训练模块占比</h3></div>
+                  {dashboardChartOptions ? <AdminChart option={dashboardChartOptions.moduleMix} /> : <p className={adminClasses("admin2-empty")}>暂无模块数据。</p>}
                 </section>
-                <section className="admin2-panel">
-                  <div className="admin2-panel-head"><h3>会话状态</h3></div>
-                  {dashboardChartOptions ? <AdminChart option={dashboardChartOptions.sessionStatus} /> : <p className="admin2-empty">暂无状态数据。</p>}
+                <section className={adminClasses("admin2-panel")}>
+                  <div className={adminClasses("admin2-panel-head")}><h3>会话状态</h3></div>
+                  {dashboardChartOptions ? <AdminChart option={dashboardChartOptions.sessionStatus} /> : <p className={adminClasses("admin2-empty")}>暂无状态数据。</p>}
                 </section>
-                <section className="admin2-panel admin2-panel--wide">
-                  <div className="admin2-panel-head">
+                <section className={adminClasses("admin2-panel admin2-panel--wide")}>
+                  <div className={adminClasses("admin2-panel-head")}>
                     <div>
                       <h3>面试核心 readiness</h3>
                       <p>能力卡片、向量覆盖和召回探针是正式训练质量的底座。</p>
                     </div>
                   </div>
                   {!interviewCoreHealth ? (
-                    <p className="admin2-empty">{interviewCoreHealthMessage}</p>
+                    <p className={adminClasses("admin2-empty")}>{interviewCoreHealthMessage}</p>
                   ) : (
-                    <div className="admin2-core-grid">
+                    <div className={adminClasses("admin2-core-grid")}>
                       <article>
                         <span>能力卡片</span>
                         <strong>{formatCoreCount(interviewCoreHealth.capability_cards.total_seed_count)}</strong>
@@ -1787,19 +1938,33 @@ export function AdminShell() {
           )}
 
           {activeAdminSection === "ai" && (
-            <section className="admin2-section">
-              <div className="admin2-grid admin2-grid--ai">
-                <section className="admin2-panel admin2-panel--wide">
-                  <div className="admin2-panel-head">
+            <section className={adminClasses("admin2-section")}>
+              <div className={adminClasses("admin2-grid admin2-grid--ai")}>
+                <section className={adminClasses("admin2-panel admin2-panel--wide")}>
+                  <div className={adminClasses("admin2-panel-head")}>
                     <div>
-                      <h3>供应商路由</h3>
-                      <p>按类型、用途、模型、区域、优先级和密钥状态管理服务。</p>
+                      <h3>AI Worker 任务中心</h3>
+                      <p>只展示任务元数据与稳定错误码，不暴露简历、回答或模型提示词。</p>
                     </div>
                   </div>
-                  <div className="admin2-provider-list">
-                    {providers.length === 0 && <p className="admin2-empty">暂无 AI 服务配置。</p>}
+                  <AdminTaskMonitor
+                    tasks={aiTasks}
+                    loading={areAiTasksLoading}
+                    isRetrying={(task) => isLocked(`task-retry:${task.id}`)}
+                    onRetry={(task) => void retryAiTask(task)}
+                  />
+                </section>
+                <section className={adminClasses("admin2-panel admin2-panel--wide")}>
+                  <div className={adminClasses("admin2-panel-head")}>
+                    <div>
+                      <h3>供应商路由</h3>
+                      <p>仅管理路由元数据；真实密钥由服务器 secret 管理，不通过网页录入。</p>
+                    </div>
+                  </div>
+                  <div className={adminClasses("admin2-provider-list")}>
+                    {providers.length === 0 && <p className={adminClasses("admin2-empty")}>暂无 AI 服务配置。</p>}
                     {providers.map((provider) => (
-                      <article className="admin2-provider-row" key={provider.id}>
+                      <article className={adminClasses("admin2-provider-row")} key={provider.id}>
                         <div>
                           <strong>{provider.id}</strong>
                           <span>{provider.provider_name} / {provider.model_name}</span>
@@ -1807,35 +1972,47 @@ export function AdminShell() {
                         </div>
                         <StatusChip tone={provider.enabled ? "good" : "neutral"}>{provider.enabled ? "启用中" : "已停用"}</StatusChip>
                         <span>{provider.has_api_key ? `密钥：${provider.api_key_preview}` : "密钥：未配置"}</span>
-                        <div className="admin2-row-actions">
-                          <button type="button" onClick={() => void testProvider(provider)}>测试</button>
-                          <button type="button" onClick={() => void toggleProvider(provider)}>{provider.enabled ? "停用" : "启用"}</button>
+                        <div className={adminClasses("admin2-row-actions")}>
+                          <button
+                            type="button"
+                            disabled={isLocked(`provider-test:${provider.id}`)}
+                            onClick={() => void testProvider(provider)}
+                          >
+                            {isLocked(`provider-test:${provider.id}`) ? "校验中" : "校验配置"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isLocked(`provider-toggle:${provider.id}`)}
+                            onClick={() => void toggleProvider(provider)}
+                          >
+                            {isLocked(`provider-toggle:${provider.id}`) ? "处理中" : provider.enabled ? "停用" : "启用"}
+                          </button>
                         </div>
                         {providerTestResults[provider.id] && <p>{providerTestResults[provider.id]}</p>}
                       </article>
                     ))}
                   </div>
                 </section>
-                <section className="admin2-panel">
-                  <div className="admin2-panel-head"><h3>AI 调用质量</h3></div>
-                  {dashboardChartOptions ? <AdminChart option={dashboardChartOptions.aiQuality} /> : <p className="admin2-empty">暂无调用分布。</p>}
+                <section className={adminClasses("admin2-panel")}>
+                  <div className={adminClasses("admin2-panel-head")}><h3>AI 调用质量</h3></div>
+                  {dashboardChartOptions ? <AdminChart option={dashboardChartOptions.aiQuality} /> : <p className={adminClasses("admin2-empty")}>暂无调用分布。</p>}
                 </section>
-                <section className="admin2-panel admin2-panel--wide">
-                  <div className="admin2-panel-head">
+                <section className={adminClasses("admin2-panel admin2-panel--wide")}>
+                  <div className={adminClasses("admin2-panel-head")}>
                     <div>
                       <h3>最近模型调用</h3>
                       <p>失败、延迟、token、成本和音频时长用于定位服务退化。</p>
                     </div>
                   </div>
-                  <div className="admin2-log-list">
-                    {aiCallLogs.length === 0 && <p className="admin2-empty">暂无模型调用记录。</p>}
+                  <div className={adminClasses("admin2-log-list")}>
+                    {aiCallLogs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无模型调用记录。</p>}
                     {aiCallLogs.slice(0, 14).map((entry) => (
-                      <article className="admin2-log-row" key={entry.id}>
+                      <article className={adminClasses("admin2-log-row")} key={entry.id}>
                         <div>
                           <strong>{entry.provider_name} / {entry.model_name}</strong>
                           <span>{entry.session_id ?? "无会话"} · {businessLabel(entry.purpose)}{entry.provider_request_id ? ` · ${entry.provider_request_id}` : ""}</span>
                         </div>
-                        <StatusChip tone={entry.success ? "good" : "danger"}>{entry.success ? "成功" : getApiErrorMessage({ detail: entry.error_message ?? undefined }, "调用失败")}</StatusChip>
+                        <StatusChip tone={entry.success ? "good" : "danger"}>{entry.success ? "成功" : getApiErrorMessage({ detail: entry.error_code ?? undefined }, "调用失败")}</StatusChip>
                         <span>{entry.latency_ms != null ? `${entry.latency_ms}ms` : "未记录延迟"} · {entry.input_tokens ?? 0}/{entry.output_tokens ?? 0} tokens · {formatDateTime(entry.created_at)}</span>
                       </article>
                     ))}
@@ -1846,20 +2023,20 @@ export function AdminShell() {
           )}
 
           {activeAdminSection === "audit" && (
-            <section className="admin2-section">
-              <div className="admin2-metrics-grid admin2-metrics-grid--four">
+            <section className={adminClasses("admin2-section")}>
+              <div className={adminClasses("admin2-metrics-grid admin2-metrics-grid--four")}>
                 <MetricCard label="管理员操作" value={auditLogs.length} detail="最近审计日志" icon="lucide:shield-check" />
                 <MetricCard label="登录失败" value={authLoginLogs.filter((entry) => !entry.success).length} detail="最近认证日志" icon="lucide:key-round" tone="warning" />
-                <MetricCard label="内容安全" value={contentSafetyLogs.filter((entry) => entry.action !== "allowed").length} detail="拦截或风险记录" icon="lucide:shield-ban" tone="danger" />
+                <MetricCard label="内容安全" value={contentSafetyLogs.length} detail="风险观察记录，不自动误杀" icon="lucide:shield-ban" tone="warning" />
                 <MetricCard label="售后纠纷" value={refundCases.filter((entry) => entry.status !== "resolved").length} detail="未解决/处理中" icon="lucide:receipt-text" tone="warning" />
               </div>
-              <div className="admin2-grid admin2-grid--audit">
-                <section className="admin2-panel">
-                  <div className="admin2-panel-head"><h3>操作审计</h3></div>
-                  <div className="admin2-log-list">
-                    {auditLogs.length === 0 && <p className="admin2-empty">暂无后台操作记录。</p>}
+              <div className={adminClasses("admin2-grid admin2-grid--audit")}>
+                <section className={adminClasses("admin2-panel")}>
+                  <div className={adminClasses("admin2-panel-head")}><h3>操作审计</h3></div>
+                  <div className={adminClasses("admin2-log-list")}>
+                    {auditLogs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无后台操作记录。</p>}
                     {auditLogs.slice(0, 14).map((entry) => (
-                      <article className="admin2-log-row" key={entry.id}>
+                      <article className={adminClasses("admin2-log-row")} key={entry.id}>
                         <div><strong>{businessLabel(entry.action)}</strong><span>{entry.admin_email} · {businessLabel(entry.target_type)}</span></div>
                         <span>{entry.target_id}</span>
                         <small>{formatDateTime(entry.created_at)}</small>
@@ -1867,12 +2044,12 @@ export function AdminShell() {
                     ))}
                   </div>
                 </section>
-                <section className="admin2-panel">
-                  <div className="admin2-panel-head"><h3>登录日志</h3></div>
-                  <div className="admin2-log-list">
-                    {authLoginLogs.length === 0 && <p className="admin2-empty">暂无登录日志。</p>}
+                <section className={adminClasses("admin2-panel")}>
+                  <div className={adminClasses("admin2-panel-head")}><h3>登录日志</h3></div>
+                  <div className={adminClasses("admin2-log-list")}>
+                    {authLoginLogs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无登录日志。</p>}
                     {authLoginLogs.slice(0, 14).map((entry) => (
-                      <article className="admin2-log-row" key={entry.id}>
+                      <article className={adminClasses("admin2-log-row")} key={entry.id}>
                         <div><strong>{entry.email}</strong><span>{businessLabel(entry.auth_method)} · {businessLabel(entry.role)} · {entry.ip_address ?? "未知 IP"}</span></div>
                         <StatusChip tone={entry.success ? "good" : "danger"}>{entry.success ? "成功" : getApiErrorMessage({ detail: entry.failure_reason ?? undefined }, "失败")}</StatusChip>
                         <small>{formatDateTime(entry.created_at)}</small>
@@ -1880,12 +2057,12 @@ export function AdminShell() {
                     ))}
                   </div>
                 </section>
-                <section className="admin2-panel">
-                  <div className="admin2-panel-head"><h3>内容安全</h3></div>
-                  <div className="admin2-log-list">
-                    {contentSafetyLogs.length === 0 && <p className="admin2-empty">暂无内容安全记录。</p>}
+                <section className={adminClasses("admin2-panel")}>
+                  <div className={adminClasses("admin2-panel-head")}><h3>内容安全</h3></div>
+                  <div className={adminClasses("admin2-log-list")}>
+                    {contentSafetyLogs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无内容安全记录。</p>}
                     {contentSafetyLogs.slice(0, 14).map((entry) => (
-                      <article className="admin2-log-row" key={entry.id}>
+                      <article className={adminClasses("admin2-log-row")} key={entry.id}>
                         <div>
                           <strong>{entry.user_email ?? "未知用户"} / {entry.source}</strong>
                           <span>{entry.session_id ?? "无会话"} · {entry.categories.map((item) => businessLabel(item)).join(" / ")}</span>
@@ -1897,18 +2074,23 @@ export function AdminShell() {
                     ))}
                   </div>
                 </section>
-                <section className="admin2-panel">
-                  <div className="admin2-panel-head"><h3>退款纠纷</h3></div>
-                  <div className="admin2-log-list">
-                    {refundCases.length === 0 && <p className="admin2-empty">暂无退款纠纷。</p>}
+                <section className={adminClasses("admin2-panel")}>
+                  <div className={adminClasses("admin2-panel-head")}><h3>退款纠纷</h3></div>
+                  <div className={adminClasses("admin2-log-list")}>
+                    {refundCases.length === 0 && <p className={adminClasses("admin2-empty")}>暂无退款纠纷。</p>}
                     {refundCases.slice(0, 14).map((entry) => (
-                      <article className="admin2-log-row" key={entry.id}>
-                        <div><strong>{entry.user_email}</strong><span>{businessLabel(entry.reason)} · {formatCents(entry.amount_cents, entry.currency)}</span></div>
+                      <article className={adminClasses("admin2-log-row")} key={entry.id}>
+                        <div>
+                          <strong>{entry.user_email}</strong>
+                          <span>
+                            {businessLabel(entry.reason)} · {formatCents(entry.amount_cents, entry.currency)} · {REFUND_CREDIT_FIELD_LABEL}：{entry.credit_adjustment ?? 0}
+                          </span>
+                        </div>
                         <StatusChip tone={entry.status === "resolved" ? "good" : "warning"}>{businessLabel(entry.status)}</StatusChip>
-                        <div className="admin2-row-actions">
-                          <button type="button" onClick={() => void updateRefundCaseStatus(entry, "processing")}>处理中</button>
-                          <button type="button" onClick={() => void updateRefundCaseStatus(entry, "resolved")}>已解决</button>
-                          <button type="button" onClick={() => void updateRefundCaseStatus(entry, "rejected")}>驳回</button>
+                        <div className={adminClasses("admin2-row-actions")}>
+                          <button type="button" disabled={isLocked(`refund-status:${entry.id}`)} onClick={() => void updateRefundCaseStatus(entry, "processing")}>处理中</button>
+                          <button type="button" disabled={isLocked(`refund-status:${entry.id}`)} onClick={() => void updateRefundCaseStatus(entry, "resolved")}>已解决</button>
+                          <button type="button" disabled={isLocked(`refund-status:${entry.id}`)} onClick={() => void updateRefundCaseStatus(entry, "rejected")}>驳回</button>
                         </div>
                       </article>
                     ))}
@@ -1919,21 +2101,21 @@ export function AdminShell() {
           )}
 
           {activeAdminSection === "system" && (
-            <section className="admin2-section">
-              <div className="admin2-grid admin2-grid--system">
-                {groupedSystemConfigs.length === 0 && <p className="admin2-empty">暂无系统配置项。</p>}
+            <section className={adminClasses("admin2-section")}>
+              <div className={adminClasses("admin2-grid admin2-grid--system")}>
+                {groupedSystemConfigs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无系统配置项。</p>}
                 {groupedSystemConfigs.map(([group, configs]) => (
-                  <section className="admin2-panel" key={group}>
-                    <div className="admin2-panel-head">
+                  <section className={adminClasses("admin2-panel")} key={group}>
+                    <div className={adminClasses("admin2-panel-head")}>
                       <div>
                         <h3>{group}</h3>
                         <p>{configs.length} 个配置项，保存后写入后台审计日志。</p>
                       </div>
                     </div>
-                    <div className="admin2-config-list">
+                    <div className={adminClasses("admin2-config-list")}>
                       {configs.map((config) => (
                         <form
-                          className="admin2-config-row"
+                          className={adminClasses("admin2-config-row")}
                           key={config.key}
                           onSubmit={(event) => {
                             event.preventDefault();
@@ -1950,7 +2132,9 @@ export function AdminShell() {
                           ) : (
                             <input name="value" defaultValue={configInputValue(config.value)} />
                           )}
-                          <button type="submit" className="admin2-primary-button">保存</button>
+                          <button type="submit" className={adminClasses("admin2-primary-button")} disabled={isLocked(`system-config:${config.key}`)}>
+                            {isLocked(`system-config:${config.key}`) ? "保存中" : "保存"}
+                          </button>
                         </form>
                       ))}
                     </div>

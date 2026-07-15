@@ -1,10 +1,24 @@
-export const CSRF_COOKIE_NAME = "mianba_csrf_token";
-export const CSRF_HEADER_NAME = "X-CSRF-Token";
-
 export type ApiErrorPayload = {
   detail?: string;
   message?: string;
 };
+
+export { ApiError } from "./api/errors";
+export { apiRequest, requestJson, setUnauthorizedHandler } from "./api/client";
+export type { ApiRequestOptions, ApiResult } from "./api/client";
+export { CSRF_COOKIE_NAME, CSRF_HEADER_NAME, csrfHeaders, getCookie } from "./api/csrf";
+export { createIdempotencyKey } from "./api/idempotency";
+export { getHCaptchaConfig } from "./api/hcaptcha";
+export type { HCaptchaConfig } from "./api/hcaptcha";
+export {
+  getTask,
+  isTerminalTask,
+  listAdminTasks,
+  mergeTaskVersion,
+  nextTaskPollDelay,
+  retryTask,
+} from "./api/tasks";
+export type { AdminTaskPage, AiTask, TaskEnvelope, TaskFailure, TaskStatus } from "./api/tasks";
 
 const API_ERROR_MESSAGES: Record<string, string> = {
   active_interview_not_found: "当前没有未完成的面试训练。",
@@ -86,27 +100,4 @@ export function getApiErrorMessage(payload: unknown, fallback = "操作失败，
     return API_ERROR_MESSAGES[data.detail];
   }
   return fallback;
-}
-
-export function getCookie(name: string) {
-  const prefix = `${encodeURIComponent(name)}=`;
-  const cookie = document.cookie
-    .split(";")
-    .map((item) => item.trim())
-    .find((item) => item.startsWith(prefix));
-  if (!cookie) {
-    return "";
-  }
-  return decodeURIComponent(cookie.slice(prefix.length));
-}
-
-export function csrfHeaders(headers: HeadersInit = {}): HeadersInit {
-  const token = getCookie(CSRF_COOKIE_NAME);
-  if (!token) {
-    return headers;
-  }
-  return {
-    ...headers,
-    [CSRF_HEADER_NAME]: token,
-  };
 }

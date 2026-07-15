@@ -3,6 +3,7 @@ import type { InterviewType } from "./types";
 export const PCM_SAMPLE_RATE = 16000;
 export const PCM_CHUNK_MS = 200;
 export const PCM_CHUNK_SAMPLES = Math.floor(PCM_SAMPLE_RATE * (PCM_CHUNK_MS / 1000));
+export const MAX_ASR_BUFFERED_BYTES = 256 * 1024;
 export const FINAL_TRANSCRIPT_TIMEOUT_MS = 10_000;
 export const ANSWER_LIMIT_MS = 300_000;
 export const SILENCE_AUTO_FINISH_MS = 3_000;

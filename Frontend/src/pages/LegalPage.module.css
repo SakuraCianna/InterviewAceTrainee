@@ -1,0 +1,251 @@
+/* 条款、隐私、退款和联系页面的共用样式。 */
+.product-home {
+  --home-ink: #10141f;
+  --home-muted: #5c6677;
+  --home-soft: #eef2f7;
+  --home-line: rgba(16, 20, 31, 0.12);
+  --home-panel: rgba(255, 255, 255, 0.84);
+  --home-blue: #2f6df6;
+  --home-green: #00a878;
+  --home-amber: #ffb84d;
+  --home-dark: #111827;
+  min-height: 100vh;
+  color: var(--home-ink);
+  overflow-x: hidden;
+  background:
+    linear-gradient(90deg, rgba(16, 20, 31, 0.045) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(16, 20, 31, 0.04) 1px, transparent 1px),
+    linear-gradient(135deg, #fbfcff 0%, #f3f6fb 44%, #eef4f1 100%);
+  background-size: 44px 44px, 44px 44px, auto;
+}
+
+.home-nav {
+  position: sticky;
+  top: 18px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(1220px, calc(100% - 32px));
+  margin: 18px auto 0;
+  padding: 10px 12px;
+  border: 1px solid var(--home-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 45px rgba(16, 20, 31, 0.08);
+  backdrop-filter: blur(18px);
+}
+
+.home-brand,
+.home-links,
+.home-links a {
+  display: inline-flex;
+  align-items: center;
+}
+
+.home-brand {
+  gap: 9px;
+  padding: 5px 8px;
+  font-weight: 900;
+}
+
+.home-brand img {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+.home-links {
+  gap: 2px;
+}
+
+.home-links a {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  color: var(--home-muted);
+  font-weight: 850;
+  transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.home-links a:hover {
+  color: var(--home-ink);
+  background: rgba(16, 20, 31, 0.06);
+  transform: translateY(-1px);
+}
+
+.home-eyebrow {
+  display: inline-flex;
+  margin: 0;
+  color: var(--home-blue);
+  font-size: 13px;
+  font-weight: 950;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.flow-heading .home-eyebrow {
+  color: #d9ff74;
+}
+
+@media (max-width: 720px) {
+  .home-links {
+    display: none;
+  }
+}
+
+.home-links {
+  gap: 3px;
+}
+
+.legal-page {
+  min-height: 100vh;
+  padding-bottom: 90px;
+}
+
+.legal-shell {
+  width: min(1040px, calc(100% - 32px));
+  margin: 88px auto 0;
+  padding: 42px;
+  border: 1px solid var(--home-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 28px 70px rgba(16, 20, 31, 0.1);
+}
+
+.legal-shell h1 {
+  margin: 14px 0 16px;
+  color: var(--home-ink);
+  font-size: 58px;
+  line-height: 1.02;
+}
+
+.legal-intro {
+  max-width: 820px;
+  margin: 0 0 28px;
+  color: var(--home-muted);
+  font-size: 18px;
+  line-height: 1.76;
+}
+
+.legal-date {
+  width: fit-content;
+  margin: 0 0 18px;
+  padding: 7px 10px;
+  border: 1px solid rgba(21, 115, 71, 0.14);
+  border-radius: 999px;
+  color: #157347;
+  background: rgba(21, 115, 71, 0.08);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.legal-list {
+  display: grid;
+  gap: 14px;
+}
+
+.legal-list article {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--home-line);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 247, 0.94)),
+    #fff;
+}
+
+.legal-list svg {
+  margin-top: 4px;
+  color: var(--home-green);
+}
+
+.legal-list h2 {
+  margin: 0 0 6px;
+  color: var(--home-ink);
+  font-size: 21px;
+}
+
+.legal-list p {
+  margin: 0;
+  color: var(--home-muted);
+  line-height: 1.82;
+}
+
+.legal-list p + p {
+  margin-top: 10px;
+}
+
+.legal-list ul {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding-left: 18px;
+}
+
+.legal-list li {
+  color: var(--home-muted);
+  line-height: 1.74;
+}
+
+.legal-list li::marker {
+  color: var(--home-green);
+}
+
+@media (max-width: 720px) {
+
+  .legal-shell {
+    width: calc(100% - 24px);
+    margin-top: 42px;
+    padding: 26px;
+  }
+
+  .legal-shell h1 {
+    font-size: 42px;
+  }
+
+  .legal-intro {
+    font-size: 16px;
+  }
+
+  .legal-list article {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 18px;
+  }
+
+  .legal-list svg {
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 820px) {
+  .product-home {
+    background-size: 32px 32px, 32px 32px, auto;
+  }
+
+  .home-nav {
+    top: 10px;
+    width: min(100% - 20px, 1220px);
+    margin-top: 10px;
+  }
+
+  .home-brand span {
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 640px) {
+
+  .home-nav {
+    border-radius: 22px;
+  }
+
+  .home-brand img {
+    width: 26px;
+    height: 26px;
+  }
+}

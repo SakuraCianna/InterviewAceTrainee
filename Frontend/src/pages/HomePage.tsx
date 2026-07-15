@@ -3,6 +3,8 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { AppIcon } from "../components/AppIcon";
 import { BrandLogo } from "../components/BrandLogo";
+import { productConfig } from "../config/productConfig";
+import { homeClasses } from "./homeStyles";
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -186,10 +188,10 @@ const creditNotes = [
 ];
 
 const filingLinks = {
-  icpNumber: import.meta.env.VITE_ICP_NUMBER || "湘ICP备2025151258号-1",
-  policeNumber: import.meta.env.VITE_POLICE_RECORD_NUMBER || "",
-  icpUrl: "https://beian.miit.gov.cn/",
-  policeUrl: "https://beian.mps.gov.cn/#/query/webSearch",
+  icpNumber: productConfig.filing.icpNumber,
+  policeNumber: productConfig.filing.policeRecordNumber,
+  icpUrl: productConfig.filing.icpUrl,
+  policeUrl: productConfig.filing.policeUrl,
 };
 
 export function HomePage() {
@@ -295,45 +297,45 @@ export function HomePage() {
   }, []);
 
   return (
-    <main className="mianba-home" ref={rootRef}>
-      <nav className="mianba-nav" aria-label="主导航">
-        <a className="mianba-brand" href="/" aria-label="面霸练习生首页">
+    <main className={homeClasses("mianba-home")} ref={rootRef}>
+      <nav className={homeClasses("mianba-nav")} aria-label="主导航">
+        <a className={homeClasses("mianba-brand")} href="/" aria-label="面霸练习生首页">
           <BrandLogo size={30} />
           <span>面霸练习生</span>
         </a>
-        <div className="mianba-nav-links">
+        <div className={homeClasses("mianba-nav-links")}>
           <a href="#tracks">训练模块</a>
           <a href="#workflow">练习流程</a>
           <a href="#reports">复盘报告</a>
           <a href="#credits">开通方式</a>
         </div>
-        <a className="mianba-nav-action" href="/login">
+        <a className={homeClasses("mianba-nav-action")} href="/login">
           登录
           <AppIcon icon="lucide:arrow-right" size={17} />
         </a>
       </nav>
 
-      <header className="mianba-hero">
-        <section className="mianba-hero-copy" aria-labelledby="home-title">
-          <p className="mianba-kicker mianba-reveal">Voice-first interview rehearsal</p>
-          <h1 className="mianba-reveal" id="home-title">把每一次开口, 都练到能上场。</h1>
-          <p className="mianba-lead mianba-reveal">
+      <header className={homeClasses("mianba-hero")}>
+        <section className={homeClasses("mianba-hero-copy")} aria-labelledby="home-title">
+          <p className={homeClasses("mianba-kicker mianba-reveal")}>Voice-first interview rehearsal</p>
+          <h1 className={homeClasses("mianba-reveal")} id="home-title">把每一次开口, 都练到能上场。</h1>
+          <p className={homeClasses("mianba-lead mianba-reveal")}>
             面霸练习生把工作面试、研究生复试、考公面试和雅思口语拆成四套独立训练。你不用对着聊天框打字, 只需要听题、开口、被追问, 最后拿到能继续行动的复盘报告。
           </p>
-          <div className="mianba-actions mianba-reveal">
-            <a className="mianba-primary" href="/register">
+          <div className={homeClasses("mianba-actions mianba-reveal")}>
+            <a className={homeClasses("mianba-primary")} href="/register">
               创建账号
               <AppIcon icon="lucide:arrow-right" size={18} />
             </a>
-            <a className="mianba-secondary" href="#tracks">
+            <a className={homeClasses("mianba-secondary")} href="#tracks">
               看训练模块
               <AppIcon icon="lucide:chevron-down" size={18} />
             </a>
           </div>
-          <div className="mianba-hero-stats mianba-reveal">
+          <div className={homeClasses("mianba-hero-stats mianba-reveal")}>
             {heroStats.map(([value, suffix, label]) => (
               <div key={label}>
-                <strong className="mianba-ticker" data-suffix={suffix} data-value={value}>
+                <strong className={homeClasses("mianba-ticker")} data-suffix={suffix} data-value={value}>
                   {value}
                   {suffix}
                 </strong>
@@ -343,20 +345,20 @@ export function HomePage() {
           </div>
         </section>
 
-        <section className={`mianba-cockpit is-${previewPhase}`} aria-label="语音面试训练台预览">
-          <div className="mianba-cockpit-head">
+        <section className={homeClasses("mianba-cockpit", `is-${previewPhase}`)} aria-label="语音面试训练台预览">
+          <div className={homeClasses("mianba-cockpit-head")}>
             <span>
               <AppIcon icon="lucide:radio" size={17} />
               live practice room
             </span>
             <strong>{cockpitStatus}</strong>
           </div>
-          <div className="mianba-cockpit-grid">
-            <aside className="mianba-track-list" aria-label="训练模块预览">
+          <div className={homeClasses("mianba-cockpit-grid")}>
+            <aside className={homeClasses("mianba-track-list")} aria-label="训练模块预览">
               {trainingTracks.map((track, index) => (
                 <button
                   aria-pressed={index === activeTrackIndex}
-                  className={index === activeTrackIndex ? "is-active" : ""}
+                  className={homeClasses(index === activeTrackIndex && "is-active")}
                   key={track.title}
                   onClick={() => {
                     setActiveTrackIndex(index);
@@ -369,27 +371,27 @@ export function HomePage() {
                 </button>
               ))}
             </aside>
-            <div className="mianba-live-room">
-              <div className="mianba-question-card">
+            <div className={homeClasses("mianba-live-room")}>
+              <div className={homeClasses("mianba-question-card")}>
                 <span>{previewPhase === "followup" ? "AI 追问" : "面试官提问"}</span>
                 <p>{previewQuestion}</p>
               </div>
-              <div className="mianba-voice-core">
-                <div className="mianba-core-ring">
-                  <span className="mianba-core-pulse" />
-                  <span className="mianba-core-orbit" />
+              <div className={homeClasses("mianba-voice-core")}>
+                <div className={homeClasses("mianba-core-ring")}>
+                  <span className={homeClasses("mianba-core-pulse")} />
+                  <span className={homeClasses("mianba-core-orbit")} />
                   <AppIcon icon="lucide:audio-lines" size={58} />
                 </div>
-                <div className="mianba-wave" aria-hidden="true">
+                <div className={homeClasses("mianba-wave")} aria-hidden="true">
                   {Array.from({ length: 19 }).map((_, index) => (
                     <span key={index} style={{ height: `${20 + (index % 8) * 8}px` }} />
                   ))}
                 </div>
               </div>
-              <div className="mianba-room-actions">
+              <div className={homeClasses("mianba-room-actions")}>
                 <button
                   aria-pressed={previewPhase === "recording"}
-                  className={previewPhase === "recording" ? "is-active" : ""}
+                  className={homeClasses(previewPhase === "recording" && "is-active")}
                   onClick={() => setPreviewPhase("recording")}
                   type="button"
                 >
@@ -398,7 +400,7 @@ export function HomePage() {
                 </button>
                 <button
                   aria-pressed={previewPhase === "followup"}
-                  className={previewPhase === "followup" ? "is-active" : ""}
+                  className={homeClasses(previewPhase === "followup" && "is-active")}
                   onClick={() => setPreviewPhase("followup")}
                   type="button"
                 >
@@ -407,7 +409,7 @@ export function HomePage() {
                 </button>
               </div>
             </div>
-            <aside className="mianba-score-panel" aria-label="复盘指标预览">
+            <aside className={homeClasses("mianba-score-panel")} aria-label="复盘指标预览">
               <span>{activeTrack.title}复盘快照</span>
               {activeTrack.preview.scores.map(([label, value]) => (
                 <div key={label}>
@@ -420,9 +422,9 @@ export function HomePage() {
         </section>
       </header>
 
-      <section className="mianba-proof-strip mianba-scroll-section">
+      <section className={homeClasses("mianba-proof-strip mianba-scroll-section")}>
         {trustItems.map(([icon, title, copy]) => (
-          <article className="mianba-proof-card mianba-motion" key={title}>
+          <article className={homeClasses("mianba-proof-card mianba-motion")} key={title}>
             <AppIcon icon={icon} size={24} />
             <div>
               <h2>{title}</h2>
@@ -432,16 +434,16 @@ export function HomePage() {
         ))}
       </section>
 
-      <section className="mianba-section mianba-scroll-section" id="tracks">
-        <div className="mianba-section-head mianba-motion">
-          <p className="mianba-kicker">Four training tracks</p>
+      <section className={homeClasses("mianba-section mianba-scroll-section")} id="tracks">
+        <div className={homeClasses("mianba-section-head mianba-motion")}>
+          <p className={homeClasses("mianba-kicker")}>Four training tracks</p>
           <h2>不是泛泛聊天, 而是按目标拆开的四类训练。</h2>
           <p>每个模块都有独立材料入口、问题组织方式和报告维度, 让你在进入房间前就知道自己要练什么。</p>
         </div>
-        <div className="mianba-track-grid">
+        <div className={homeClasses("mianba-track-grid")}>
           {trainingTracks.map((track, index) => (
-            <article className="mianba-track-card mianba-motion" key={track.title}>
-              <div className="mianba-card-top">
+            <article className={homeClasses("mianba-track-card mianba-motion")} key={track.title}>
+              <div className={homeClasses("mianba-card-top")}>
                 <AppIcon icon={track.icon} size={28} />
                 <span>0{index + 1}</span>
               </div>
@@ -462,17 +464,17 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="mianba-workflow mianba-scroll-section" id="workflow">
-        <div className="mianba-section-head mianba-section-head-dark mianba-motion">
-          <p className="mianba-kicker">Training rhythm</p>
+      <section className={homeClasses("mianba-workflow mianba-scroll-section")} id="workflow">
+        <div className={homeClasses("mianba-section-head mianba-section-head-dark mianba-motion")}>
+          <p className={homeClasses("mianba-kicker")}>Training rhythm</p>
           <h2>流程像真实面试, 但每一步都可复盘。</h2>
           <p>从选择目标到拿到报告, 页面只保留必要控制, 把注意力留给听题和表达。</p>
         </div>
-        <div className="mianba-flow-shell">
-          <span className="mianba-flow-beam" aria-hidden="true" />
-          <div className="mianba-step-grid">
+        <div className={homeClasses("mianba-flow-shell")}>
+          <span className={homeClasses("mianba-flow-beam")} aria-hidden="true" />
+          <div className={homeClasses("mianba-step-grid")}>
             {practiceSteps.map(([number, title, copy]) => (
-              <article className="mianba-step-card mianba-motion" key={number}>
+              <article className={homeClasses("mianba-step-card mianba-motion")} key={number}>
                 <span>{number}</span>
                 <h3>{title}</h3>
                 <p>{copy}</p>
@@ -482,19 +484,19 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="mianba-section mianba-scroll-section" id="reports">
-        <div className="mianba-section-head mianba-motion">
-          <p className="mianba-kicker">Actionable report</p>
+      <section className={homeClasses("mianba-section mianba-scroll-section")} id="reports">
+        <div className={homeClasses("mianba-section-head mianba-motion")}>
+          <p className={homeClasses("mianba-kicker")}>Actionable report</p>
           <h2>报告不只给分, 还告诉你下一轮该怎么练。</h2>
           <p>每一场训练都会留下问题、回答、追问、评分维度和改进建议, 方便你把一次练习变成下一次进步。</p>
         </div>
-        <div className="mianba-report-grid">
+        <div className={homeClasses("mianba-report-grid")}>
           {reportCards.map((report) => (
-            <article className="mianba-report-card mianba-motion" key={report.label}>
-              <div className="mianba-report-head">
+            <article className={homeClasses("mianba-report-card mianba-motion")} key={report.label}>
+              <div className={homeClasses("mianba-report-head")}>
                 <span>{report.label}</span>
                 <strong
-                  className="mianba-ticker"
+                  className={homeClasses("mianba-ticker")}
                   data-decimals={report.score.includes(".") ? "1" : "0"}
                   data-value={report.score}
                 >
@@ -502,7 +504,7 @@ export function HomePage() {
                 </strong>
               </div>
               <h3>{report.title}</h3>
-              <div className="mianba-report-metrics">
+              <div className={homeClasses("mianba-report-metrics")}>
                 {report.metrics.map(([label, value]) => (
                   <div key={label}>
                     <span>{label}</span>
@@ -511,8 +513,8 @@ export function HomePage() {
                   </div>
                 ))}
               </div>
-              <p className="mianba-report-summary">{report.summary}</p>
-              <div className="mianba-report-detail-grid">
+              <p className={homeClasses("mianba-report-summary")}>{report.summary}</p>
+              <div className={homeClasses("mianba-report-detail-grid")}>
                 <section>
                   <h4>评分依据</h4>
                   <ul>
@@ -531,20 +533,20 @@ export function HomePage() {
                 </section>
               </div>
               <p>{report.advice}</p>
-              <small className="mianba-report-reminder">{report.reminder}</small>
+              <small className={homeClasses("mianba-report-reminder")}>{report.reminder}</small>
             </article>
           ))}
         </div>
       </section>
 
-      <section className="mianba-credit-band mianba-scroll-section" id="credits">
-        <div className="mianba-credit-copy mianba-motion">
-          <p className="mianba-kicker">Credit activation</p>
+      <section className={homeClasses("mianba-credit-band mianba-scroll-section")} id="credits">
+        <div className={homeClasses("mianba-credit-copy mianba-motion")}>
+          <p className={homeClasses("mianba-kicker")}>Credit activation</p>
           <h2>新人送 1 张体验券, 正式训练按场景扣次。</h2>
           <p>
             需要开通训练次数时, 可添加官方微信 Teptysuki666。确认后系统会发放对应模块次数, 并保留开通、扣次、训练和报告记录。
           </p>
-          <div className="mianba-credit-notes" aria-label="开通与扣次说明">
+          <div className={homeClasses("mianba-credit-notes")} aria-label="开通与扣次说明">
             {creditNotes.map(([title, copy]) => (
               <article key={title}>
                 <strong>{title}</strong>
@@ -552,12 +554,12 @@ export function HomePage() {
               </article>
             ))}
           </div>
-          <a className="mianba-primary" href="/register">
+          <a className={homeClasses("mianba-primary")} href="/register">
             先创建账号
             <AppIcon icon="lucide:arrow-right" size={18} />
           </a>
         </div>
-        <div className="mianba-credit-table mianba-motion">
+        <div className={homeClasses("mianba-credit-table mianba-motion")}>
           {trainingTracks.map((track) => (
             <div key={track.title}>
               <span>
@@ -570,17 +572,17 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="mianba-final">
-        <BrandLogo size={112} className="mianba-final-logo" />
+      <section className={homeClasses("mianba-final")}>
+        <BrandLogo size={112} className={homeClasses("mianba-final-logo")} />
         <h2>把紧张留在练习里, 把稳定带到真正上场时。</h2>
-        <a className="mianba-final-action" href="/register">
+        <a className={homeClasses("mianba-final-action")} href="/register">
           开始第一次模拟
           <AppIcon icon="lucide:arrow-right" size={18} />
         </a>
       </section>
 
-      <footer className="mianba-footer">
-        <div className="mianba-footer-brand">
+      <footer className={homeClasses("mianba-footer")}>
+        <div className={homeClasses("mianba-footer-brand")}>
           <BrandLogo size={48} />
           <span>面霸练习生</span>
         </div>
@@ -591,7 +593,7 @@ export function HomePage() {
           <a href="/contact">联系我们</a>
         </nav>
         <p>本产品用于面试和口语模拟训练, 报告仅作为复盘参考, 不承诺录取、上岸或考试成绩结果。</p>
-        <div className="mianba-filing-links" aria-label="备案信息">
+        <div className={homeClasses("mianba-filing-links")} aria-label="备案信息">
           <a href={filingLinks.icpUrl} target="_blank" rel="noreferrer">
             {filingLinks.icpNumber}
           </a>

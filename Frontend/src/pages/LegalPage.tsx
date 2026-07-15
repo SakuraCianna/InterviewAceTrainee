@@ -1,5 +1,6 @@
 import { AppIcon } from "../components/AppIcon";
 import { BrandLogo } from "../components/BrandLogo";
+import { legalClasses } from "./legalStyles";
 
 type LegalPageType = "terms" | "privacy" | "refund" | "contact";
 
@@ -297,13 +298,13 @@ export function LegalPage({ type }: { type: LegalPageType }) {
   const page = legalPages[type];
 
   return (
-    <main className="product-home legal-page">
-      <nav className="home-nav" aria-label="政策页导航">
-        <a href="/" className="home-brand" aria-label="返回面霸练习生首页">
+    <main className={legalClasses("product-home legal-page")}>
+      <nav className={legalClasses("home-nav")} aria-label="政策页导航">
+        <a href="/" className={legalClasses("home-brand")} aria-label="返回面霸练习生首页">
           <BrandLogo size={34} />
           <span>面霸练习生</span>
         </a>
-        <div className="home-links">
+        <div className={legalClasses("home-links")}>
           <a href="/terms">条款</a>
           <a href="/privacy">隐私</a>
           <a href="/refund">退款</a>
@@ -312,12 +313,12 @@ export function LegalPage({ type }: { type: LegalPageType }) {
         </div>
       </nav>
 
-      <section className="legal-shell">
-        <p className="home-eyebrow">{page.eyebrow}</p>
+      <section className={legalClasses("legal-shell")}>
+        <p className={legalClasses("home-eyebrow")}>{page.eyebrow}</p>
         <h1>{page.title}</h1>
-        <p className="legal-date">{page.effectiveDate}</p>
-        <p className="legal-intro">{page.intro}</p>
-        <div className="legal-list">
+        <p className={legalClasses("legal-date")}>{page.effectiveDate}</p>
+        <p className={legalClasses("legal-intro")}>{page.intro}</p>
+        <div className={legalClasses("legal-list")}>
           {page.sections.map((section) => (
             <article key={section.title}>
               <AppIcon icon="lucide:check-circle-2" size={20} />

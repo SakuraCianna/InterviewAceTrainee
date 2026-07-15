@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { EChartsOption } from "echarts";
 import type { AdminDashboardStats, AdminStatsPoint } from "./types";
+import { adminClasses } from "./adminStyles";
 
 type AdminEChartsModule = typeof import("../../lib/adminEcharts");
 type EChartsInstance = ReturnType<AdminEChartsModule["initAdminChart"]>;
@@ -97,5 +98,5 @@ export function AdminChart({ option, height = 280 }: { option: EChartsOption; he
     };
   }, []);
 
-  return <div ref={containerRef} className="admin-chart" style={{ height }} />;
+  return <div ref={containerRef} className={adminClasses("admin-chart")} style={{ height }} />;
 }

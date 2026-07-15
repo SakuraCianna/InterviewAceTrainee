@@ -31,13 +31,19 @@ export type InterviewStateResponse = {
   current_step_index: number;
   total_steps: number;
   current_question: InterviewQuestion | null;
+  active_task?: import("../../lib/api").AiTask | null;
   report: InterviewReport | null;
-  balance_after?: number;
-  voucher_applied?: boolean;
-  voucher_id?: string | null;
   detail?: string;
   message?: string;
 };
+
+export type InterviewAnswerTaskResponse = {
+  request_id?: string;
+  session?: InterviewStateResponse;
+  task: import("../../lib/api").AiTask;
+};
+
+export type InterviewAnswerResponse = InterviewStateResponse | InterviewAnswerTaskResponse;
 
 export type CurrentUserResponse = {
   email: string;
