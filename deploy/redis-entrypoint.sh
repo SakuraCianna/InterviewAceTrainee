@@ -14,7 +14,7 @@ chmod 0750 /run/redis
 umask 077
 cat > /run/redis/users.acl <<EOF
 user default off
-user mianba_app on >${password} ~mianba:* &mianba:* -@all +@connection +@read +@write +@transaction +eval +evalsha +scan -keys -flushall -flushdb -config -shutdown -module -acl
+user mianba_app on >${password} ~mianba:* &mianba:* -@all +@connection +@read +@write +@transaction +eval +evalsha +scan +info -keys -flushall -flushdb -config -shutdown -module -acl
 EOF
 chown redis:redis /run/redis/users.acl
 
