@@ -4,6 +4,8 @@ Frontend/.vite/
 Frontend/*.tsbuildinfo
 
 database_backups/
+secrets/
+runtime-config/
 nginx/certs/
 nginx/*.key
 nginx/*.csr
