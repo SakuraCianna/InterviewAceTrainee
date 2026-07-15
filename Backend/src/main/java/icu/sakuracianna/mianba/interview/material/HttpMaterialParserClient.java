@@ -58,6 +58,7 @@ public final class HttpMaterialParserClient implements MaterialParserClient {
     private final URI endpoint;
     private final URI healthEndpoint;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public HttpMaterialParserClient(ObjectMapper mapper, MaterialParserProperties properties) {
         this(HttpClient.newBuilder()
                 .connectTimeout(properties.connectTimeout())

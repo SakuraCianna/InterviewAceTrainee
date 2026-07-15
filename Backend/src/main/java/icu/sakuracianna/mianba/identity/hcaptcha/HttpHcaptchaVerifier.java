@@ -40,6 +40,7 @@ public final class HttpHcaptchaVerifier implements HumanVerification {
     private final ObjectMapper mapper;
     private final HcaptchaProperties properties;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public HttpHcaptchaVerifier(ObjectMapper mapper, HcaptchaProperties properties) {
         this(HttpClient.newBuilder()
                 .connectTimeout(properties.connectTimeout())
