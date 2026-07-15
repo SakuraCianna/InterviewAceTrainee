@@ -253,6 +253,45 @@ jobs:
           bash deploy/ci-business-smoke.sh
           docker compose -f docker-compose.yml -f deploy/docker-compose.ci.yml ps
 
+      - name: Diagnose failed integration topology
+        if: failure()
+        shell: bash
+        env:
+          MIANBA_APP_IMAGE: mianba-java:${{ github.sha }}
+          MIANBA_FRONTEND_IMAGE: mianba-frontend:${{ github.sha }}
+          MIANBA_SECRETS_DIR: ${{ github.workspace }}/.ci-runtime-secrets
+          MIANBA_CERTS_DIR: ${{ github.workspace }}/.ci-runtime-certs
+          MIANBA_RUNTIME_CONFIG_DIR: ${{ github.workspace }}/deploy
+        run: |
+          set +e
+          compose=(docker compose -f docker-compose.yml -f deploy/docker-compose.ci.yml)
+          "${compose[@]}" ps -a
+          for service in postgres redis rabbitmq migrate material-parser api worker frontend nginx; do
+            container_id="$("${compose[@]}" ps -a -q "$service" 2>/dev/null)"
+            test -n "$container_id" || continue
+            state="$(docker inspect --format '{{.State.Status}}' "$container_id" 2>/dev/null)"
+            exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$container_id" 2>/dev/null)"
+            health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+              "$container_id" 2>/dev/null)"
+            printf 'service=%s state=%s exit_code=%s health=%s\n' \
+              "$service" "$state" "$exit_code" "$health"
+            abnormal=false
+            if test "$state" != running; then
+              abnormal=true
+            elif test "$health" != none && test "$health" != healthy; then
+              abnormal=true
+            fi
+            if test "$service" = migrate && test "$state" = exited && test "$exit_code" = 0; then
+              abnormal=false
+            fi
+            if test "$abnormal" = true; then
+              docker inspect --format \
+                '{{if .State.Health}}{{range .State.Health.Log}}{{println .End "exit=" .ExitCode "output=" .Output}}{{end}}{{end}}' \
+                "$container_id"
+              docker logs --tail 120 "$container_id" 2>&1
+            fi
+          done
+
       - name: Clean integration topology
         if: always()
         shell: bash

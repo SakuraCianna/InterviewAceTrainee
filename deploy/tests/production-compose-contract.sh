@@ -290,6 +290,24 @@ for name in \
     || fail "Compose field is not fail-closed: $name"
 done
 
+redis_entrypoint="$workspace/deploy/redis-entrypoint.sh"
+redis_runtime_owner_line="$(grep -nFx -- 'chown redis:redis /run/redis' "$redis_entrypoint" \
+  | cut -d: -f1 || true)"
+redis_runtime_mode_line="$(grep -nFx -- 'chmod 0750 /run/redis' "$redis_entrypoint" \
+  | cut -d: -f1 || true)"
+redis_acl_write_line="$(grep -nF -- 'cat > /run/redis/users.acl' "$redis_entrypoint" \
+  | cut -d: -f1 || true)"
+[[ "$redis_runtime_owner_line" =~ ^[0-9]+$ ]] \
+  || fail "Redis entrypoint does not assign the runtime directory to the redis user"
+[[ "$redis_runtime_mode_line" =~ ^[0-9]+$ ]] \
+  || fail "Redis runtime directory permissions are not fail-closed"
+[[ "$redis_acl_write_line" =~ ^[0-9]+$ ]] \
+  || fail "Redis entrypoint does not write the expected ACL file"
+(( redis_runtime_owner_line < redis_acl_write_line )) \
+  || fail "Redis runtime directory ownership is assigned after the ACL file is written"
+(( redis_runtime_mode_line < redis_acl_write_line )) \
+  || fail "Redis runtime directory permissions are assigned after the ACL file is written"
+
 rm -f -- "$MIANBA_TEST_DOCKER_CAPTURE"
 if bash "$workspace/deploy/production-compose.sh" up -d >/dev/null 2>&1; then
   fail "state-changing Compose command was accepted"

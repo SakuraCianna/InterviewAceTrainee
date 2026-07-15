@@ -8,6 +8,9 @@ if [ "${#password}" -lt 32 ]; then
   exit 1
 fi
 
+# 官方入口会将 redis-server 降权为 redis 用户；ACL 文件的父目录必须允许该用户穿越。
+chown redis:redis /run/redis
+chmod 0750 /run/redis
 umask 077
 cat > /run/redis/users.acl <<EOF
 user default off
