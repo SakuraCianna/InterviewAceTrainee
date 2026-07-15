@@ -192,7 +192,7 @@ test ! -L "$PRODUCTION_PATH/shared/compose.env"
 test "$(stat -c '%a' "$PRODUCTION_PATH/shared/compose.env")" = '600'
 ```
 
-19 个字段必须按模板顺序全部存在且非空，每项紧邻包含中文的注释，注释使用英文标点。校验器拒绝 CRLF、引号、变量展开、命令替换、管道和其他命令语法，且只输出字段名或行号错误。六个镜像和三个共享目录字段仍保留在 schema 中，激活脚本会用已校验 SHA 和 `PRODUCTION_PATH` 派生值覆盖它们；其余 10 个资源与 CORS 字段只从该服务器文件读取。
+15 个字段必须按模板顺序全部存在且非空，每项紧邻包含中文的注释，注释使用英文标点。校验器拒绝 CRLF、引号、变量展开、命令替换、管道和其他命令语法，且只输出字段名或行号错误。两个自建镜像和三个共享目录字段仍保留在 schema 中，激活脚本会用已校验 SHA 和 `PRODUCTION_PATH` 派生值覆盖它们；基础设施镜像（PostgreSQL、Redis、RabbitMQ、Nginx）版本已直接写入 `docker-compose.yml`，不再通过 env 注入；其余 10 个资源与 CORS 字段只从该服务器文件读取。
 
 候选 runtime 就位后可执行不输出值的独立校验；自动激活和回滚也会在每次 Compose 调用前重复校验：
 

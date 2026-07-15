@@ -213,17 +213,9 @@ jobs:
             esac
           done
           docker image inspect "mianba-java:$DEPLOY_SHA" "mianba-frontend:$DEPLOY_SHA" >/dev/null
-          docker tag "$postgres_source" "mianba-postgres:$DEPLOY_SHA"
-          docker tag "$redis_source" "mianba-redis:$DEPLOY_SHA"
-          docker tag "$rabbitmq_source" "mianba-rabbitmq:$DEPLOY_SHA"
-          docker tag "$nginx_source" "mianba-nginx:$DEPLOY_SHA"
           archive_images=(
             "mianba-java:$DEPLOY_SHA"
             "mianba-frontend:$DEPLOY_SHA"
-            "mianba-postgres:$DEPLOY_SHA"
-            "mianba-redis:$DEPLOY_SHA"
-            "mianba-rabbitmq:$DEPLOY_SHA"
-            "mianba-nginx:$DEPLOY_SHA"
           )
           image_archive="release/mianba-images-$DEPLOY_SHA.tar"
           docker save --output "$image_archive" "${archive_images[@]}"

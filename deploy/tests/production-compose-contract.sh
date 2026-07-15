@@ -23,18 +23,6 @@ MIANBA_APP_IMAGE=ignored-app-image
 # 前端静态镜像, 发布脚本会覆盖为不可变 SHA 标签
 MIANBA_FRONTEND_IMAGE=ignored-frontend-image
 
-# PostgreSQL 镜像, 发布脚本会覆盖为本地 SHA 标签
-MIANBA_POSTGRES_IMAGE=ignored-postgres-image
-
-# Redis 镜像, 发布脚本会覆盖为本地 SHA 标签
-MIANBA_REDIS_IMAGE=ignored-redis-image
-
-# RabbitMQ 镜像, 发布脚本会覆盖为本地 SHA 标签
-MIANBA_RABBITMQ_IMAGE=ignored-rabbitmq-image
-
-# Nginx 镜像, 发布脚本会覆盖为本地 SHA 标签
-MIANBA_NGINX_IMAGE=ignored-nginx-image
-
 # 服务器 secret 目录, 发布脚本按生产根目录派生
 MIANBA_SECRETS_DIR=/ignored/secrets
 
@@ -177,10 +165,6 @@ done
   done
   printf 'APP:%s\n' "${MIANBA_APP_IMAGE:-}"
   printf 'FRONTEND:%s\n' "${MIANBA_FRONTEND_IMAGE:-}"
-  printf 'POSTGRES:%s\n' "${MIANBA_POSTGRES_IMAGE:-}"
-  printf 'REDIS:%s\n' "${MIANBA_REDIS_IMAGE:-}"
-  printf 'RABBITMQ:%s\n' "${MIANBA_RABBITMQ_IMAGE:-}"
-  printf 'NGINX:%s\n' "${MIANBA_NGINX_IMAGE:-}"
   printf 'SECRETS:%s\n' "${MIANBA_SECRETS_DIR:-}"
   printf 'CERTS:%s\n' "${MIANBA_CERTS_DIR:-}"
   printf 'RUNTIME_CONFIG:%s\n' "${MIANBA_RUNTIME_CONFIG_DIR:-}"
@@ -207,10 +191,6 @@ export MIANBA_PRODUCTION_ROOT="$production_root"
 export MIANBA_TEST_DOCKER_CAPTURE="$temporary_root/docker.capture"
 export MIANBA_APP_IMAGE='polluted-app-image'
 export MIANBA_FRONTEND_IMAGE='polluted-frontend-image'
-export MIANBA_POSTGRES_IMAGE='polluted-postgres-image'
-export MIANBA_REDIS_IMAGE='polluted-redis-image'
-export MIANBA_RABBITMQ_IMAGE='polluted-rabbitmq-image'
-export MIANBA_NGINX_IMAGE='polluted-nginx-image'
 export MIANBA_SECRETS_DIR='/polluted/secrets'
 export MIANBA_CERTS_DIR='/polluted/certs'
 export MIANBA_RUNTIME_CONFIG_DIR='/polluted/runtime-config'
@@ -237,10 +217,6 @@ for expected in \
   'ARG:--services' \
   "APP:mianba-java:$sha" \
   "FRONTEND:mianba-frontend:$sha" \
-  "POSTGRES:mianba-postgres:$sha" \
-  "REDIS:mianba-redis:$sha" \
-  "RABBITMQ:mianba-rabbitmq:$sha" \
-  "NGINX:mianba-nginx:$sha" \
   "SECRETS:$production_root/shared/secrets" \
   "CERTS:$production_root/shared/certs" \
   "RUNTIME_CONFIG:$production_root/shared/runtime-config"; do
@@ -281,8 +257,7 @@ fi
 mv -- "$temporary_root/compose.env.saved" "$compose_env_file"
 
 for name in \
-  MIANBA_APP_IMAGE MIANBA_FRONTEND_IMAGE MIANBA_POSTGRES_IMAGE MIANBA_REDIS_IMAGE \
-  MIANBA_RABBITMQ_IMAGE MIANBA_NGINX_IMAGE MIANBA_SECRETS_DIR MIANBA_CERTS_DIR \
+  MIANBA_APP_IMAGE MIANBA_FRONTEND_IMAGE MIANBA_SECRETS_DIR MIANBA_CERTS_DIR \
   MIANBA_RUNTIME_CONFIG_DIR MIANBA_CORS_ALLOWED_ORIGINS API_DB_POOL_SIZE API_DB_MIN_IDLE \
   WORKER_DB_POOL_SIZE WORKER_DB_MIN_IDLE DB_CONNECTION_TIMEOUT_MS API_TOMCAT_MAX_THREADS \
   API_TOMCAT_ACCEPT_COUNT WORKER_CONSUMER_CONCURRENCY WORKER_CONSUMER_MAX_CONCURRENCY; do

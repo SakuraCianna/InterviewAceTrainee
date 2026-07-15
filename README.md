@@ -121,7 +121,7 @@ npm run dev
 
 `rabbitmq-definitions.json` 不是人工维护的 Secret。脚本从两个 RabbitMQ 密码文件派生该运行配置，并通过同目录临时文件和原子重命名刷新；生成失败时保留旧配置。
 
-根目录 `.env.example` 与 `deploy/compose.env.example` 使用完全相同的 19 个生产 Compose 字段，字段名称和顺序由 `scripts/check-env-schema.ps1` 自动核对。本机 `.env` 只是同结构的忽略文件，不提供 localhost 变体、不保存 Secret，也绝不会被生产发布读取。服务器唯一的非敏感配置事实来源是 `<PRODUCTION_PATH>/shared/compose.env`：它必须是非符号链接的 0600 普通文件，字段、顺序和相邻中文注释与示例完全一致，且注释只使用英文标点。`deploy/validate-compose-env.sh` 以 UTF-8 严格解析该文件，不执行 `source`、不展开命令语法，也不打印字段值。
+根目录 `.env.example` 与 `deploy/compose.env.example` 使用完全相同的 15 个生产 Compose 字段，字段名称和顺序由 `scripts/check-env-schema.ps1` 自动核对。本机 `.env` 只是同结构的忽略文件，不提供 localhost 变体、不保存 Secret，也绝不会被生产发布读取。服务器唯一的非敏感配置事实来源是 `<PRODUCTION_PATH>/shared/compose.env`：它必须是非符号链接的 0600 普通文件，字段、顺序和相邻中文注释与示例完全一致，且注释只使用英文标点。`deploy/validate-compose-env.sh` 以 UTF-8 严格解析该文件，不执行 `source`、不展开命令语法，也不打印字段值。
 
 生产脚本每次调用 Compose 都显式传入 `--env-file`，并先从子进程环境移除全部 19 个同名字段，防止 SSH、运维 Shell 或工作流环境污染覆盖服务器文件。其中六个 commit 专属镜像标签和 `secret`、证书、稳定 runtime-config 三个派生目录由发布脚本重新注入；CORS、API/Worker 连接池、数据库等待时间、Tomcat 线程/队列和 Worker 消费并发等其余 10 项只来自服务器 `shared/compose.env`。Compose 对全部 19 项使用缺失即失败的插值。一次性 `migrate` 角色使用数据库所有者执行 Flyway；API 与 Worker 分别使用 `mianba_api`、`mianba_worker` 且关闭 Flyway，数据库与 RabbitMQ 权限互相隔离。生产 Cookie 强制 Secure。迁移期间保留的 `Backend/.env` 与 `Frontend/.env` 只作为旧 Python/前端部署配置备份，不参与新 Spring Boot Compose 启动。
 
@@ -220,7 +220,7 @@ API 对每个用户执行以下材料配额和内容擦除规则：
 9. 生产只执行 `docker load`；常驻服务的 `docker compose up --no-build --pull never` 与一次性迁移的 `docker compose run --pull never` 都只使用六个 commit 专属本地镜像，不现场运行 Maven、npm、测试、Docker build 或隐式 registry pull；精确清理本次 staging、最多保留 5 个 release，不执行全局 prune
 
 生产工作流还会通过 GitHub Actions API 要求同一 commit 已在 `sakuracianna` 完整 CI 中成功，历史 SHA 不能绕过 Compose 拓扑和业务烟测直接发布。
-生产观察命令统一通过 runtime 包内的 `deploy/production-compose.sh` 解析 `current`、固定 project 名和六个镜像标签；该入口不开放 `up`、`down`、`pull`、`rm` 等状态变更，避免手工环境变量漂移。
+生产观察命令统一通过 runtime 包内的 `deploy/production-compose.sh` 解析 `current`、固定 project 名和两个自建镜像标签；该入口不开放 `up`、`down`、`pull`、`rm` 等状态变更，避免手工环境变量漂移。
 
 启用自动传输前必须由仓库管理员配置并验证以下待配置项:
 

@@ -19,7 +19,7 @@ x-java-security: &java-security
 
 services:
   postgres:
-    image: ${MIANBA_POSTGRES_IMAGE:?MIANBA_POSTGRES_IMAGE is required}
+    image: pgvector/pgvector:0.8.5-pg18-bookworm@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0
     restart: unless-stopped
     environment:
       POSTGRES_DB: mianba_prod
@@ -101,7 +101,7 @@ services:
     cpus: "0.50"
 
   redis:
-    image: ${MIANBA_REDIS_IMAGE:?MIANBA_REDIS_IMAGE is required}
+    image: redis:8.8.0-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/opt/mianba/redis-entrypoint.sh"]
     secrets:
@@ -133,7 +133,7 @@ services:
       start_period: 10s
 
   rabbitmq:
-    image: ${MIANBA_RABBITMQ_IMAGE:?MIANBA_RABBITMQ_IMAGE is required}
+    image: rabbitmq:4.3.2-management@sha256:c1e33461287f4c53049ce525575f0df77b2a00a88e2593776afbb6c1489bdb81
     restart: unless-stopped
     environment:
       RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2 +sbwt none +sbwtdcpu none +sbwtdio none"
@@ -385,7 +385,7 @@ services:
       start_period: 10s
 
   nginx:
-    image: ${MIANBA_NGINX_IMAGE:?MIANBA_NGINX_IMAGE is required}
+    image: nginx:1.29.7-alpine@sha256:e7257f1ef28ba17cf7c248cb8ccf6f0c6e0228ab9c315c152f9c203cd34cf6d1
     restart: unless-stopped
     depends_on:
       api:
