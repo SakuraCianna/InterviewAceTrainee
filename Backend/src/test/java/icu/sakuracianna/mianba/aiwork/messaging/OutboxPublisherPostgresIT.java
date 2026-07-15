@@ -26,6 +26,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 class OutboxPublisherPostgresIT {
     private static final String ALLOWED_DATABASE_URL =
             "jdbc:postgresql://127.0.0.1:5432/mianba_integration_test";
+    private static final String ALLOWED_DATABASE_NAME = "mianba_integration_test";
+    private static final String ALLOWED_DATABASE_USERNAME = "postgres";
 
     private JdbcTemplate jdbc;
     private TransactionTemplate transactions;
@@ -36,13 +38,81 @@ class OutboxPublisherPostgresIT {
         if (!ALLOWED_DATABASE_URL.equals(databaseUrl)) {
             throw new IllegalStateException("Integration test database URL is not the dedicated local database");
         }
+        String databaseUsername = requiredEnvironment("MIANBA_IT_DATABASE_USERNAME");
+        if (!ALLOWED_DATABASE_USERNAME.equals(databaseUsername)) {
+            throw new IllegalStateException("Integration test database user must be the dedicated PostgreSQL owner");
+        }
         DataSource dataSource = new DriverManagerDataSource(
                 databaseUrl,
-                requiredEnvironment("MIANBA_IT_DATABASE_USERNAME"),
+                databaseUsername,
                 requiredEnvironment("MIANBA_IT_DATABASE_PASSWORD"));
+        JdbcTemplate migrationJdbc = new JdbcTemplate(dataSource);
+        verifyDedicatedDatabase(migrationJdbc);
+        prepareMigrationRoles(migrationJdbc);
+        verifyMigrationRolePrivileges(migrationJdbc);
         Flyway.configure().dataSource(dataSource).load().migrate();
         jdbc = new JdbcTemplate(dataSource);
         transactions = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
+    }
+
+    /**
+     * 从数据库连接本身复核测试库身份，防止仅依赖连接字符串判断而误执行迁移。
+     *
+     * @param migrationJdbc 具备迁移权限的测试库访问器
+     */
+    private static void verifyDedicatedDatabase(JdbcTemplate migrationJdbc) {
+        String databaseName = migrationJdbc.queryForObject("SELECT current_database()", String.class);
+        String databaseUsername = migrationJdbc.queryForObject("SELECT current_user", String.class);
+        if (!ALLOWED_DATABASE_NAME.equals(databaseName)
+                || !ALLOWED_DATABASE_USERNAME.equals(databaseUsername)) {
+            throw new IllegalStateException("Integration test connection is not the dedicated PostgreSQL database");
+        }
+    }
+
+    /**
+     * 复现生产数据库初始化顺序，为完整迁移中的最小权限授权准备测试角色。
+     *
+     * 测试角色禁止登录且不持有管理权限，只用于验证迁移脚本能够为 API 和 Worker 分别授权。
+     *
+     * @param migrationJdbc 具备创建角色权限的测试库访问器
+     */
+    private static void prepareMigrationRoles(JdbcTemplate migrationJdbc) {
+        migrationJdbc.execute("""
+                DO $migration_roles$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mianba_api') THEN
+                        CREATE ROLE mianba_api NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mianba_worker') THEN
+                        CREATE ROLE mianba_worker NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+                    END IF;
+                END
+                $migration_roles$
+                """);
+    }
+
+    /**
+     * 校验测试角色没有登录或集群管理能力，避免复用同名高权限角色执行迁移。
+     *
+     * @param migrationJdbc 具备查询角色属性权限的测试库访问器
+     */
+    private static void verifyMigrationRolePrivileges(JdbcTemplate migrationJdbc) {
+        Integer unsafeRoleCount = migrationJdbc.queryForObject("""
+                SELECT count(*)
+                FROM pg_roles
+                WHERE rolname IN ('mianba_api', 'mianba_worker')
+                  AND (
+                      rolcanlogin
+                      OR rolsuper
+                      OR rolcreatedb
+                      OR rolcreaterole
+                      OR rolreplication
+                      OR rolbypassrls
+                  )
+                """, Integer.class);
+        if (unsafeRoleCount == null || unsafeRoleCount != 0) {
+            throw new IllegalStateException("Integration test migration roles have unsafe privileges");
+        }
     }
 
     @Test
