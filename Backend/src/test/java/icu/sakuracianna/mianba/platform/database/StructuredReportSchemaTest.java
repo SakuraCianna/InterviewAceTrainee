@@ -17,6 +17,15 @@ class StructuredReportSchemaTest {
                 .contains("generation_status")
                 .contains("current_revision")
                 .contains("summary_source")
+                .contains("ADD COLUMN prompt_version varchar(80)")
+                .contains("ADD COLUMN rubric_version varchar(80)")
+                .contains("ADD COLUMN enhanced_at timestamptz")
+                .contains("ADD COLUMN enhancement_error_code varchar(80)")
+                .contains("ADD CONSTRAINT ck_reports_prompt_version")
+                .contains("ADD CONSTRAINT ck_reports_rubric_version")
+                .contains("ADD CONSTRAINT ck_reports_enhanced_at")
+                .contains("ADD CONSTRAINT ck_reports_enhancement_error_code")
+                .doesNotContain("last_enhancement_error_code")
                 .contains("CHECK (num_nonnulls(session_id, package_id) = 1)")
                 .contains("CREATE UNIQUE INDEX ux_reports_session")
                 .contains("WHERE session_id IS NOT NULL")
@@ -33,6 +42,7 @@ class StructuredReportSchemaTest {
                 .contains("CREATE TABLE turn_dimension_scores")
                 .contains("turn_id uuid NOT NULL REFERENCES turns(id) ON DELETE CASCADE")
                 .contains("score smallint NOT NULL CHECK (score BETWEEN 0 AND 100)")
+                .contains("rubric_version varchar(80) NOT NULL")
                 .contains("UNIQUE (turn_id, dimension_code)")
                 .contains("ALTER TABLE ai_jobs")
                 .contains("ADD COLUMN package_id uuid")
@@ -53,6 +63,12 @@ class StructuredReportSchemaTest {
                 .contains("validation_status")
                 .contains("finish_reason")
                 .contains("attempt_no")
+                .contains("CHECK (operation IN (")
+                .contains(
+                        "'LEGACY'",
+                        "'TURN_EVALUATION'",
+                        "'REPORT_ENHANCEMENT'",
+                        "'PACKAGE_REPORT'")
                 .doesNotContain("prompt_body", "output_body", "prompt_text", "output_text");
     }
 

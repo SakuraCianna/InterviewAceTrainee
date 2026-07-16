@@ -4,14 +4,19 @@ ALTER TABLE reports
     ADD COLUMN generation_status varchar(32),
     ADD COLUMN current_revision integer,
     ADD COLUMN summary_source varchar(24),
+    ADD COLUMN prompt_version varchar(80),
+    ADD COLUMN rubric_version varchar(80),
+    ADD COLUMN enhanced_at timestamptz,
     ADD COLUMN enhancement_attempts smallint,
-    ADD COLUMN last_enhancement_error_code varchar(80);
+    ADD COLUMN enhancement_error_code varchar(80);
 
 UPDATE reports
 SET report_scope = 'SESSION',
     generation_status = 'BASE_READY',
     current_revision = 1,
     summary_source = 'TEMPLATE',
+    prompt_version = 'legacy-unknown',
+    rubric_version = 'legacy-unknown',
     enhancement_attempts = 0;
 
 ALTER TABLE reports
@@ -24,6 +29,10 @@ ALTER TABLE reports
     ALTER COLUMN current_revision SET NOT NULL,
     ALTER COLUMN summary_source SET DEFAULT 'TEMPLATE',
     ALTER COLUMN summary_source SET NOT NULL,
+    ALTER COLUMN prompt_version SET DEFAULT 'legacy-unknown',
+    ALTER COLUMN prompt_version SET NOT NULL,
+    ALTER COLUMN rubric_version SET DEFAULT 'legacy-unknown',
+    ALTER COLUMN rubric_version SET NOT NULL,
     ALTER COLUMN enhancement_attempts SET DEFAULT 0,
     ALTER COLUMN enhancement_attempts SET NOT NULL,
     ADD CONSTRAINT ck_reports_single_subject
@@ -40,8 +49,17 @@ ALTER TABLE reports
         CHECK (current_revision > 0),
     ADD CONSTRAINT ck_reports_summary_source
         CHECK (summary_source IN ('TEMPLATE', 'AI')),
+    ADD CONSTRAINT ck_reports_prompt_version
+        CHECK (char_length(btrim(prompt_version)) BETWEEN 1 AND 80),
+    ADD CONSTRAINT ck_reports_rubric_version
+        CHECK (char_length(btrim(rubric_version)) BETWEEN 1 AND 80),
+    ADD CONSTRAINT ck_reports_enhanced_at
+        CHECK (enhanced_at IS NULL OR enhanced_at >= created_at),
     ADD CONSTRAINT ck_reports_enhancement_attempts
-        CHECK (enhancement_attempts BETWEEN 0 AND 4);
+        CHECK (enhancement_attempts BETWEEN 0 AND 4),
+    ADD CONSTRAINT ck_reports_enhancement_error_code
+        CHECK (enhancement_error_code IS NULL
+            OR char_length(btrim(enhancement_error_code)) BETWEEN 1 AND 80);
 
 -- V1 使用 table-level UNIQUE，约束名可能由 PostgreSQL 自动生成，不能依赖固定名称。
 DO $drop_reports_session_unique$
@@ -101,8 +119,10 @@ CREATE INDEX ix_report_revisions_generated_job
     ON report_revisions(generated_job_id) WHERE generated_job_id IS NOT NULL;
 
 INSERT INTO report_revisions(
-    report_id, revision_no, source, report_json, output_schema_version, created_at)
-SELECT id, 1, 'TEMPLATE', report_json, schema_version::text, created_at
+    report_id, revision_no, source, report_json, prompt_version, rubric_version,
+    output_schema_version, created_at)
+SELECT id, 1, 'TEMPLATE', report_json, prompt_version, rubric_version,
+       schema_version::text, created_at
 FROM reports;
 
 CREATE TABLE turn_dimension_scores (
@@ -113,6 +133,8 @@ CREATE TABLE turn_dimension_scores (
     score smallint NOT NULL CHECK (score BETWEEN 0 AND 100),
     evidence text NOT NULL CHECK (char_length(evidence) BETWEEN 1 AND 800),
     comment text CHECK (comment IS NULL OR char_length(comment) <= 1200),
+    rubric_version varchar(80) NOT NULL
+        CHECK (char_length(btrim(rubric_version)) BETWEEN 1 AND 80),
     created_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (turn_id, dimension_code)
 );
@@ -146,7 +168,14 @@ ALTER TABLE ai_call_logs
     ALTER COLUMN attempt_no SET DEFAULT 1,
     ALTER COLUMN attempt_no SET NOT NULL,
     ADD CONSTRAINT ck_ai_call_logs_operation
-        CHECK (char_length(btrim(operation)) BETWEEN 1 AND 48),
+        CHECK (operation IN (
+            'LEGACY',
+            'MATERIAL_ANALYSIS',
+            'TURN_EVALUATION',
+            'REPORT_ENHANCEMENT',
+            'PACKAGE_REPORT',
+            'SPEECH_RECOGNITION',
+            'SPEECH_SYNTHESIS')),
     ADD CONSTRAINT ck_ai_call_logs_prompt_version
         CHECK (prompt_version IS NULL OR char_length(btrim(prompt_version)) BETWEEN 1 AND 80),
     ADD CONSTRAINT ck_ai_call_logs_output_schema_version

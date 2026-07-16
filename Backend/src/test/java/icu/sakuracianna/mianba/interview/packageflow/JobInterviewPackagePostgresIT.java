@@ -28,6 +28,7 @@ class JobInterviewPackagePostgresIT {
     private static final String ALLOWED_DATABASE_USERNAME = "postgres";
 
     private JdbcTemplate jdbc;
+    private DataSource migrationDataSource;
 
     @BeforeAll
     void migrateDedicatedDatabase() {
@@ -48,6 +49,7 @@ class JobInterviewPackagePostgresIT {
         prepareMigrationRoles(migrationJdbc);
         verifyMigrationRolePrivileges(migrationJdbc);
         Flyway.configure().dataSource(dataSource).load().migrate();
+        migrationDataSource = dataSource;
         jdbc = new JdbcTemplate(dataSource);
     }
 
@@ -335,6 +337,125 @@ class JobInterviewPackagePostgresIT {
                 List.of("DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"));
     }
 
+    @Test
+    void upgradesExistingV2SessionReportWithoutDataLoss() {
+        String schemaName = "mianba_upgrade_" + UUID.randomUUID().toString().replace("-", "");
+        String historyTable = "flyway_history_"
+                + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        String quotedSchema = quoteIsolatedSchema(schemaName);
+        JdbcTemplate upgradeJdbc = new JdbcTemplate(migrationDataSource);
+        UUID userId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID reportId = UUID.randomUUID();
+        try {
+            isolatedFlyway(schemaName, historyTable, "2").migrate();
+            upgradeJdbc.update("""
+                    INSERT INTO %s.users(id, email)
+                    VALUES (?, ?)
+                    """.formatted(quotedSchema), userId, userId + "@example.invalid");
+            upgradeJdbc.update("""
+                    INSERT INTO %s.sessions(
+                        id, user_id, start_idempotency_key, interview_type, status,
+                        total_turns, ended_at)
+                    VALUES (?, ?, ?, 'job', 'completed', 1, now())
+                    """.formatted(quotedSchema), sessionId, userId, "upgrade-session-" + sessionId);
+            upgradeJdbc.update("""
+                    INSERT INTO %s.reports(
+                        id, session_id, total_score, report_json, schema_version)
+                    VALUES (?, ?, 77, '{"summary":"legacy"}'::jsonb, 3)
+                    """.formatted(quotedSchema), reportId, sessionId);
+
+            isolatedFlyway(schemaName, historyTable, null).migrate();
+
+            MigratedReport migratedReport = upgradeJdbc.queryForObject("""
+                    SELECT session_id, package_id, total_score, schema_version,
+                           report_json ->> 'summary' AS summary,
+                           report_scope, generation_status, current_revision,
+                           summary_source, prompt_version, rubric_version,
+                           enhanced_at, enhancement_error_code
+                    FROM %s.reports
+                    WHERE id = ?
+                    """.formatted(quotedSchema), (resultSet, rowNumber) -> new MigratedReport(
+                            resultSet.getObject("session_id", UUID.class),
+                            resultSet.getObject("package_id", UUID.class),
+                            resultSet.getInt("total_score"),
+                            resultSet.getInt("schema_version"),
+                            resultSet.getString("summary"),
+                            resultSet.getString("report_scope"),
+                            resultSet.getString("generation_status"),
+                            resultSet.getInt("current_revision"),
+                            resultSet.getString("summary_source"),
+                            resultSet.getString("prompt_version"),
+                            resultSet.getString("rubric_version"),
+                            resultSet.getObject("enhanced_at"),
+                            resultSet.getString("enhancement_error_code")), reportId);
+            assertThat(migratedReport)
+                    .isEqualTo(new MigratedReport(
+                            sessionId,
+                            null,
+                            77,
+                            3,
+                            "legacy",
+                            "SESSION",
+                            "BASE_READY",
+                            1,
+                            "TEMPLATE",
+                            "legacy-unknown",
+                            "legacy-unknown",
+                            null,
+                            null));
+
+            MigratedRevision migratedRevision = upgradeJdbc.queryForObject("""
+                    SELECT revision_no, source, report_json ->> 'summary' AS summary,
+                           prompt_version, rubric_version, output_schema_version
+                    FROM %s.report_revisions
+                    WHERE report_id = ?
+                    """.formatted(quotedSchema), (resultSet, rowNumber) -> new MigratedRevision(
+                            resultSet.getInt("revision_no"),
+                            resultSet.getString("source"),
+                            resultSet.getString("summary"),
+                            resultSet.getString("prompt_version"),
+                            resultSet.getString("rubric_version"),
+                            resultSet.getString("output_schema_version")), reportId);
+            assertThat(migratedRevision)
+                    .isEqualTo(new MigratedRevision(
+                            1,
+                            "TEMPLATE",
+                            "legacy",
+                            "legacy-unknown",
+                            "legacy-unknown",
+                            "3"));
+
+            Integer legacyUniqueCount = upgradeJdbc.queryForObject("""
+                    SELECT count(*)
+                    FROM pg_constraint constraint_row
+                    JOIN pg_class table_row ON table_row.oid = constraint_row.conrelid
+                    JOIN pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+                    WHERE namespace_row.nspname = ?
+                      AND table_row.relname = 'reports'
+                      AND constraint_row.contype = 'u'
+                      AND pg_get_constraintdef(constraint_row.oid) = 'UNIQUE (session_id)'
+                    """, Integer.class, schemaName);
+            assertThat(legacyUniqueCount).isZero();
+
+            List<String> reportIndexes = upgradeJdbc.queryForList("""
+                    SELECT indexdef
+                    FROM pg_indexes
+                    WHERE schemaname = ? AND tablename = 'reports'
+                      AND indexname IN ('ux_reports_session', 'ux_reports_package')
+                    """, String.class, schemaName);
+            assertThat(reportIndexes)
+                    .anySatisfy(indexDefinition -> assertThat(indexDefinition)
+                            .contains("UNIQUE INDEX ux_reports_session")
+                            .contains("WHERE (session_id IS NOT NULL)"))
+                    .anySatisfy(indexDefinition -> assertThat(indexDefinition)
+                            .contains("UNIQUE INDEX ux_reports_package")
+                            .contains("WHERE (package_id IS NOT NULL)"));
+        } finally {
+            upgradeJdbc.execute("DROP SCHEMA IF EXISTS " + quotedSchema + " CASCADE");
+        }
+    }
+
     private void insertUser(UUID userId) {
         jdbc.update("INSERT INTO users(id, email) VALUES (?, ?)", userId, userId + "@example.invalid");
     }
@@ -433,6 +554,29 @@ class JobInterviewPackagePostgresIT {
         return Boolean.TRUE.equals(granted);
     }
 
+    private Flyway isolatedFlyway(String schemaName, String historyTable, String targetVersion) {
+        if (!historyTable.matches("flyway_history_[0-9a-f]{12}")) {
+            throw new IllegalArgumentException("Unexpected integration-test history table name");
+        }
+        var configuration = Flyway.configure()
+                .dataSource(migrationDataSource)
+                .schemas(schemaName)
+                .defaultSchema(schemaName)
+                .table(historyTable)
+                .createSchemas(true);
+        if (targetVersion != null) {
+            configuration.target(targetVersion);
+        }
+        return configuration.load();
+    }
+
+    private static String quoteIsolatedSchema(String schemaName) {
+        if (!schemaName.matches("mianba_upgrade_[0-9a-f]{32}")) {
+            throw new IllegalArgumentException("Unexpected integration-test schema name");
+        }
+        return '"' + schemaName.replace("\"", "\"\"") + '"';
+    }
+
     private void deleteUserFixtures(UUID userId) {
         jdbc.update("DELETE FROM interview_packages WHERE user_id = ?", userId);
         jdbc.update("DELETE FROM vouchers WHERE user_id = ?", userId);
@@ -488,5 +632,30 @@ class JobInterviewPackagePostgresIT {
             throw new IllegalStateException("Required integration test environment is missing: " + name);
         }
         return value;
+    }
+
+    private record MigratedReport(
+            UUID sessionId,
+            UUID packageId,
+            int totalScore,
+            int schemaVersion,
+            String summary,
+            String reportScope,
+            String generationStatus,
+            int currentRevision,
+            String summarySource,
+            String promptVersion,
+            String rubricVersion,
+            Object enhancedAt,
+            String enhancementErrorCode) {
+    }
+
+    private record MigratedRevision(
+            int revisionNo,
+            String source,
+            String summary,
+            String promptVersion,
+            String rubricVersion,
+            String outputSchemaVersion) {
     }
 }
