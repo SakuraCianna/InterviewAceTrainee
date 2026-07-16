@@ -77,6 +77,10 @@ public class JdbcInterviewService implements InterviewService {
             UUID materialId,
             String idempotencyKey) {
         InterviewType type = parseType(interviewType);
+        if (type == InterviewType.JOB) {
+            throw new ApiException(HttpStatus.CONFLICT,
+                    "job_interview_package_required", "工作面试请通过套餐流程开始");
+        }
         InterviewPlan plan = PLANS.get(type);
         cancelExpiredOpenSessions(userId);
 

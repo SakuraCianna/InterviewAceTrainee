@@ -15,7 +15,10 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import tools.jackson.databind.ObjectMapper;
@@ -23,13 +26,30 @@ import tools.jackson.databind.ObjectMapper;
 class JdbcInterviewServiceStateTest {
     private static final Instant NOW = Instant.parse("2026-07-14T08:00:00Z");
 
-    @Test
-    void startRejectsMaterialWhoseRetentionDoesNotCoverTheWholeSession() {
+    @ParameterizedTest
+    @ValueSource(strings = {"job", " JOB ", "JoB"})
+    void startRejectsDirectJobBeforeAnyJdbcInteraction(String rawType) {
         InterviewStateJdbcTemplate jdbc = new InterviewStateJdbcTemplate();
         JdbcInterviewService service = service(jdbc);
 
         assertThatThrownBy(() -> service.start(
-                UUID.randomUUID(), UUID.randomUUID(), "job", UUID.randomUUID(), "start-key"))
+                UUID.randomUUID(), UUID.randomUUID(), rawType, UUID.randomUUID(), "legacy-job-start"))
+                .isInstanceOfSatisfying(ApiException.class, error -> {
+                    assertThat(error.status()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(error.detail()).isEqualTo("job_interview_package_required");
+                    assertThat(error.getMessage()).isEqualTo("工作面试请通过套餐流程开始");
+                });
+        assertThat(jdbc.queries).isEmpty();
+        assertThat(jdbc.updates).isEmpty();
+    }
+
+    @Test
+    void startStillValidatesMaterialForNonJobInterview() {
+        InterviewStateJdbcTemplate jdbc = new InterviewStateJdbcTemplate();
+        JdbcInterviewService service = service(jdbc);
+
+        assertThatThrownBy(() -> service.start(
+                UUID.randomUUID(), UUID.randomUUID(), "postgraduate", UUID.randomUUID(), "start-key"))
                 .isInstanceOfSatisfying(ApiException.class,
                         error -> assertThat(error.detail()).isEqualTo("interview_material_not_found"));
     }
@@ -73,12 +93,14 @@ class JdbcInterviewServiceStateTest {
     }
 
     private static final class InterviewStateJdbcTemplate extends JdbcTemplate {
+        private final java.util.ArrayList<String> queries = new java.util.ArrayList<>();
         private final java.util.ArrayList<String> updates = new java.util.ArrayList<>();
         private boolean returnExpiredSpeechState;
         private boolean returnExpiredAnswerState;
 
         @Override
         public <T> T queryForObject(String sql, Class<T> requiredType, Object... args) {
+            queries.add(sql);
             if (sql.contains("FROM materials")) {
                 long matchingMaterials = sql.contains("retention_until >= ?")
                         ? 0L
@@ -90,6 +112,7 @@ class JdbcInterviewServiceStateTest {
 
         @Override
         public <T> List<T> query(String sql, RowMapper<T> rowMapper, Object... args) {
+            queries.add(sql);
             try {
                 if (returnExpiredSpeechState && sql.contains("s.status AS session_status")) {
                     ResultSet resultSet = mock(ResultSet.class);
