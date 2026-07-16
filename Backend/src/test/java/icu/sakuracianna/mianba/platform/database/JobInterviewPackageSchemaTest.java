@@ -39,17 +39,40 @@ class JobInterviewPackageSchemaTest {
 
     @Test
     void migrationDefinesExactlyThreePackageBillingModes() throws IOException {
-        assertThat(migrationSql())
-                .contains("admin_unlimited_usage boolean NOT NULL DEFAULT false")
-                .contains("admin_unlimited_usage = false AND charged_credit = 3 AND voucher_id IS NULL")
-                .contains("admin_unlimited_usage = false AND charged_credit = 0 AND voucher_id IS NOT NULL")
-                .contains("admin_unlimited_usage = true AND charged_credit = 0 AND voucher_id IS NULL");
+        String normalizedSql = migrationSql().replaceAll("\\s+", " ").trim();
+        String expectedBillingCheck = """
+                CHECK ((admin_unlimited_usage = false AND charged_credit = 3 AND voucher_id IS NULL)
+                    OR (admin_unlimited_usage = false AND charged_credit = 0 AND voucher_id IS NOT NULL)
+                    OR (admin_unlimited_usage = true AND charged_credit = 0 AND voucher_id IS NULL))
+                """.replaceAll("\\s+", " ").trim();
+
+        assertThat(normalizedSql)
+                .contains("admin_unlimited_usage boolean NOT NULL DEFAULT false");
+        assertThat(packageBillingCheck(normalizedSql))
+                .isEqualTo(expectedBillingCheck);
     }
 
     @Test
     void migrationEnforcesAnExactThirtyDayExpiration() throws IOException {
         assertThat(migrationSql())
                 .contains("CHECK (expires_at = created_at + interval '30 days')");
+    }
+
+    private String packageBillingCheck(String normalizedSql) {
+        String marker = "CHECK ((admin_unlimited_usage";
+        int start = normalizedSql.indexOf(marker);
+        assertThat(start).as("package billing CHECK start").isGreaterThanOrEqualTo(0);
+
+        int depth = 0;
+        for (int index = normalizedSql.indexOf('(', start); index < normalizedSql.length(); index++) {
+            char character = normalizedSql.charAt(index);
+            if (character == '(') {
+                depth++;
+            } else if (character == ')' && --depth == 0) {
+                return normalizedSql.substring(start, index + 1);
+            }
+        }
+        throw new AssertionError("Package billing CHECK is not closed");
     }
 
     private String migrationSql() throws IOException {
