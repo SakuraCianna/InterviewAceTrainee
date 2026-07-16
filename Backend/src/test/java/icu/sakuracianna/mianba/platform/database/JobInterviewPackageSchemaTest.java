@@ -38,6 +38,15 @@ class JobInterviewPackageSchemaTest {
     }
 
     @Test
+    void migrationDefinesExactlyThreePackageBillingModes() throws IOException {
+        assertThat(migrationSql())
+                .contains("admin_unlimited_usage boolean NOT NULL DEFAULT false")
+                .contains("admin_unlimited_usage = false AND charged_credit = 3 AND voucher_id IS NULL")
+                .contains("admin_unlimited_usage = false AND charged_credit = 0 AND voucher_id IS NOT NULL")
+                .contains("admin_unlimited_usage = true AND charged_credit = 0 AND voucher_id IS NULL");
+    }
+
+    @Test
     void migrationEnforcesAnExactThirtyDayExpiration() throws IOException {
         assertThat(migrationSql())
                 .contains("CHECK (expires_at = created_at + interval '30 days')");

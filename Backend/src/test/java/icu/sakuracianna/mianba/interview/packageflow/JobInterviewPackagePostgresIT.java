@@ -52,11 +52,12 @@ class JobInterviewPackagePostgresIT {
     }
 
     @Test
-    void billingRequiresExactlyCreditsOrVoucher() {
+    void billingAllowsExactlyCreditsVoucherOrAdminUnlimited() {
         UUID userId = UUID.randomUUID();
         UUID voucherId = UUID.randomUUID();
         UUID creditPackageId = UUID.randomUUID();
         UUID voucherPackageId = UUID.randomUUID();
+        UUID adminPackageId = UUID.randomUUID();
         try {
             insertUser(userId);
             jdbc.update("""
@@ -65,18 +66,39 @@ class JobInterviewPackagePostgresIT {
                     """, voucherId, userId, "voucher-" + voucherId);
 
             assertThatThrownBy(() -> insertPackage(
-                    UUID.randomUUID(), userId, null, 0, "missing-voucher", "COMPLETED"))
+                    UUID.randomUUID(), userId, null, 0, false,
+                    "missing-voucher", "COMPLETED"))
                     .isInstanceOf(DataIntegrityViolationException.class);
             assertThatThrownBy(() -> insertPackage(
-                    UUID.randomUUID(), userId, voucherId, 3, "credits-with-voucher", "COMPLETED"))
+                    UUID.randomUUID(), userId, voucherId, 3, false,
+                    "credits-with-voucher", "COMPLETED"))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> insertPackage(
+                    UUID.randomUUID(), userId, voucherId, 0, true,
+                    "admin-with-voucher", "COMPLETED"))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> insertPackage(
+                    UUID.randomUUID(), userId, null, 3, true,
+                    "admin-with-credits", "COMPLETED"))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> insertPackage(
+                    UUID.randomUUID(), userId, voucherId, 3, true,
+                    "admin-with-credits-and-voucher", "COMPLETED"))
                     .isInstanceOf(DataIntegrityViolationException.class);
 
-            insertPackage(creditPackageId, userId, null, 3, "valid-credits", "COMPLETED");
-            insertPackage(voucherPackageId, userId, voucherId, 0, "valid-voucher", "COMPLETED");
+            insertPackage(
+                    creditPackageId, userId, null, 3, false,
+                    "valid-credits", "COMPLETED");
+            insertPackage(
+                    voucherPackageId, userId, voucherId, 0, false,
+                    "valid-voucher", "COMPLETED");
+            insertPackage(
+                    adminPackageId, userId, null, 0, true,
+                    "valid-admin-unlimited", "COMPLETED");
 
             Integer packageCount = jdbc.queryForObject(
                     "SELECT count(*) FROM interview_packages WHERE user_id = ?", Integer.class, userId);
-            assertThat(packageCount).isEqualTo(2);
+            assertThat(packageCount).isEqualTo(3);
         } finally {
             deleteUserFixtures(userId);
         }
@@ -238,12 +260,25 @@ class JobInterviewPackagePostgresIT {
             int chargedCredit,
             String idempotencyKey,
             String status) {
+        insertPackage(
+                packageId, userId, voucherId, chargedCredit, false,
+                idempotencyKey, status);
+    }
+
+    private void insertPackage(
+            UUID packageId,
+            UUID userId,
+            UUID voucherId,
+            int chargedCredit,
+            boolean adminUnlimitedUsage,
+            String idempotencyKey,
+            String status) {
         jdbc.update("""
                 INSERT INTO interview_packages(
                     id, user_id, voucher_id, start_idempotency_key, request_hash,
-                    status, current_stage_code, charged_credit, plan_version,
-                    rubric_version, material_snapshot)
-                VALUES (?, ?, ?, ?, ?, ?, 'TECHNICAL_FIRST', ?,
+                    status, current_stage_code, charged_credit, admin_unlimited_usage,
+                    plan_version, rubric_version, material_snapshot)
+                VALUES (?, ?, ?, ?, ?, ?, 'TECHNICAL_FIRST', ?, ?,
                         'job-cn-v1', 'job-rubric-v1', '{}'::jsonb)
                 """,
                 packageId,
@@ -252,7 +287,8 @@ class JobInterviewPackagePostgresIT {
                 idempotencyKey,
                 "0".repeat(64),
                 status,
-                chargedCredit);
+                chargedCredit,
+                adminUnlimitedUsage);
     }
 
     private void insertStage(

@@ -10,6 +10,7 @@ CREATE TABLE interview_packages (
     current_stage_code varchar(32) NOT NULL DEFAULT 'TECHNICAL_FIRST'
         CHECK (current_stage_code IN ('TECHNICAL_FIRST', 'TECHNICAL_SECOND', 'HR_FINAL')),
     charged_credit integer NOT NULL CHECK (charged_credit IN (0, 3)),
+    admin_unlimited_usage boolean NOT NULL DEFAULT false,
     plan_version varchar(80) NOT NULL,
     rubric_version varchar(80) NOT NULL,
     material_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb
@@ -22,8 +23,9 @@ CREATE TABLE interview_packages (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (user_id, start_idempotency_key),
-    CHECK ((charged_credit = 3 AND voucher_id IS NULL)
-        OR (charged_credit = 0 AND voucher_id IS NOT NULL)),
+    CHECK ((admin_unlimited_usage = false AND charged_credit = 3 AND voucher_id IS NULL)
+        OR (admin_unlimited_usage = false AND charged_credit = 0 AND voucher_id IS NOT NULL)
+        OR (admin_unlimited_usage = true AND charged_credit = 0 AND voucher_id IS NULL)),
     CHECK (expires_at = created_at + interval '30 days')
 );
 CREATE UNIQUE INDEX ux_interview_packages_one_active_user
