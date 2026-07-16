@@ -112,13 +112,13 @@ export function AuthPage({ mode }: AuthPageProps) {
         tl.to(fadeItems, { opacity: 1, duration: 0.24, stagger: 0.025 });
         return;
       }
-      tl.to(backRef.current, { opacity: 1, y: 0, duration: 0.45 })
-        .to(eyebrowRef.current, { opacity: 1, y: 0, duration: 0.36 }, "-=0.2")
-        .to(titleLines, { opacity: 1, y: 0, duration: 0.56, stagger: 0.08 }, "-=0.08")
-        .to(descRef.current, { opacity: 1, y: 0, duration: 0.42 }, "-=0.22")
-        .to(statusCardRef.current, { opacity: 1, y: 0, duration: 0.42 }, "-=0.18")
-        .to(authCardRef.current, { opacity: 1, x: 0, scale: 1, filter: "blur(0px)", duration: 0.64 }, "-=0.4")
-        .to(formItems, { opacity: 1, y: 0, duration: 0.34, stagger: 0.055 }, "-=0.32");
+      tl.to(backRef.current, { opacity: 1, y: 0, duration: 0.28 })
+        .to(eyebrowRef.current, { opacity: 1, y: 0, duration: 0.22 }, "-=0.12")
+        .to(titleLines, { opacity: 1, y: 0, duration: 0.34, stagger: 0.05 }, "-=0.05")
+        .to(descRef.current, { opacity: 1, y: 0, duration: 0.26 }, "-=0.14")
+        .to(statusCardRef.current, { opacity: 1, y: 0, duration: 0.26 }, "-=0.12")
+        .to(authCardRef.current, { opacity: 1, x: 0, scale: 1, filter: "blur(0px)", duration: 0.38 }, "-=0.24")
+        .to(formItems, { opacity: 1, y: 0, duration: 0.22, stagger: 0.035 }, "-=0.2");
     }, pageRef);
 
     return () => ctx.revert();
@@ -406,12 +406,6 @@ export function AuthPage({ mode }: AuthPageProps) {
               </div>
             </label>
 
-            <HCaptchaChallenge
-              ref={captchaRef}
-              label={passwordLoginRequiresCaptcha ? "登录安全验证" : "验证码发送安全验证"}
-              onStateChange={setCaptchaState}
-            />
-
             {(mode === "register" || isResetMode) && (
               <label className={authClasses("auth-anim-field")}>
                 验证码
@@ -480,6 +474,12 @@ export function AuthPage({ mode }: AuthPageProps) {
                 <button type="button" onClick={openResetMode}>忘记密码?</button>
               </div>
             )}
+
+            <HCaptchaChallenge
+              ref={captchaRef}
+              label={passwordLoginRequiresCaptcha ? "登录安全验证" : "验证码发送安全验证"}
+              onStateChange={setCaptchaState}
+            />
 
             <Button
               className={authClasses("auth-submit auth-anim-field")}
