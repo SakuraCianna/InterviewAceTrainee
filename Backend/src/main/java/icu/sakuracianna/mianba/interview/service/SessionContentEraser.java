@@ -63,6 +63,10 @@ public final class SessionContentEraser {
                     evaluation_score = NULL,
                     evaluation_feedback = NULL,
                     evaluated_at = NULL,
+                    section_code = NULL,
+                    question_type = NULL,
+                    topic_code = NULL,
+                    parent_turn_id = NULL,
                     status = 'cancelled'
                 WHERE session_id = ?
                 """, sessionId);
@@ -71,6 +75,18 @@ public final class SessionContentEraser {
                 UPDATE content_safety
                 SET matched_terms = '[]'::jsonb, content_excerpt = NULL
                 WHERE session_id = ?
+                """, sessionId);
+        jdbc.update("""
+                UPDATE interview_package_stages AS target
+                SET context_snapshot = '{}'::jsonb,
+                    content_erased_at = COALESCE(content_erased_at, now()),
+                    version = version + 1,
+                    updated_at = now()
+                WHERE target.package_id IN (
+                    SELECT source.package_id
+                    FROM interview_package_stages AS source
+                    WHERE source.session_id = ?)
+                  AND (context_snapshot <> '{}'::jsonb OR target.content_erased_at IS NULL)
                 """, sessionId);
     }
 }

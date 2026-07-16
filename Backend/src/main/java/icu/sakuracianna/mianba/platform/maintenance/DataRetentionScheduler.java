@@ -16,7 +16,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * 分批执行会话超时、内容擦除和无引用材料清理策略。
  *
- * 每个阶段只持有单类业务行锁，避免低配服务器上的长事务与 Worker 形成循环等待。
+ * 套餐维护固定按 Package→Stage 加锁，其余阶段只持有单类业务行锁，避免低配服务器上的长事务。
  */
 @Component
 @ConditionalOnProperty(name = "mianba.runtime.role", havingValue = "api", matchIfMissing = true)
@@ -40,22 +40,93 @@ public class DataRetentionScheduler {
     /** 每小时清理有界批次，避免维护任务挤占 API 和 Worker 的数据库连接。 */
     @Scheduled(fixedDelayString = "${mianba.maintenance.retention-delay-ms:3600000}")
     public void enforceRetention() {
+        int expiredPackages = expireJobInterviewPackages();
         int reconciledArtifacts = reconcileClosedSessionArtifacts();
         int expiredSessions = cancelExpiredSessions();
         // 第二次对账覆盖本轮刚转为 cancelled、但后续独立事务尚未处理的任务和轮次。
         reconciledArtifacts += reconcileClosedSessionArtifacts();
         int erasedSessions = eraseExpiredSessionContent();
+        int erasedPackages = eraseExpiredPackageContent();
         int erasedMaterials = eraseExpiredMaterials();
         int purgedMaterials = purgeDeletedMaterials();
         int deletedOperationalLogs = deleteOldOperationalLogs();
-        if (reconciledArtifacts > 0 || expiredSessions > 0 || erasedSessions > 0 || erasedMaterials > 0
-                || purgedMaterials > 0 || deletedOperationalLogs > 0) {
+        if (expiredPackages > 0 || reconciledArtifacts > 0 || expiredSessions > 0 || erasedSessions > 0
+                || erasedPackages > 0 || erasedMaterials > 0 || purgedMaterials > 0
+                || deletedOperationalLogs > 0) {
             LOGGER.info(
-                    "Retention cleanup completed reconciled_artifacts={} expired_sessions={} erased_sessions={} "
-                            + "erased_materials={} purged_materials={} operational_logs={}",
-                    reconciledArtifacts, expiredSessions, erasedSessions, erasedMaterials,
-                    purgedMaterials, deletedOperationalLogs);
+                    "Retention cleanup completed expired_packages={} reconciled_artifacts={} expired_sessions={} "
+                            + "erased_sessions={} erased_packages={} erased_materials={} purged_materials={} "
+                            + "operational_logs={}",
+                    expiredPackages, reconciledArtifacts, expiredSessions, erasedSessions, erasedPackages,
+                    erasedMaterials, purgedMaterials, deletedOperationalLogs);
         }
+    }
+
+    /** 在一个有界事务中按 Package→Stage 顺序终止到期套餐，避免与阶段启动形成反向锁序。 */
+    private int expireJobInterviewPackages() {
+        return Objects.requireNonNull(transactions.execute(status -> {
+            List<UUID> ids = jdbc.query("""
+                    SELECT id FROM interview_packages
+                    WHERE status = 'ACTIVE' AND expires_at <= now()
+                    ORDER BY expires_at, id
+                    LIMIT ?
+                    FOR UPDATE SKIP LOCKED
+                    """, (rs, row) -> rs.getObject("id", UUID.class), BATCH_SIZE);
+            int expired = 0;
+            for (UUID id : ids) {
+                jdbc.update("""
+                        UPDATE interview_package_stages
+                        SET status = 'EXPIRED', version = version + 1, updated_at = now()
+                        WHERE package_id = ?
+                          AND status IN ('LOCKED', 'UNLOCKED', 'IN_PROGRESS')
+                        """, id);
+                expired += jdbc.update("""
+                        UPDATE interview_packages
+                        SET status = 'EXPIRED', completed_at = COALESCE(completed_at, now()),
+                            version = version + 1, updated_at = now()
+                        WHERE id = ? AND status = 'ACTIVE' AND expires_at <= now()
+                        """, id);
+            }
+            return expired;
+        }), "Package expiry transaction returned no result");
+    }
+
+    /** 擦除终态满 90 天套餐的内容快照，保留计划、时长、轮次和账务元数据。 */
+    private int eraseExpiredPackageContent() {
+        return Objects.requireNonNull(transactions.execute(status -> {
+            List<UUID> ids = jdbc.query("""
+                    SELECT id FROM interview_packages
+                    WHERE status IN ('COMPLETED', 'EXPIRED', 'CANCELLED')
+                      AND content_erased_at IS NULL
+                      AND completed_at IS NOT NULL
+                      AND completed_at <= now() - interval '90 days'
+                    ORDER BY completed_at, id
+                    LIMIT ?
+                    FOR UPDATE SKIP LOCKED
+                    """, (rs, row) -> rs.getObject("id", UUID.class), BATCH_SIZE);
+            int erased = 0;
+            for (UUID id : ids) {
+                jdbc.update("""
+                        UPDATE interview_package_stages
+                        SET context_snapshot = '{}'::jsonb,
+                            content_erased_at = COALESCE(content_erased_at, now()),
+                            version = version + 1, updated_at = now()
+                        WHERE package_id = ?
+                          AND (context_snapshot <> '{}'::jsonb OR content_erased_at IS NULL)
+                        """, id);
+                erased += jdbc.update("""
+                        UPDATE interview_packages
+                        SET material_snapshot = '{}'::jsonb, content_erased_at = now(),
+                            version = version + 1, updated_at = now()
+                        WHERE id = ?
+                          AND status IN ('COMPLETED', 'EXPIRED', 'CANCELLED')
+                          AND content_erased_at IS NULL
+                          AND completed_at IS NOT NULL
+                          AND completed_at <= now() - interval '90 days'
+                        """, id);
+            }
+            return erased;
+        }), "Package content retention transaction returned no result");
     }
 
     private int cancelExpiredSessions() {
