@@ -50,10 +50,24 @@ public final class SessionContentEraser {
                     version = version + 1,
                     updated_at = now()
                 WHERE session_id = ?
-                """, cancellationCode, cancellationCode, sessionId);
+                   OR (
+                       session_id IS NULL
+                       AND kind = 'GENERATE_REPORT'
+                       AND package_id IN (
+                           SELECT source.package_id
+                           FROM interview_package_stages AS source
+                           WHERE source.session_id = ?
+                       )
+                   )
+                """, cancellationCode, cancellationCode, sessionId, sessionId);
     }
 
     void eraseConversation(UUID sessionId) {
+        jdbc.update("""
+                DELETE FROM turn_dimension_scores
+                WHERE turn_id IN (
+                    SELECT id FROM turns WHERE session_id = ?)
+                """, sessionId);
         jdbc.update("""
                 UPDATE turns
                 SET round_name = '内容已删除',
@@ -67,10 +81,21 @@ public final class SessionContentEraser {
                     question_type = NULL,
                     topic_code = NULL,
                     parent_turn_id = NULL,
+                    covered_sections = '[]'::jsonb,
+                    covered_topics = '[]'::jsonb,
+                    risk_flags = '[]'::jsonb,
                     status = 'cancelled'
                 WHERE session_id = ?
                 """, sessionId);
         jdbc.update("DELETE FROM reports WHERE session_id = ?", sessionId);
+        jdbc.update("""
+                DELETE FROM reports
+                WHERE report_scope = 'PACKAGE'
+                  AND package_id IN (
+                      SELECT source.package_id
+                      FROM interview_package_stages AS source
+                      WHERE source.session_id = ?)
+                """, sessionId);
         jdbc.update("""
                 UPDATE content_safety
                 SET matched_terms = '[]'::jsonb, content_excerpt = NULL

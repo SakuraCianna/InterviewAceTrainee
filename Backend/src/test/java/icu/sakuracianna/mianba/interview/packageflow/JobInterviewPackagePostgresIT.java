@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
@@ -323,8 +325,8 @@ class JobInterviewPackagePostgresIT {
         assertPrivileges(
                 "mianba_api",
                 "turn_dimension_scores",
-                List.of("SELECT"),
-                List.of("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"));
+                List.of("SELECT", "DELETE"),
+                List.of("INSERT", "UPDATE", "TRUNCATE", "REFERENCES", "TRIGGER"));
         assertPrivileges(
                 "mianba_worker",
                 "report_revisions",
@@ -335,6 +337,74 @@ class JobInterviewPackagePostgresIT {
                 "turn_dimension_scores",
                 List.of("SELECT", "INSERT", "UPDATE"),
                 List.of("DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"));
+    }
+
+    @Test
+    void turnEvaluationArraysRejectInvalidShapesCodesAndCardinality() {
+        UUID userId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        try {
+            insertUser(userId);
+            insertCompletedSession(sessionId, userId);
+            jdbc.update("""
+                    INSERT INTO turns(id, session_id, turn_index, round_name, question_text)
+                    VALUES (?, ?, 0, '一面', '请介绍自己')
+                    """, turnId, sessionId);
+
+            jdbc.update("""
+                    UPDATE turns
+                    SET covered_sections = ?::jsonb,
+                        covered_topics = ?::jsonb,
+                        risk_flags = ?::jsonb
+                    WHERE id = ?
+                    """,
+                    "[\"INTRODUCTION\",\"FOUNDATIONS\"]",
+                    "[\"JAVA_MEMORY_MODEL\"]",
+                    "[\"EVIDENCE_MISSING\"]",
+                    turnId);
+            assertThat(jdbc.queryForList("""
+                    SELECT jsonb_array_elements_text(covered_sections)
+                    FROM turns WHERE id = ?
+                    """, String.class, turnId))
+                    .containsExactly("INTRODUCTION", "FOUNDATIONS");
+
+            assertThatThrownBy(() -> jdbc.update(
+                    "UPDATE turns SET covered_sections = '{}'::jsonb WHERE id = ?", turnId))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> jdbc.update(
+                    "UPDATE turns SET covered_topics = '[\"VALID\",1]'::jsonb WHERE id = ?", turnId))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> jdbc.update(
+                    "UPDATE turns SET risk_flags = '[\"lower_case\"]'::jsonb WHERE id = ?", turnId))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> jdbc.update(
+                    "UPDATE turns SET risk_flags = ?::jsonb WHERE id = ?",
+                    "[\"" + "A".repeat(65) + "\"]",
+                    turnId))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            String tooManyCodes = IntStream.range(0, 17)
+                    .mapToObj(index -> "\"CODE_" + index + "\"")
+                    .collect(Collectors.joining(",", "[", "]"));
+            assertThatThrownBy(() -> jdbc.update(
+                    "UPDATE turns SET covered_sections = ?::jsonb WHERE id = ?",
+                    tooManyCodes,
+                    turnId))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+        } finally {
+            deleteUserFixtures(userId);
+        }
+    }
+
+    @Test
+    void v4GrantsOnlyTheNewRuntimePrivileges() {
+        assertPrivileges(
+                "mianba_worker",
+                "ai_jobs",
+                List.of("SELECT", "INSERT", "UPDATE"),
+                List.of("DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"));
+        assertThat(hasTablePrivilege("mianba_api", "turn_dimension_scores", "DELETE")).isTrue();
+        assertThat(hasTablePrivilege("mianba_worker", "turn_dimension_scores", "DELETE")).isFalse();
     }
 
     @Test
@@ -451,6 +521,49 @@ class JobInterviewPackagePostgresIT {
                     .anySatisfy(indexDefinition -> assertThat(indexDefinition)
                             .contains("UNIQUE INDEX ux_reports_package")
                             .contains("WHERE (package_id IS NOT NULL)"));
+        } finally {
+            upgradeJdbc.execute("DROP SCHEMA IF EXISTS " + quotedSchema + " CASCADE");
+        }
+    }
+
+    @Test
+    void upgradesExistingV3TurnsWithEmptyEvaluationArrays() {
+        String schemaName = "mianba_upgrade_" + UUID.randomUUID().toString().replace("-", "");
+        String historyTable = "flyway_history_"
+                + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        String quotedSchema = quoteIsolatedSchema(schemaName);
+        JdbcTemplate upgradeJdbc = new JdbcTemplate(migrationDataSource);
+        UUID userId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        try {
+            isolatedFlyway(schemaName, historyTable, "3").migrate();
+            upgradeJdbc.update("""
+                    INSERT INTO %s.users(id, email)
+                    VALUES (?, ?)
+                    """.formatted(quotedSchema), userId, userId + "@example.invalid");
+            upgradeJdbc.update("""
+                    INSERT INTO %s.sessions(
+                        id, user_id, start_idempotency_key, interview_type, status, total_turns)
+                    VALUES (?, ?, ?, 'job', 'active', 1)
+                    """.formatted(quotedSchema), sessionId, userId, "upgrade-session-" + sessionId);
+            upgradeJdbc.update("""
+                    INSERT INTO %s.turns(id, session_id, turn_index, round_name, question_text)
+                    VALUES (?, ?, 0, '一面', '请介绍自己')
+                    """.formatted(quotedSchema), turnId, sessionId);
+
+            isolatedFlyway(schemaName, historyTable, null).migrate();
+
+            EvaluationArrays arrays = upgradeJdbc.queryForObject("""
+                    SELECT covered_sections::text AS covered_sections,
+                           covered_topics::text AS covered_topics,
+                           risk_flags::text AS risk_flags
+                    FROM %s.turns WHERE id = ?
+                    """.formatted(quotedSchema), (resultSet, rowNumber) -> new EvaluationArrays(
+                            resultSet.getString("covered_sections"),
+                            resultSet.getString("covered_topics"),
+                            resultSet.getString("risk_flags")), turnId);
+            assertThat(arrays).isEqualTo(new EvaluationArrays("[]", "[]", "[]"));
         } finally {
             upgradeJdbc.execute("DROP SCHEMA IF EXISTS " + quotedSchema + " CASCADE");
         }
@@ -657,5 +770,11 @@ class JobInterviewPackagePostgresIT {
             String promptVersion,
             String rubricVersion,
             String outputSchemaVersion) {
+    }
+
+    private record EvaluationArrays(
+            String coveredSections,
+            String coveredTopics,
+            String riskFlags) {
     }
 }

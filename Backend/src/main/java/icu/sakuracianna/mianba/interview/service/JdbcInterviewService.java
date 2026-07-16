@@ -339,6 +339,7 @@ public class JdbcInterviewService implements InterviewService {
             throw new ApiException(HttpStatus.CONFLICT,
                     "interview_turn_stale", "回答轮次已经变化，请刷新后重试");
         }
+        UUID packageId = resolvePackageBinding(sessionId);
 
         safetyPolicy.assess(normalizedAnswer)
                 .ifPresent(finding -> recordSafetyFinding(userId, sessionId, finding));
@@ -370,15 +371,18 @@ public class JdbcInterviewService implements InterviewService {
             Map<String, Object> jobInput = new LinkedHashMap<>();
             jobInput.put("session_id", sessionId.toString());
             jobInput.put("turn_index", session.currentTurnIndex());
-            jobInput.put("material_context", session.materialContext());
+            if (packageId == null) {
+                jobInput.put("material_context", session.materialContext());
+            }
             String inputRef = mapper.writeValueAsString(jobInput);
             jdbc.update("""
                     INSERT INTO ai_jobs(
-                        id, owner_id, session_id, kind, status, stage, progress,
+                        id, owner_id, session_id, package_id, kind, status, stage, progress,
                         idempotency_key, request_hash, input_ref, expires_at)
-                    VALUES (?, ?, ?, 'GENERATE_FOLLOW_UP', 'QUEUED', 'WAITING_FOR_WORKER', 0,
+                    VALUES (?, ?, ?, ?, 'GENERATE_FOLLOW_UP', 'QUEUED', 'WAITING_FOR_WORKER', 0,
                             ?, ?, ?::jsonb, ?)
-                    """, jobId, userId, sessionId, idempotencyKey, requestHash, inputRef,
+                    """, jobId, userId, sessionId, packageId,
+                    idempotencyKey, requestHash, inputRef,
                     java.sql.Timestamp.from(now.plus(30, ChronoUnit.MINUTES)));
             insertOutbox(jobId, 0, safeRequestId, now);
         } catch (JacksonException exception) {
@@ -387,6 +391,19 @@ public class JdbcInterviewService implements InterviewService {
         TaskView task = tasks.findByOwnerAndIdempotency(userId, idempotencyKey)
                 .orElseThrow(() -> new IllegalStateException("Created AI task was not found"));
         return new AnswerAcceptance(get(userId, sessionId), task);
+    }
+
+    private UUID resolvePackageBinding(UUID sessionId) {
+        List<UUID> packageIds = jdbc.query("""
+                SELECT package_id
+                FROM interview_package_stages
+                WHERE session_id = ?
+                ORDER BY package_id
+                """, (resultSet, rowNumber) -> resultSet.getObject("package_id", UUID.class), sessionId);
+        if (packageIds.size() > 1) {
+            throw new IllegalStateException("Interview session is bound to multiple interview packages");
+        }
+        return packageIds.isEmpty() ? null : packageIds.getFirst();
     }
 
     private void recordSafetyFinding(
