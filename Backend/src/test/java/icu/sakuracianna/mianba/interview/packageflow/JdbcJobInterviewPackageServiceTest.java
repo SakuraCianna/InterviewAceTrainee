@@ -530,7 +530,7 @@ class JdbcJobInterviewPackageServiceTest {
     }
 
     @Test
-    void createIsTransactionalViewCollectionsAreImmutableAndStartStageRejectsStably() throws Exception {
+    void createIsTransactionalAndViewCollectionsAreImmutable() throws Exception {
         Method create = JdbcJobInterviewPackageService.class.getMethod(
                 "create", UUID.class, UUID.class, UUID.class, UUID.class, String.class);
         assertThat(create.getAnnotation(Transactional.class)).isNotNull();
@@ -555,18 +555,246 @@ class JdbcJobInterviewPackageServiceTest {
         assertThatThrownBy(() -> stage.requiredSections().clear())
                 .isInstanceOf(UnsupportedOperationException.class);
 
-        Fixture fixture = new Fixture(BillingMode.CREDIT);
-        assertThatThrownBy(() -> fixture.service.startStage(
-                        fixture.userId,
-                        fixture.packageId,
-                        JobInterviewStage.TECHNICAL_SECOND,
-                        UUID.randomUUID(),
-                        "stage-key"))
+    }
+
+    @Test
+    void startTechnicalSecondLocksOwnerPackageThenStageAndPersistsUnbilledOpening()
+            throws Exception {
+        StageFixture fixture = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+
+        Method startStage = JdbcJobInterviewPackageService.class.getMethod(
+                "startStage",
+                UUID.class,
+                UUID.class,
+                JobInterviewStage.class,
+                UUID.class,
+                String.class);
+        assertThat(startStage.getAnnotation(Transactional.class)).isNotNull();
+
+        JobInterviewPackageView view = fixture.service.startStage(
+                fixture.userId,
+                fixture.packageId,
+                JobInterviewStage.TECHNICAL_SECOND,
+                fixture.sessionId,
+                "second-stage-key");
+
+        assertThat(view.stages()).singleElement().satisfies(stage -> {
+            assertThat(stage.stageCode()).isEqualTo(JobInterviewStage.TECHNICAL_SECOND);
+            assertThat(stage.status()).isEqualTo("IN_PROGRESS");
+            assertThat(stage.sessionId()).isEqualTo(fixture.sessionId);
+        });
+        List<SqlCall> locks = fixture.jdbc.callsContaining("FOR UPDATE");
+        assertThat(locks).hasSize(2);
+        assertThat(locks.get(0).sql())
+                .contains("FROM interview_packages", "user_id = ?", "FOR UPDATE");
+        assertThat(locks.get(0).args()).containsExactly(fixture.packageId, fixture.userId);
+        assertThat(locks.get(1).sql())
+                .contains("FROM interview_package_stages", "FOR UPDATE")
+                .doesNotContain("JOIN sessions");
+        assertThat(locks.get(1).args())
+                .containsExactly(fixture.packageId, JobInterviewStage.TECHNICAL_SECOND.name());
+
+        SqlCall sessionInsert = fixture.jdbc.singleCallContaining("INSERT INTO sessions");
+        assertThat(sessionInsert.sql())
+                .contains("'job'", "'active'", "charged_credit", "voucher_id")
+                .contains("0", "NULL", "false");
+        assertThat(sessionInsert.args()).containsExactly(
+                fixture.sessionId,
+                fixture.userId,
+                "second-stage-key",
+                fixture.materialId,
+                12,
+                Timestamp.from(NOW),
+                Timestamp.from(NOW.plus(24, ChronoUnit.HOURS)),
+                Timestamp.from(NOW),
+                Timestamp.from(NOW));
+
+        SqlCall stageBinding = fixture.jdbc.singleCallContaining("UPDATE interview_package_stages");
+        assertThat(stageBinding.sql())
+                .contains("status = 'IN_PROGRESS'", "status = 'UNLOCKED'", "session_id IS NULL")
+                .contains("stage_code = ?", "version = version + 1");
+        assertThat(stageBinding.args()).containsExactly(
+                fixture.sessionId,
+                Timestamp.from(NOW),
+                Timestamp.from(NOW),
+                fixture.packageId,
+                JobInterviewStage.TECHNICAL_SECOND.name());
+
+        SqlCall turnInsert = fixture.jdbc.singleCallContaining("INSERT INTO turns");
+        assertThat(turnInsert.sql())
+                .contains("turn_index", "'waiting_answer'", "parent_turn_id", "NULL");
+        assertThat(turnInsert.args()).containsExactly(
+                fixture.sessionId,
+                "技术二面 · 项目深挖",
+                "请选一个最能体现你技术深度的项目，先说明背景、目标和你负责的核心部分。",
+                "PROJECT_DEEP_DIVE",
+                "PROJECT_DEEP_DIVE",
+                "project_overview",
+                Timestamp.from(NOW));
+
+        assertThat(fixture.jdbc.indexOf("FROM interview_packages"))
+                .isLessThan(fixture.jdbc.indexOf("FROM interview_package_stages"));
+        assertThat(fixture.jdbc.indexOf("INSERT INTO sessions"))
+                .isLessThan(fixture.jdbc.indexOf("UPDATE interview_package_stages"));
+        assertThat(fixture.jdbc.indexOf("UPDATE interview_package_stages"))
+                .isLessThan(fixture.jdbc.indexOf("INSERT INTO turns"));
+        assertThat(fixture.jdbc.indexOf("INSERT INTO turns"))
+                .isLessThan(fixture.jdbc.lastIndexOf("FROM interview_packages p"));
+        assertThat(fixture.jdbc.callsContaining("UPDATE users")).isEmpty();
+        assertThat(fixture.jdbc.callsContaining("UPDATE vouchers")).isEmpty();
+        assertThat(fixture.jdbc.callsContaining("INSERT INTO credit_ledger")).isEmpty();
+    }
+
+    @Test
+    void startHrFinalClipsExpiryToPackageAndPersistsHrOpeningMetadata() {
+        StageFixture fixture = new StageFixture(JobInterviewStage.HR_FINAL);
+        fixture.jdbc.packageExpiresAt = NOW.plus(2, ChronoUnit.HOURS);
+
+        fixture.service.startStage(
+                fixture.userId,
+                fixture.packageId,
+                JobInterviewStage.HR_FINAL,
+                fixture.sessionId,
+                "hr-stage-key");
+
+        SqlCall sessionInsert = fixture.jdbc.singleCallContaining("INSERT INTO sessions");
+        assertThat(sessionInsert.args().get(4)).isEqualTo(8);
+        assertThat(sessionInsert.args().get(6))
+                .isEqualTo(Timestamp.from(NOW.plus(2, ChronoUnit.HOURS)));
+        SqlCall turnInsert = fixture.jdbc.singleCallContaining("INSERT INTO turns");
+        assertThat(turnInsert.args()).containsExactly(
+                fixture.sessionId,
+                "HR 面 · 求职动机",
+                "结合前两轮面试体验，请先说明你选择这个岗位和公司的主要动机。",
+                "MOTIVATION",
+                "HR_COMPREHENSIVE",
+                "job_motivation",
+                Timestamp.from(NOW));
+    }
+
+    @Test
+    void startStageReplaysOnlySameBoundSessionAndKeyWithoutWrites() {
+        StageFixture replay = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+        replay.jdbc.stageStatus = "IN_PROGRESS";
+        replay.jdbc.boundSessionId = replay.sessionId;
+        replay.jdbc.boundSessionKey = "same-stage-key";
+
+        JobInterviewPackageView view = replay.service.startStage(
+                replay.userId,
+                replay.packageId,
+                JobInterviewStage.TECHNICAL_SECOND,
+                replay.sessionId,
+                "same-stage-key");
+
+        assertThat(view.stages().getFirst().sessionId()).isEqualTo(replay.sessionId);
+        assertThat(replay.jdbc.updateCalls()).isEmpty();
+
+        StageFixture differentSession = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+        differentSession.jdbc.stageStatus = "IN_PROGRESS";
+        differentSession.jdbc.boundSessionId = differentSession.sessionId;
+        differentSession.jdbc.boundSessionKey = "same-stage-key";
+        assertConflict(() -> differentSession.service.startStage(
+                differentSession.userId,
+                differentSession.packageId,
+                JobInterviewStage.TECHNICAL_SECOND,
+                UUID.randomUUID(),
+                "same-stage-key"), "idempotency_key_conflict");
+        assertThat(differentSession.jdbc.updateCalls()).isEmpty();
+
+        StageFixture differentKey = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+        differentKey.jdbc.stageStatus = "IN_PROGRESS";
+        differentKey.jdbc.boundSessionId = differentKey.sessionId;
+        differentKey.jdbc.boundSessionKey = "original-stage-key";
+        assertConflict(() -> differentKey.service.startStage(
+                differentKey.userId,
+                differentKey.packageId,
+                JobInterviewStage.TECHNICAL_SECOND,
+                differentKey.sessionId,
+                "changed-stage-key"), "idempotency_key_conflict");
+        assertThat(differentKey.jdbc.updateCalls()).isEmpty();
+    }
+
+    @Test
+    void startStageRejectsInvalidOwnerPackageAndStageStatesBeforeWrites() {
+        StageFixture missingPackage = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+        missingPackage.jdbc.packageExists = false;
+        assertApiFailure(() -> missingPackage.start(), 404, "job_interview_package_not_found");
+
+        StageFixture inactive = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+        inactive.jdbc.packageStatus = "COMPLETED";
+        assertApiFailure(() -> inactive.start(), 409, "job_interview_package_not_active");
+
+        StageFixture expired = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+        expired.jdbc.packageExpiresAt = NOW;
+        assertApiFailure(() -> expired.start(), 410, "job_interview_package_expired");
+
+        StageFixture wrongCurrent = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+        wrongCurrent.jdbc.currentStage = JobInterviewStage.HR_FINAL;
+        assertApiFailure(() -> wrongCurrent.start(), 409, "job_interview_stage_not_current");
+
+        StageFixture missingStage = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+        missingStage.jdbc.stageExists = false;
+        assertApiFailure(() -> missingStage.start(), 404, "job_interview_stage_not_found");
+
+        StageFixture lockedStage = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+        lockedStage.jdbc.stageStatus = "LOCKED";
+        assertApiFailure(() -> lockedStage.start(), 409, "job_interview_stage_not_unlocked");
+
+        StageFixture firstStage = new StageFixture(JobInterviewStage.TECHNICAL_FIRST);
+        assertApiFailure(() -> firstStage.start(), 409, "job_interview_stage_already_started");
+
+        for (StageFixture fixture : List.of(
+                missingPackage, inactive, expired, wrongCurrent, missingStage, lockedStage, firstStage)) {
+            assertThat(fixture.jdbc.updateCalls()).isEmpty();
+        }
+
+        StageFixture invalidKey = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+        assertApiFailure(() -> invalidKey.service.startStage(
+                invalidKey.userId,
+                invalidKey.packageId,
+                JobInterviewStage.TECHNICAL_SECOND,
+                invalidKey.sessionId,
+                " "), 422, "validation_failed");
+        assertThat(invalidKey.jdbc.calls).isEmpty();
+    }
+
+    @Test
+    void startStageConstraintAndConditionalUpdateFailuresStopWithoutPostFailureQuery() {
+        StageFixture sessionConflict = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+        sessionConflict.jdbc.failOnSql = "INSERT INTO sessions";
+        assertApiFailure(() -> sessionConflict.start(), 409, "job_interview_package_conflict");
+        assertThat(sessionConflict.jdbc.calls.getLast().sql()).contains("INSERT INTO sessions");
+
+        StageFixture bindConflict = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+        bindConflict.jdbc.stageUpdateRows = 0;
+        assertApiFailure(() -> bindConflict.start(), 409, "job_interview_package_conflict");
+        assertThat(bindConflict.jdbc.calls.getLast().sql()).contains("UPDATE interview_package_stages");
+
+        StageFixture turnConflict = new StageFixture(JobInterviewStage.TECHNICAL_SECOND);
+        turnConflict.jdbc.failOnSql = "INSERT INTO turns";
+        assertApiFailure(() -> turnConflict.start(), 409, "job_interview_package_conflict");
+        assertThat(turnConflict.jdbc.calls.getLast().sql()).contains("INSERT INTO turns");
+
+        for (StageFixture fixture : List.of(sessionConflict, bindConflict, turnConflict)) {
+            assertThat(fixture.jdbc.callsContaining("FROM interview_packages p")).isEmpty();
+        }
+    }
+
+    private static void assertConflict(ThrowingAction action, String detail) {
+        assertApiFailure(action, 409, detail);
+    }
+
+    private static void assertApiFailure(ThrowingAction action, int status, String detail) {
+        assertThatThrownBy(action::run)
                 .isInstanceOfSatisfying(ApiException.class, error -> {
-                    assertThat(error.status().value()).isEqualTo(409);
-                    assertThat(error.detail()).isEqualTo("job_interview_stage_start_unavailable");
+                    assertThat(error.status().value()).isEqualTo(status);
+                    assertThat(error.detail()).isEqualTo(detail);
                 });
-        assertThat(fixture.jdbc.calls).isEmpty();
+    }
+
+    @FunctionalInterface
+    private interface ThrowingAction {
+        void run();
     }
 
     private enum BillingMode {
@@ -617,10 +845,197 @@ class JdbcJobInterviewPackageServiceTest {
         }
     }
 
+    private static final class StageFixture {
+        private final UUID userId = UUID.randomUUID();
+        private final UUID packageId = UUID.randomUUID();
+        private final UUID sessionId = UUID.randomUUID();
+        private final UUID materialId = UUID.randomUUID();
+        private final JobInterviewStage stage;
+        private final StageRecordingJdbcTemplate jdbc;
+        private final JdbcJobInterviewPackageService service;
+
+        private StageFixture(JobInterviewStage stage) {
+            this.stage = stage;
+            jdbc = new StageRecordingJdbcTemplate(userId, packageId, materialId, stage);
+            service = new JdbcJobInterviewPackageService(
+                    jdbc, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC));
+        }
+
+        private void start() {
+            service.startStage(userId, packageId, stage, sessionId, "stage-key");
+        }
+    }
+
     private record SqlCall(String kind, String sql, List<Object> args) {
         private SqlCall(String kind, String sql, Object[] args) {
             this(kind, sql, Collections.unmodifiableList(
                     new ArrayList<>(Arrays.asList(args.clone()))));
+        }
+    }
+
+    private static final class StageRecordingJdbcTemplate extends JdbcTemplate {
+        private final UUID userId;
+        private final UUID packageId;
+        private final UUID materialId;
+        private final JobInterviewStage requestedStage;
+        private final List<SqlCall> calls = new ArrayList<>();
+        private boolean packageExists = true;
+        private boolean stageExists = true;
+        private String packageStatus = "ACTIVE";
+        private JobInterviewStage currentStage;
+        private Instant packageExpiresAt = NOW.plus(30, ChronoUnit.DAYS);
+        private String stageStatus = "UNLOCKED";
+        private UUID boundSessionId;
+        private String boundSessionKey;
+        private int stageUpdateRows = 1;
+        private String failOnSql;
+
+        private StageRecordingJdbcTemplate(
+                UUID userId,
+                UUID packageId,
+                UUID materialId,
+                JobInterviewStage requestedStage) {
+            this.userId = userId;
+            this.packageId = packageId;
+            this.materialId = materialId;
+            this.requestedStage = requestedStage;
+            currentStage = requestedStage;
+        }
+
+        @Override
+        public <T> List<T> query(String sql, RowMapper<T> mapper, Object... args) {
+            record("query", sql, args);
+            try {
+                if (sql.contains("FROM interview_packages") && sql.contains("FOR UPDATE")) {
+                    if (!packageExists || !packageId.equals(args[0]) || !userId.equals(args[1])) {
+                        return List.of();
+                    }
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("status")).thenReturn(packageStatus);
+                    when(rs.getString("current_stage_code")).thenReturn(currentStage.name());
+                    when(rs.getObject("material_id", UUID.class)).thenReturn(materialId);
+                    when(rs.getTimestamp("expires_at"))
+                            .thenReturn(Timestamp.from(packageExpiresAt));
+                    return List.of(map(mapper, rs));
+                }
+                if (sql.contains("FROM interview_package_stages") && sql.contains("FOR UPDATE")) {
+                    if (!stageExists
+                            || !packageId.equals(args[0])
+                            || !requestedStage.name().equals(args[1])) {
+                        return List.of();
+                    }
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("status")).thenReturn(stageStatus);
+                    when(rs.getObject("session_id", UUID.class)).thenReturn(boundSessionId);
+                    when(rs.getInt("max_turns"))
+                            .thenReturn(JobInterviewPlan.chineseEnterpriseV1()
+                                    .stage(requestedStage).maxTurns());
+                    return List.of(map(mapper, rs));
+                }
+                if (sql.contains("FROM sessions") && sql.contains("start_idempotency_key")) {
+                    if (boundSessionId == null || !boundSessionId.equals(args[0])) {
+                        return List.of();
+                    }
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("start_idempotency_key")).thenReturn(boundSessionKey);
+                    return List.of(map(mapper, rs));
+                }
+                if (sql.contains("FROM interview_packages p")) {
+                    if (!packageExists || !packageId.equals(args[0]) || !userId.equals(args[1])) {
+                        return List.of();
+                    }
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getObject("id", UUID.class)).thenReturn(packageId);
+                    when(rs.getString("status")).thenReturn(packageStatus);
+                    when(rs.getString("current_stage_code")).thenReturn(currentStage.name());
+                    when(rs.getInt("charged_credit")).thenReturn(3);
+                    when(rs.getBoolean("admin_unlimited_usage")).thenReturn(false);
+                    when(rs.getTimestamp("expires_at"))
+                            .thenReturn(Timestamp.from(packageExpiresAt));
+                    return List.of(map(mapper, rs));
+                }
+                if (sql.contains("FROM interview_package_stages s")) {
+                    if (!stageExists || !packageId.equals(args[0]) || !userId.equals(args[1])) {
+                        return List.of();
+                    }
+                    JobInterviewPlan.StagePlan plan = JobInterviewPlan.chineseEnterpriseV1()
+                            .stage(requestedStage);
+                    ResultSet rs = mock(ResultSet.class);
+                    when(rs.getString("stage_code")).thenReturn(requestedStage.name());
+                    when(rs.getInt("sequence_no")).thenReturn(requestedStage.sequence());
+                    when(rs.getString("status")).thenReturn(stageStatus);
+                    when(rs.getObject("session_id", UUID.class)).thenReturn(boundSessionId);
+                    when(rs.getInt("min_turns")).thenReturn(plan.minTurns());
+                    when(rs.getInt("max_turns")).thenReturn(plan.maxTurns());
+                    when(rs.getInt("target_duration_minutes")).thenReturn(plan.targetMinutes());
+                    when(rs.getString("required_sections_json"))
+                            .thenReturn(JSON.writeValueAsString(plan.requiredSections()));
+                    return List.of(map(mapper, rs));
+                }
+                throw new AssertionError("Unexpected stage query: " + sql);
+            } catch (tools.jackson.core.JacksonException exception) {
+                throw new AssertionError(exception);
+            } catch (SQLException exception) {
+                throw new DataAccessResourceFailureException(
+                        "Unable to create JDBC stage test row", exception);
+            }
+        }
+
+        @Override
+        public int update(String sql, Object... args) {
+            record("update", sql, args);
+            if (failOnSql != null && sql.contains(failOnSql)) {
+                throw new DataIntegrityViolationException("simulated stage database constraint");
+            }
+            if (sql.contains("UPDATE interview_package_stages")) {
+                if (stageUpdateRows == 1) {
+                    stageStatus = "IN_PROGRESS";
+                    boundSessionId = (UUID) args[0];
+                }
+                return stageUpdateRows;
+            }
+            if (sql.contains("INSERT INTO sessions")) {
+                boundSessionKey = (String) args[2];
+            }
+            return 1;
+        }
+
+        private <T> T map(RowMapper<T> mapper, ResultSet resultSet) throws SQLException {
+            return mapper.mapRow(resultSet, 0);
+        }
+
+        private void record(String kind, String sql, Object[] args) {
+            calls.add(new SqlCall(kind, sql, args));
+        }
+
+        private List<SqlCall> callsContaining(String fragment) {
+            return calls.stream().filter(call -> call.sql().contains(fragment)).toList();
+        }
+
+        private SqlCall singleCallContaining(String fragment) {
+            return callsContaining(fragment).getFirst();
+        }
+
+        private List<SqlCall> updateCalls() {
+            return calls.stream().filter(call -> call.kind().equals("update")).toList();
+        }
+
+        private int indexOf(String fragment) {
+            for (int index = 0; index < calls.size(); index++) {
+                if (calls.get(index).sql().contains(fragment)) {
+                    return index;
+                }
+            }
+            return -1;
+        }
+
+        private int lastIndexOf(String fragment) {
+            for (int index = calls.size() - 1; index >= 0; index--) {
+                if (calls.get(index).sql().contains(fragment)) {
+                    return index;
+                }
+            }
+            return -1;
         }
     }
 

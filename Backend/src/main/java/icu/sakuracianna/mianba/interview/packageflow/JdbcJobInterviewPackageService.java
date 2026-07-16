@@ -30,13 +30,25 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-/** 在单个数据库事务中创建工作面试套餐、固定阶段与首场技术面试。 */
+/** 在单个数据库事务中创建工作面试套餐，并按需启动套餐阶段。 */
 @Service
 @ConditionalOnProperty(name = "mianba.runtime.role", havingValue = "api", matchIfMissing = true)
 public class JdbcJobInterviewPackageService implements JobInterviewPackageService {
     private static final String END_RULE = "MIN_TURNS_AND_COVERAGE_AND_MODEL_OR_MAX_TURNS";
     private static final String FIRST_ROUND = "技术一面 · 自我介绍";
     private static final String FIRST_QUESTION = "请用两分钟介绍与你目标岗位最相关的一段经历。";
+    private static final StageOpening SECOND_STAGE_OPENING = new StageOpening(
+            "技术二面 · 项目深挖",
+            "请选一个最能体现你技术深度的项目，先说明背景、目标和你负责的核心部分。",
+            "PROJECT_DEEP_DIVE",
+            "PROJECT_DEEP_DIVE",
+            "project_overview");
+    private static final StageOpening HR_STAGE_OPENING = new StageOpening(
+            "HR 面 · 求职动机",
+            "结合前两轮面试体验，请先说明你选择这个岗位和公司的主要动机。",
+            "MOTIVATION",
+            "HR_COMPREHENSIVE",
+            "job_motivation");
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
@@ -48,6 +60,7 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
+    /** 固定按 Package→Stage 顺序加锁，使阶段绑定与幂等重放共享同一事务事实。 */
     @Override
     @Transactional
     public JobInterviewPackageView create(
@@ -214,16 +227,219 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
     }
 
     @Override
+    @Transactional
     public JobInterviewPackageView startStage(
             UUID userId,
             UUID packageId,
             JobInterviewStage stage,
             UUID sessionId,
             String idempotencyKey) {
-        throw new ApiException(
-                HttpStatus.CONFLICT,
-                "job_interview_stage_start_unavailable",
-                "当前版本暂不支持启动后续面试阶段");
+        requireStartStageArguments(userId, packageId, stage, sessionId, idempotencyKey);
+        LockedPackage lockedPackage = lockPackage(userId, packageId);
+        Instant now = clock.instant();
+        requireStartablePackage(lockedPackage, stage, now);
+
+        LockedStage lockedStage = lockStage(packageId, stage);
+        if (lockedStage.sessionId() != null) {
+            return replayStartedStage(
+                    userId, packageId, lockedStage.sessionId(), sessionId, idempotencyKey);
+        }
+        if (stage == JobInterviewStage.TECHNICAL_FIRST) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "job_interview_stage_already_started",
+                    "技术一面只能随套餐创建启动");
+        }
+        if (!"UNLOCKED".equals(lockedStage.status())) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "job_interview_stage_not_unlocked",
+                    "当前面试阶段尚未解锁");
+        }
+
+        Instant sessionExpiresAt = min(now.plus(24, ChronoUnit.HOURS), lockedPackage.expiresAt());
+        if (!sessionExpiresAt.isAfter(now)) {
+            throw new ApiException(
+                    HttpStatus.GONE,
+                    "job_interview_package_expired",
+                    "工作面试套餐已过期");
+        }
+        Timestamp nowTimestamp = Timestamp.from(now);
+        insertLaterSession(
+                userId,
+                sessionId,
+                idempotencyKey,
+                lockedPackage.materialId(),
+                lockedStage.maxTurns(),
+                nowTimestamp,
+                Timestamp.from(sessionExpiresAt));
+        bindLaterStage(packageId, stage, sessionId, nowTimestamp);
+        insertLaterTurn(sessionId, openingFor(stage), nowTimestamp);
+        return get(userId, packageId);
+    }
+
+    private LockedPackage lockPackage(UUID userId, UUID packageId) {
+        return jdbc.query("""
+                SELECT status, current_stage_code, material_id, expires_at
+                FROM interview_packages
+                WHERE id = ? AND user_id = ?
+                FOR UPDATE
+                """, (rs, row) -> new LockedPackage(
+                rs.getString("status"),
+                JobInterviewStage.valueOf(rs.getString("current_stage_code")),
+                rs.getObject("material_id", UUID.class),
+                rs.getTimestamp("expires_at").toInstant()), packageId, userId)
+                .stream().findFirst()
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        "job_interview_package_not_found",
+                        "工作面试套餐不存在"));
+    }
+
+    private static void requireStartablePackage(
+            LockedPackage lockedPackage,
+            JobInterviewStage stage,
+            Instant now) {
+        if (!"ACTIVE".equals(lockedPackage.status())) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "job_interview_package_not_active",
+                    "工作面试套餐当前不可启动阶段");
+        }
+        if (!lockedPackage.expiresAt().isAfter(now)) {
+            throw new ApiException(
+                    HttpStatus.GONE,
+                    "job_interview_package_expired",
+                    "工作面试套餐已过期");
+        }
+        if (lockedPackage.currentStage() != stage) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "job_interview_stage_not_current",
+                    "只能启动当前面试阶段");
+        }
+    }
+
+    private LockedStage lockStage(UUID packageId, JobInterviewStage stage) {
+        return jdbc.query("""
+                SELECT status, session_id, max_turns
+                FROM interview_package_stages
+                WHERE package_id = ? AND stage_code = ?
+                FOR UPDATE
+                """, (rs, row) -> new LockedStage(
+                rs.getString("status"),
+                rs.getObject("session_id", UUID.class),
+                rs.getInt("max_turns")), packageId, stage.name())
+                .stream().findFirst()
+                .orElseThrow(() -> new ApiException(
+                        HttpStatus.NOT_FOUND,
+                        "job_interview_stage_not_found",
+                        "工作面试阶段不存在"));
+    }
+
+    private JobInterviewPackageView replayStartedStage(
+            UUID userId,
+            UUID packageId,
+            UUID boundSessionId,
+            UUID requestedSessionId,
+            String idempotencyKey) {
+        Optional<String> boundKey = jdbc.query("""
+                SELECT start_idempotency_key
+                FROM sessions
+                WHERE id = ?
+                """, (rs, row) -> rs.getString("start_idempotency_key"), boundSessionId)
+                .stream().findFirst();
+        if (!boundSessionId.equals(requestedSessionId)
+                || boundKey.isEmpty()
+                || !boundKey.get().equals(idempotencyKey)) {
+            throw new ApiException(
+                    HttpStatus.CONFLICT,
+                    "idempotency_key_conflict",
+                    "已启动阶段不能绑定其他会话或幂等键");
+        }
+        return get(userId, packageId);
+    }
+
+    private void insertLaterSession(
+            UUID userId,
+            UUID sessionId,
+            String idempotencyKey,
+            UUID materialId,
+            int totalTurns,
+            Timestamp now,
+            Timestamp expiresAt) {
+        try {
+            jdbc.update("""
+                    INSERT INTO sessions(
+                        id, user_id, start_idempotency_key, material_id, interview_type,
+                        status, current_turn_index, total_turns, charged_credit,
+                        voucher_id, admin_unlimited_usage, started_at,
+                        expires_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 'job', 'active', 0, ?, 0,
+                            NULL, false, ?, ?, ?, ?)
+                    """,
+                    sessionId,
+                    userId,
+                    idempotencyKey,
+                    materialId,
+                    totalTurns,
+                    now,
+                    expiresAt,
+                    now,
+                    now);
+        } catch (DataIntegrityViolationException exception) {
+            throw aggregateConflict();
+        }
+    }
+
+    private void bindLaterStage(
+            UUID packageId,
+            JobInterviewStage stage,
+            UUID sessionId,
+            Timestamp now) {
+        try {
+            int updated = jdbc.update("""
+                    UPDATE interview_package_stages
+                    SET status = 'IN_PROGRESS', session_id = ?, started_at = ?,
+                        version = version + 1, updated_at = ?
+                    WHERE package_id = ? AND stage_code = ?
+                      AND status = 'UNLOCKED' AND session_id IS NULL
+                    """, sessionId, now, now, packageId, stage.name());
+            if (updated != 1) {
+                throw aggregateConflict();
+            }
+        } catch (DataIntegrityViolationException exception) {
+            throw aggregateConflict();
+        }
+    }
+
+    private void insertLaterTurn(UUID sessionId, StageOpening opening, Timestamp now) {
+        try {
+            jdbc.update("""
+                    INSERT INTO turns(
+                        session_id, turn_index, round_name, question_text, status,
+                        section_code, question_type, topic_code, parent_turn_id, created_at)
+                    VALUES (?, 0, ?, ?, 'waiting_answer', ?, ?, ?, NULL, ?)
+                    """,
+                    sessionId,
+                    opening.roundName(),
+                    opening.question(),
+                    opening.sectionCode(),
+                    opening.questionType(),
+                    opening.topicCode(),
+                    now);
+        } catch (DataIntegrityViolationException exception) {
+            throw aggregateConflict();
+        }
+    }
+
+    private static StageOpening openingFor(JobInterviewStage stage) {
+        return switch (stage) {
+            case TECHNICAL_SECOND -> SECOND_STAGE_OPENING;
+            case HR_FINAL -> HR_STAGE_OPENING;
+            case TECHNICAL_FIRST -> throw new IllegalArgumentException(
+                    "Technical first stage is created with the package");
+        };
     }
 
     private Optional<JobInterviewPackageView> replay(
@@ -601,6 +817,24 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
         }
     }
 
+    private static void requireStartStageArguments(
+            UUID userId,
+            UUID packageId,
+            JobInterviewStage stage,
+            UUID sessionId,
+            String idempotencyKey) {
+        Objects.requireNonNull(userId, "userId");
+        Objects.requireNonNull(packageId, "packageId");
+        Objects.requireNonNull(stage, "stage");
+        Objects.requireNonNull(sessionId, "sessionId");
+        if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 128) {
+            throw new ApiException(
+                    HttpStatus.UNPROCESSABLE_CONTENT,
+                    "validation_failed",
+                    "幂等键长度必须在 1 到 128 字符之间");
+        }
+    }
+
     private static String requestHash(UUID packageId, UUID firstSessionId, UUID materialId) {
         return sha256(canonical(packageId, firstSessionId, materialId));
     }
@@ -649,6 +883,24 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
     }
 
     private record PreparedJson(String materialSnapshot, List<String> planSnapshots) {
+    }
+
+    private record LockedPackage(
+            String status,
+            JobInterviewStage currentStage,
+            UUID materialId,
+            Instant expiresAt) {
+    }
+
+    private record LockedStage(String status, UUID sessionId, int maxTurns) {
+    }
+
+    private record StageOpening(
+            String roundName,
+            String question,
+            String sectionCode,
+            String questionType,
+            String topicCode) {
     }
 
     private record PackageRow(
