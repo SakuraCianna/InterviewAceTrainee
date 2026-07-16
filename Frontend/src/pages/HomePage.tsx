@@ -320,7 +320,7 @@ export function HomePage() {
           <p className={homeClasses("mianba-kicker mianba-reveal")}>Voice-first interview rehearsal</p>
           <h1 className={homeClasses("mianba-reveal")} id="home-title">把每一次开口, 都练到能上场。</h1>
           <p className={homeClasses("mianba-lead mianba-reveal")}>
-            面霸练习生把工作面试、研究生复试、考公面试和雅思口语拆成四套独立训练。你不用对着聊天框打字, 只需要听题、开口、被追问, 最后拿到能继续行动的复盘报告。
+            不用对着聊天框打字。听题、开口、被追问，最后拿到能继续行动的复盘报告。
           </p>
           <div className={homeClasses("mianba-actions mianba-reveal")}>
             <a className={homeClasses("mianba-primary")} href="/register">
@@ -409,15 +409,6 @@ export function HomePage() {
                 </button>
               </div>
             </div>
-            <aside className={homeClasses("mianba-score-panel")} aria-label="复盘指标预览">
-              <span>{activeTrack.title}复盘快照</span>
-              {activeTrack.preview.scores.map(([label, value]) => (
-                <div key={label}>
-                  <small>{label}</small>
-                  <strong>{value}</strong>
-                </div>
-              ))}
-            </aside>
           </div>
         </section>
       </header>

@@ -123,6 +123,7 @@ public class IdentityConfiguration {
                                     "from", properties.mailFrom(),
                                     "to", java.util.List.of(email),
                                     "subject", "面霸练习生验证码",
+                                    "html", buildHtmlEmail(code, expiresInSeconds),
                                     "text", "您的验证码是 " + code + "，" + expiresInSeconds + " 秒内有效。请勿转发。"))
                             .retrieve()
                             .toBodilessEntity();
@@ -144,6 +145,50 @@ public class IdentityConfiguration {
             message.setText("您的验证码是 " + code + "，" + expiresInSeconds + " 秒内有效。请勿转发。");
             mailSender.send(message);
         };
+    }
+
+    private static String buildHtmlEmail(String code, int expiresInSeconds) {
+        String expiry = expiresInSeconds % 60 == 0
+                ? (expiresInSeconds / 60) + " 分钟"
+                : expiresInSeconds + " 秒";
+        return ("""
+                <!DOCTYPE html>
+                <html lang="zh-CN">
+                <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+                <body style="margin:0;padding:0;background:#f7f4ec;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+                <table width="100%%" cellpadding="0" cellspacing="0" style="background:#f7f4ec;padding:48px 16px;">
+                  <tr><td align="center">
+                    <table width="540" cellpadding="0" cellspacing="0" style="max-width:540px;width:100%%;border-radius:14px;overflow:hidden;border:1px solid rgba(20,24,32,0.1);box-shadow:0 20px 60px rgba(20,24,32,0.10);">
+                      <tr>
+                        <td style="background:#141820;padding:26px 36px;">
+                          <p style="margin:0;color:#cbe85b;font-size:13px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;">MIANBA TRAINEE</p>
+                          <p style="margin:6px 0 0;color:#ffffff;font-size:19px;font-weight:800;">面霸练习生</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="background:#fffdf7;padding:38px 36px 30px;">
+                          <p style="margin:0 0 6px;color:#566170;font-size:13px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">安全验证码</p>
+                          <h1 style="margin:0 0 28px;color:#141820;font-size:26px;font-weight:800;line-height:1.22;">这是你的登录 / 注册验证码</h1>
+                          <div style="background:#eef4ff;border:1px solid rgba(36,104,242,0.18);border-radius:12px;padding:30px 24px;text-align:center;margin-bottom:26px;">
+                            <p style="margin:0 0 8px;color:#566170;font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">验证码</p>
+                            <p style="margin:0;color:#2468f2;font-size:52px;font-weight:900;letter-spacing:12px;font-variant-numeric:tabular-nums;">%s</p>
+                          </div>
+                          <p style="margin:0 0 20px;color:#566170;font-size:15px;line-height:1.72;">该验证码将在 <strong style="color:#141820;">%s</strong> 后失效。如果你没有发起此请求，请忽略这封邮件，账号不会受到任何影响。</p>
+                          <div style="border-left:3px solid #e8c547;background:rgba(232,197,71,0.09);border-radius:0 8px 8px 0;padding:13px 16px;">
+                            <p style="margin:0;color:#141820;font-size:14px;line-height:1.65;"><strong>安全提示：</strong>面霸练习生不会通过电话、短信或任何渠道索要验证码，请勿转发给任何人。</p>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="background:#f7f4ec;padding:18px 36px;border-top:1px solid rgba(20,24,32,0.08);">
+                          <p style="margin:0;color:#9aa4b0;font-size:12px;line-height:1.6;">此邮件由面霸练习生系统自动发送，请勿直接回复。报告用于训练复盘，不承诺录取或考试结果。</p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td></tr>
+                </table>
+                </body></html>
+                """).formatted(code, expiry);
     }
 
     private static String verificationIdempotencyKey(byte[] salt, String email, String code) {

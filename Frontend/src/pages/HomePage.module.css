@@ -324,8 +324,8 @@
 
 .mianba-cockpit-grid {
   display: grid;
-  grid-template-columns: 174px minmax(0, 1fr) 154px;
-  min-height: 520px;
+  grid-template-columns: 174px minmax(0, 1fr);
+  min-height: 460px;
 }
 
 .mianba-track-list,
@@ -687,6 +687,14 @@
 .mianba-proof-card svg {
   color: var(--mb-coral);
   transition: transform 220ms ease, filter 220ms ease;
+}
+
+.mianba-proof-card:nth-child(2) svg {
+  color: var(--mb-blue);
+}
+
+.mianba-proof-card:nth-child(3) svg {
+  color: var(--mb-green);
 }
 
 .mianba-proof-card:hover svg {
