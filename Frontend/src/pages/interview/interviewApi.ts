@@ -1,7 +1,8 @@
-import { csrfHeaders } from "../../lib/api";
+import { createIdempotencyKey, csrfHeaders, requestJson } from "../../lib/api";
 import type {
   ApiPayload,
   CurrentUserResponse,
+  InterviewAnswerResponse,
   InterviewHistoryItem,
   InterviewMaterialResponse,
   InterviewStateResponse,
@@ -9,23 +10,28 @@ import type {
   SpeechSynthesisApiResponse,
 } from "./types";
 
-type ApiResult<T> = {
-  response: Response;
-  data: T;
-};
-
 const jsonHeaders = { "Content-Type": "application/json" };
-const emptyPayload = {} as ApiPayload;
 const credentials = { credentials: "include" } as const;
 
-async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit, fallback?: T): Promise<ApiResult<T>> {
-  const response = await fetch(input, init);
-  const data = (await response.json().catch(() => fallback ?? emptyPayload)) as T;
-  return { response, data };
+type OperationRequestOptions = {
+  idempotencyKey: string;
+  signal?: AbortSignal;
+};
+
+async function retryNetworkOnce<T>(request: () => Promise<T>, signal?: AbortSignal) {
+  try {
+    return await request();
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    // 同一次业务操作可能已到达服务端，网络重试必须复用原幂等键。
+    return request();
+  }
 }
 
-export function getCurrentAccount() {
-  return requestJson<CurrentUserResponse & ApiPayload>("/api/auth/me", credentials);
+export function getCurrentAccount(signal?: AbortSignal) {
+  return requestJson<CurrentUserResponse & ApiPayload>("/api/auth/me", { ...credentials, signal });
 }
 
 export function requestAccountEmailCode(email: string) {
@@ -46,77 +52,132 @@ export function changePasswordWithEmailCode(payload: { code: string; new_passwor
   });
 }
 
-export function listInterviewHistory() {
-  return requestJson<InterviewHistoryItem[]>("/api/interviews/history", credentials, []);
+export function listInterviewHistory(signal?: AbortSignal) {
+  return requestJson<InterviewHistoryItem[]>("/api/interviews/history", { ...credentials, signal }, []);
 }
 
-export function deleteInterviewHistoryItem(sessionId: string) {
-  return fetch(`/api/interviews/${encodeURIComponent(sessionId)}`, {
+export function deleteInterviewHistoryItem(sessionId: string, signal?: AbortSignal) {
+  return requestJson<void>(`/api/interviews/${encodeURIComponent(sessionId)}`, {
     method: "DELETE",
-    credentials: "include",
-    headers: csrfHeaders(),
-  });
+    signal,
+  }).then(({ response }) => response);
 }
 
-export function getActiveInterviewSession() {
-  return requestJson<InterviewStateResponse>("/api/interviews/active", credentials);
+export function getActiveInterviewSession(signal?: AbortSignal) {
+  return requestJson<InterviewStateResponse | null>("/api/interviews/active", { ...credentials, signal }, null);
 }
 
 export function startInterviewSession(payload: {
   session_id: string;
   interview_type: InterviewType;
   material_id?: string;
-}) {
-  return requestJson<InterviewStateResponse>("/api/interviews", {
-    method: "POST",
-    credentials: "include",
-    headers: csrfHeaders(jsonHeaders),
-    body: JSON.stringify(payload),
-  });
+}, options: OperationRequestOptions) {
+  return retryNetworkOnce(
+    () => requestJson<InterviewStateResponse>("/api/interviews", {
+      method: "POST",
+      credentials: "include",
+      headers: csrfHeaders(jsonHeaders),
+      idempotencyKey: options.idempotencyKey,
+      signal: options.signal,
+      body: JSON.stringify(payload),
+    }),
+    options.signal,
+  );
 }
 
-export function uploadInterviewMaterial(formData: FormData) {
+export function uploadInterviewMaterial(formData: FormData, options: OperationRequestOptions) {
   return requestJson<InterviewMaterialResponse & ApiPayload>("/api/interview-materials", {
     method: "POST",
     credentials: "include",
     headers: csrfHeaders(),
+    idempotencyKey: options.idempotencyKey,
+    signal: options.signal,
     body: formData,
   });
 }
 
-export function synthesizeQuestionSpeech(payload: {
-  text: string;
-  interview_type?: InterviewType;
-  session_id: string;
-}) {
+export function synthesizeQuestionSpeech(sessionId: string) {
+  const payload = { session_id: sessionId };
   return requestJson<SpeechSynthesisApiResponse>("/api/speech/tts", {
     method: "POST",
     credentials: "include",
     headers: csrfHeaders(jsonHeaders),
+    idempotencyKey: createIdempotencyKey(),
     body: JSON.stringify(payload),
   });
 }
 
-export function submitInterviewAnswer(sessionId: string, answerText: string) {
-  return requestJson<InterviewStateResponse>(`/api/interviews/${encodeURIComponent(sessionId)}/answers`, {
+type TtsChunk = { a: string; m: string; i: number; f: boolean };
+
+/**
+ * 流式语音合成：返回一个 AsyncGenerator，每 yield 一个 chunk 即可立即播放。
+ * 调用方应在 AbortController 中止时 break 循环以释放连接。
+ */
+export async function* streamQuestionSpeech(
+  sessionId: string,
+  signal: AbortSignal,
+): AsyncGenerator<TtsChunk> {
+  const response = await fetch("/api/speech/tts/stream", {
     method: "POST",
     credentials: "include",
     headers: csrfHeaders(jsonHeaders),
-    body: JSON.stringify({ answer_text: answerText }),
+    body: JSON.stringify({ session_id: sessionId }),
+    signal,
   });
+  if (!response.ok || !response.body) {
+    throw new Error(`TTS stream error: ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.startsWith("data:")) {
+          const json = line.slice(5).trim();
+          if (json) yield JSON.parse(json) as TtsChunk;
+        }
+      }
+    }
+  } finally {
+    reader.cancel();
+  }
 }
 
-export function getInterviewSession(sessionId: string) {
+export function submitInterviewAnswer(
+  sessionId: string,
+  answerText: string,
+  turnIndex: number,
+  options: OperationRequestOptions,
+) {
+  const payload = { answer_text: answerText, turn_index: turnIndex };
+  return retryNetworkOnce(
+    () => requestJson<InterviewAnswerResponse>(`/api/interviews/${encodeURIComponent(sessionId)}/answers`, {
+      method: "POST",
+      credentials: "include",
+      headers: csrfHeaders(jsonHeaders),
+      idempotencyKey: options.idempotencyKey,
+      signal: options.signal,
+      body: JSON.stringify(payload),
+    }),
+    options.signal,
+  );
+}
+
+export function getInterviewSession(sessionId: string, signal?: AbortSignal) {
   return requestJson<InterviewStateResponse>(
     `/api/interviews/${encodeURIComponent(sessionId)}`,
-    credentials,
+    { ...credentials, signal },
   );
 }
 
 export function logoutAccount() {
-  return fetch("/api/auth/logout", {
+  return requestJson<void>("/api/auth/logout", {
     method: "POST",
-    credentials: "include",
-    headers: csrfHeaders(),
-  });
+  }).then(({ response }) => response);
 }

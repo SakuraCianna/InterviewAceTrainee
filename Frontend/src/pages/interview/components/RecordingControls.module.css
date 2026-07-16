@@ -1,0 +1,9 @@
+.controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.controls :global(.adm-button) { min-height: 48px; border-radius: 14px; font-weight: 800; }
+.controls :global(.adm-button-content) { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.primaryButton { border: 0 !important; color: #fff !important; background: var(--blue) !important; }
+.darkButton { border: 0 !important; color: #fff !important; background: #172033 !important; }
+.secondaryButton { border: 1px solid rgba(15, 23, 42, .14) !important; color: #25324a !important; background: #fff !important; }
+.controls :global(.adm-button):focus-visible { outline: 3px solid rgba(40, 100, 232, .28); outline-offset: 3px; }
+.controls :global(.adm-button-disabled) { opacity: .52; }
+@media (max-width: 480px) { .controls { grid-template-columns: 1fr; } }

@@ -1,4 +1,4 @@
-import { csrfHeaders } from "../../lib/api";
+import { csrfHeaders, requestJson } from "../../lib/api";
 import type {
   AICallLogEntry,
   AdminAuditLog,
@@ -20,11 +20,6 @@ import type {
   VoucherIssueResponse,
 } from "./types";
 
-type ApiResult<T> = {
-  response: Response;
-  data: T;
-};
-
 export type AdminApiErrorPayload = {
   detail?: string;
   message?: string;
@@ -43,14 +38,6 @@ export type UserRoleResponse = AdminApiErrorPayload & {
 };
 
 const jsonHeaders = { "Content-Type": "application/json" };
-const emptyObject = {} as AdminApiErrorPayload;
-
-async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit, fallback?: T): Promise<ApiResult<T>> {
-  const response = await fetch(input, init);
-  const data = (await response.json().catch(() => fallback ?? emptyObject)) as T;
-  return { response, data };
-}
-
 const credentials = { credentials: "include" } as const;
 
 export function getCurrentUser() {
@@ -153,32 +140,34 @@ export function getUserInterviewReport(userEmail: string, sessionId: string) {
   );
 }
 
-export function requestAdminEmailCode(email: string) {
+export function requestAdminEmailCode(email: string, captchaToken: string) {
   return requestJson<AdminLoginResponse>("/api/auth/email-code/request", {
     method: "POST",
     credentials: "include",
     headers: jsonHeaders,
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, captcha_token: captchaToken }),
   });
 }
 
-export function loginAdmin(email: string, password: string, code: string) {
+export function loginAdmin(email: string, password: string, code: string, captchaToken: string) {
   return requestJson<AdminLoginResponse>("/api/auth/admin/login", {
     method: "POST",
     credentials: "include",
     headers: jsonHeaders,
-    body: JSON.stringify({ email, password, code }),
+    body: JSON.stringify({ email, password, code, captcha_token: captchaToken }),
   });
 }
 
 export function adjustUserCredits(
   userEmail: string,
   payload: { change_amount: number; reason: string; note?: string },
+  idempotencyKey: string,
 ) {
   return requestJson<CreditAdjustmentResponse>(`/api/admin/users/${encodeURIComponent(userEmail)}/credits`, {
     method: "POST",
     credentials: "include",
     headers: csrfHeaders(jsonHeaders),
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
@@ -190,11 +179,12 @@ export function issueVouchers(payload: {
   voucher_type: string;
   reason: string;
   note?: string;
-}) {
+}, idempotencyKey: string) {
   return requestJson<VoucherIssueResponse & AdminApiErrorPayload>("/api/admin/vouchers", {
     method: "POST",
     credentials: "include",
     headers: csrfHeaders(jsonHeaders),
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
@@ -202,11 +192,13 @@ export function issueVouchers(payload: {
 export function createCustomerServiceNote(
   userEmail: string,
   payload: { category: string; content: string; related_session_id?: string },
+  idempotencyKey: string,
 ) {
   return requestJson<AdminApiErrorPayload>(`/api/admin/users/${encodeURIComponent(userEmail)}/notes`, {
     method: "POST",
     credentials: "include",
     headers: csrfHeaders(jsonHeaders),
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
@@ -221,11 +213,13 @@ export function createRefundCase(
     credit_adjustment?: number;
     related_session_id?: string;
   },
+  idempotencyKey: string,
 ) {
   return requestJson<AdminApiErrorPayload>(`/api/admin/users/${encodeURIComponent(userEmail)}/refund-cases`, {
     method: "POST",
     credentials: "include",
     headers: csrfHeaders(jsonHeaders),
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
@@ -233,63 +227,68 @@ export function createRefundCase(
 export function updateRefundCase(
   caseId: string,
   payload: { status: string; resolution?: string | null },
+  idempotencyKey: string,
 ) {
   return requestJson<AdminApiErrorPayload>(`/api/admin/refund-cases/${encodeURIComponent(caseId)}`, {
     method: "PUT",
     credentials: "include",
     headers: csrfHeaders(jsonHeaders),
+    idempotencyKey,
     body: JSON.stringify(payload),
   });
 }
 
-export function updateProviderEnabled(providerId: string, enabled: boolean) {
+export function updateProviderEnabled(providerId: string, enabled: boolean, idempotencyKey: string) {
   return requestJson<AdminApiErrorPayload>(`/api/ai-providers/${encodeURIComponent(providerId)}`, {
     method: "PUT",
     credentials: "include",
     headers: csrfHeaders(jsonHeaders),
+    idempotencyKey,
     body: JSON.stringify({ enabled }),
   });
 }
 
-export function testProviderConfig(providerId: string) {
+export function testProviderConfig(providerId: string, idempotencyKey: string) {
   return requestJson<ProviderTestResponse>(`/api/ai-providers/${encodeURIComponent(providerId)}/test`, {
     method: "POST",
     credentials: "include",
     headers: csrfHeaders(),
+    idempotencyKey,
   });
 }
 
-export function updateAdminUserStatus(userEmail: string, isActive: boolean) {
+export function updateAdminUserStatus(userEmail: string, isActive: boolean, idempotencyKey: string) {
   return requestJson<AdminApiErrorPayload>(`/api/admin/users/${encodeURIComponent(userEmail)}/status`, {
     method: "PUT",
     credentials: "include",
     headers: csrfHeaders(jsonHeaders),
+    idempotencyKey,
     body: JSON.stringify({ is_active: isActive, reason: isActive ? "manual_restore" : "manual_disable" }),
   });
 }
 
-export function updateAdminUserRole(userEmail: string, role: "user" | "admin") {
+export function updateAdminUserRole(userEmail: string, role: "user" | "admin", idempotencyKey: string) {
   return requestJson<UserRoleResponse>(`/api/admin/users/${encodeURIComponent(userEmail)}/role`, {
     method: "PUT",
     credentials: "include",
     headers: csrfHeaders(jsonHeaders),
+    idempotencyKey,
     body: JSON.stringify({ role, reason: role === "admin" ? "grant_admin" : "revoke_admin" }),
   });
 }
 
-export function updateSystemConfigValue(configKey: string, value: SystemConfig["value"]) {
+export function updateSystemConfigValue(configKey: string, value: SystemConfig["value"], idempotencyKey: string) {
   return requestJson<SystemConfig & AdminApiErrorPayload>(`/api/admin/system-configs/${encodeURIComponent(configKey)}`, {
     method: "PUT",
     credentials: "include",
     headers: csrfHeaders(jsonHeaders),
+    idempotencyKey,
     body: JSON.stringify({ value }),
   });
 }
 
 export function logoutAdmin() {
-  return fetch("/api/auth/logout", {
+  return requestJson<void>("/api/auth/logout", {
     method: "POST",
-    credentials: "include",
-    headers: csrfHeaders(),
-  });
+  }).then(({ response }) => response);
 }

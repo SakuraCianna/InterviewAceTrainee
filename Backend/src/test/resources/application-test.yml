@@ -1,0 +1,34 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:mianba;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+  flyway:
+    enabled: false
+  ai:
+    model:
+      chat: none
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: false
+
+mianba:
+  runtime:
+    role: api
+    production: false
+    local-fallback-enabled: true
+  security:
+    jwt-secret: test-secret-that-is-at-least-thirty-two-bytes
+    cookie-secure: false
+    cookie-same-site: Lax
+    allowed-origins:
+      - http://localhost:5173
+  infrastructure:
+    database-url: jdbc:h2:mem:mianba
+    database-username: sa
+    database-password: test
+    redis-host: test
+    rabbit-host: test
+    rabbit-username: test
+    rabbit-password: test

@@ -4,3 +4,7 @@ dist
 *.tsbuildinfo
 .env
 .env.*
+src/test
+**/*.test.ts
+**/*.test.tsx
+coverage

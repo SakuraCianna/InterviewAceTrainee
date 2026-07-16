@@ -1,6 +1,7 @@
 import type { FormEvent } from "react";
 import { Button } from "antd-mobile";
 import { AppIcon } from "../../components/AppIcon";
+import { roomClasses } from "./roomStyles";
 
 type AccountSettingsPanelProps = {
   email: string;
@@ -30,17 +31,17 @@ export function AccountSettingsPanel({
   onSubmit,
 }: AccountSettingsPanelProps) {
   return (
-    <section className="account-settings-panel" aria-label="账户设置">
-      <div className="account-settings-copy">
-        <span className="eyebrow">Account Settings</span>
+    <section className={roomClasses("account-settings-panel")} aria-label="账户设置">
+      <div className={roomClasses("account-settings-copy")}>
+        <span className={roomClasses("eyebrow")}>Account Settings</span>
         <h2>账户与密码</h2>
         <p>{email}</p>
       </div>
-      <form className="account-password-form" onSubmit={onSubmit}>
+      <form className={roomClasses("account-password-form")} onSubmit={onSubmit}>
         <label>
           <span>邮箱验证码</span>
-          <div className="code-row">
-            <div className="input-shell">
+          <div className={roomClasses("code-row")}>
+            <div className={roomClasses("input-shell")}>
               <AppIcon icon="lucide:key-round" size={17} />
               <input
                 value={code}
@@ -53,7 +54,7 @@ export function AccountSettingsPanel({
             </div>
             <Button
               type="button"
-              className="code-button"
+              className={roomClasses("code-button")}
               fill="outline"
               shape="rounded"
               loading={isRequestingCode}
@@ -66,7 +67,7 @@ export function AccountSettingsPanel({
         </label>
         <label>
           <span>新密码</span>
-          <div className="input-shell">
+          <div className={roomClasses("input-shell")}>
             <AppIcon icon="lucide:key-round" size={17} />
             <input
               type="password"
@@ -79,7 +80,7 @@ export function AccountSettingsPanel({
           </div>
         </label>
         <Button
-          className="auth-submit account-password-submit"
+          className={roomClasses("auth-submit account-password-submit")}
           color="primary"
           loading={isChangingPassword}
           shape="rounded"
@@ -87,7 +88,7 @@ export function AccountSettingsPanel({
         >
           {isChangingPassword ? "修改中" : "修改密码"}
         </Button>
-        <p className="account-settings-message" role="status" aria-live="polite">
+        <p className={roomClasses("account-settings-message")} role="status" aria-live="polite">
           {message}
         </p>
       </form>

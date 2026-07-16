@@ -1,5 +1,6 @@
 import { AppIcon } from "../../components/AppIcon";
 import { BrandLogo } from "../../components/BrandLogo";
+import { adminClasses } from "./adminStyles";
 import type { AdminSectionKey, CurrentUser } from "./types";
 
 export type AdminSidebarNavItem = {
@@ -28,16 +29,16 @@ export function AdminSidebar({
   onLogout,
 }: AdminSidebarProps) {
   return (
-    <aside className="admin-sidebar" aria-label="管理员后台侧栏">
-      <a href="/" className="admin-sidebar-brand">
+    <aside className={adminClasses("admin-sidebar")} aria-label="管理员后台侧栏">
+      <a href="/" className={adminClasses("admin-sidebar-brand")}>
         <BrandLogo size={30} />
         <span>面霸练习生</span>
       </a>
-      <nav className="admin-sidebar-nav" aria-label="后台导航">
+      <nav className={adminClasses("admin-sidebar-nav")} aria-label="后台导航">
         {navItems.map((item) => (
           <button
             type="button"
-            className={activeSection === item.key ? "is-active" : ""}
+            className={adminClasses(activeSection === item.key && "is-active")}
             key={item.key}
             onClick={() => onSelectSection(item.key)}
           >
@@ -46,17 +47,17 @@ export function AdminSidebar({
           </button>
         ))}
       </nav>
-      <div className="admin-sidebar-status" aria-live="polite">
+      <div className={adminClasses("admin-sidebar-status")} aria-live="polite">
         <span>当前账号</span>
         <strong>{currentUser.email}</strong>
         <p>{statusMessage}</p>
       </div>
-      <div className="admin-sidebar-actions">
+      <div className={adminClasses("admin-sidebar-actions")}>
         <button type="button" onClick={onRefresh}>
           <AppIcon icon="lucide:refresh-cw" size={18} />
           刷新数据
         </button>
-        <button type="button" className="admin-sidebar-logout" onClick={onLogout}>
+        <button type="button" className={adminClasses("admin-sidebar-logout")} onClick={onLogout}>
           <AppIcon icon="lucide:log-out" size={18} />
           退出
         </button>

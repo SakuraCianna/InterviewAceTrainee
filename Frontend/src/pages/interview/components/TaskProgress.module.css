@@ -1,0 +1,101 @@
+.card {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--blue) 24%, transparent);
+  border-radius: var(--radius-lg, 18px);
+  background: color-mix(in srgb, var(--surface, #fff) 94%, var(--blue) 6%);
+  box-shadow: var(--shadow-sm, 0 12px 28px rgba(15, 23, 42, 0.08));
+}
+
+.heading,
+.meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.heading > div {
+  display: grid;
+  gap: 4px;
+}
+
+.kicker,
+.meta {
+  color: var(--text-muted, #64748b);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.heading strong {
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.percent {
+  color: var(--blue);
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.progress {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  accent-color: var(--blue);
+}
+
+.card p {
+  margin: 0;
+  color: var(--steel);
+  line-height: 1.65;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.syncError {
+  color: var(--danger, #b42318) !important;
+  font-size: 13px;
+}
+
+.retryButton,
+.refreshButton {
+  flex: 1 1 150px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  background: var(--blue);
+  font-weight: 800;
+}
+
+.refreshButton {
+  border: 1px solid color-mix(in srgb, var(--blue) 35%, transparent);
+  color: var(--blue);
+  background: var(--surface, #fff);
+}
+
+.retryButton:focus-visible,
+.refreshButton:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--blue) 35%, transparent);
+  outline-offset: 3px;
+}
+
+.retryButton:disabled,
+.refreshButton:disabled {
+  cursor: wait;
+  opacity: 0.64;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress {
+    scroll-behavior: auto;
+  }
+}
