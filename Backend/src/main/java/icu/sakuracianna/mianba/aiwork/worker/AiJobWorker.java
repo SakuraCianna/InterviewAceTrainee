@@ -535,7 +535,13 @@ public class AiJobWorker {
                 rs.getString("answer_text"),
                 requiredScore(rs),
                 rs.getString("evaluation_feedback")), sessionId);
-        return assembleReport(sessionId, input, evaluatedTurns);
+        List<InterviewAiGenerator.ReportTurn> reportTurns = evaluatedTurns.stream()
+                .map(t -> new InterviewAiGenerator.ReportTurn(
+                        t.turnIndex(), t.roundName(), t.question(), t.answer(),
+                        t.score(), t.feedback()))
+                .toList();
+        String aiSummary = generator.synthesizeReportSummary(reportTurns, input.interviewType());
+        return assembleReport(sessionId, input, evaluatedTurns, aiSummary);
     }
 
     /**
@@ -550,6 +556,14 @@ public class AiJobWorker {
             UUID sessionId,
             InterviewAiGenerator.InterviewAiInput input,
             List<TurnEvaluationRow> evaluatedTurns) {
+        return assembleReport(sessionId, input, evaluatedTurns, null);
+    }
+
+    static ReportResult assembleReport(
+            UUID sessionId,
+            InterviewAiGenerator.InterviewAiInput input,
+            List<TurnEvaluationRow> evaluatedTurns,
+            String aiSummary) {
         ReportCopyPolicy copy = ReportCopyPolicy.forInterviewType(input.interviewType());
         ReportAggregation aggregation = aggregateEvaluations(input.interviewType(), evaluatedTurns);
 
@@ -579,7 +593,8 @@ public class AiJobWorker {
         report.put("total_score", aggregation.totalScore());
         report.put("readiness_level", copy.readinessLevel(aggregation.totalScore()));
         report.put("score_explanation", copy.scoreExplanation(evaluatedTurns.size()));
-        report.put("summary", aggregation.summary());
+        report.put("summary", aiSummary != null && !aiSummary.isBlank()
+                ? aiSummary : aggregation.summary());
         report.put("dimensions", dimensions);
         report.put("strengths", aggregation.strengths());
         report.put("improvements", aggregation.improvements());
