@@ -1,85 +1,49 @@
 package icu.sakuracianna.mianba.aiwork.worker;
 
-/** Worker 解析并校验后的面试评价结果。 */
+import java.util.List;
+
+/** Worker 严格解析并校验后的多维面试评价结果。 */
 public record InterviewEvaluation(
         int score,
         String feedback,
-        String roundName,
-        String nextQuestion) {
+        List<DimensionEvaluation> dimensions,
+        List<String> coveredSections,
+        List<String> coveredTopics,
+        List<String> riskFlags,
+        boolean shouldEndStage,
+        String nextQuestion,
+        String nextSection,
+        String nextQuestionType,
+        String nextTopicCode) {
 
-    public InterviewEvaluation normalized(boolean finalTurn) {
-        int safeScore = Math.min(100, Math.max(0, score));
-        String safeFeedback = clean(feedback, 1200, "回答已记录，请继续保持结构化表达。");
-        String safeRound = clean(roundName, 80, "追问");
-        String safeQuestion = finalTurn ? null : clean(nextQuestion, 2000, "请进一步说明你的判断依据和具体行动。");
-        return new InterviewEvaluation(safeScore, safeFeedback, safeRound, safeQuestion);
+    public InterviewEvaluation {
+        dimensions = List.copyOf(dimensions);
+        coveredSections = List.copyOf(coveredSections);
+        coveredTopics = List.copyOf(coveredTopics);
+        riskFlags = List.copyOf(riskFlags);
+    }
+
+    /** Task 5 前保留给既有 Worker 测试替身的四字段构造方式。 */
+    public InterviewEvaluation(int score, String feedback, String roundName, String nextQuestion) {
+        this(
+                score,
+                feedback,
+                List.of(new DimensionEvaluation(
+                        "LEGACY", score, "兼容旧 Worker 的已校验评价", "等待结构化持久化迁移")),
+                List.of(),
+                List.of(),
+                List.of(),
+                nextQuestion == null,
+                nextQuestion,
+                roundName,
+                roundName,
+                "LEGACY");
     }
 
     /**
-     * 按可信面试策略归一化模型输出。
-     *
-     * IELTS 的可见文本必须为英文；下一轮名称由服务端阶段表决定；明显重复的问题会替换为
-     * 对应阶段的兜底题，防止模型漂移破坏面试流程。
+     * 旧 Worker 在 Task 5 迁移前仍读取 roundName；结构化契约以可信 nextSection 作为兼容值。
      */
-    public InterviewEvaluation normalized(InterviewAiGenerator.InterviewAiInput input) {
-        InterviewPromptPolicy.Profile profile = InterviewPromptPolicy.profile(input.interviewType());
-        int safeScore = Math.min(100, Math.max(0, score));
-        String safeFeedback = clean(feedback, 1200, profile.feedbackFallback());
-        String safeRound = InterviewPromptPolicy.nextStage(input);
-        String safeQuestion = input.finalTurn()
-                ? null
-                : clean(nextQuestion, 2000, InterviewPromptPolicy.fallbackQuestion(input));
-
-        if (profile.englishOnly()) {
-            if (!InterviewPromptPolicy.isEnglishText(safeFeedback)) {
-                safeFeedback = profile.feedbackFallback();
-            }
-            if (!InterviewPromptPolicy.isEnglishText(safeRound)) {
-                safeRound = "IELTS Speaking";
-            }
-            if (safeQuestion != null && !InterviewPromptPolicy.isEnglishText(safeQuestion)) {
-                safeQuestion = InterviewPromptPolicy.fallbackQuestion(input);
-            }
-        }
-        if (safeQuestion != null
-                && InterviewPromptPolicy.repeatsKnownQuestion(safeQuestion, input)) {
-            safeQuestion = InterviewPromptPolicy.fallbackQuestion(input);
-        }
-        return new InterviewEvaluation(safeScore, safeFeedback, safeRound, safeQuestion);
-    }
-
-    private static String clean(String value, int limit, String fallback) {
-        String normalized = value == null ? "" : removeUnsupportedCharacters(value).strip();
-        if (normalized.isEmpty()) {
-            return fallback;
-        }
-        int codePoints = normalized.codePointCount(0, normalized.length());
-        if (codePoints <= limit) {
-            return normalized;
-        }
-        return normalized.substring(0, normalized.offsetByCodePoints(0, limit));
-    }
-
-    private static String removeUnsupportedCharacters(String value) {
-        StringBuilder safe = new StringBuilder(value.length());
-        for (int index = 0; index < value.length(); index++) {
-            char current = value.charAt(index);
-            if (Character.isHighSurrogate(current)) {
-                if (index + 1 < value.length() && Character.isLowSurrogate(value.charAt(index + 1))) {
-                    safe.append(current).append(value.charAt(++index));
-                } else {
-                    safe.append(' ');
-                }
-            } else if (Character.isLowSurrogate(current)) {
-                safe.append(' ');
-            } else if (Character.isISOControl(current)
-                    && current != '\n' && current != '\r' && current != '\t') {
-                // PostgreSQL text 不接受 NUL；其他不可见控制字符也统一替换，避免模型输出污染存储与日志。
-                safe.append(' ');
-            } else {
-                safe.append(current);
-            }
-        }
-        return safe.toString();
+    public String roundName() {
+        return nextSection;
     }
 }

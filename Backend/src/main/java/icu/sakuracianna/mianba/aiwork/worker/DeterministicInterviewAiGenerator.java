@@ -1,5 +1,7 @@
 package icu.sakuracianna.mianba.aiwork.worker;
 
+import java.util.Comparator;
+import java.util.List;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -21,16 +23,37 @@ final class DeterministicInterviewAiGenerator implements InterviewAiGenerator {
     @Override
     public InterviewEvaluation evaluate(InterviewAiInput input) {
         InterviewPromptPolicy.Profile profile = InterviewPromptPolicy.profile(input.interviewType());
+        InterviewPromptPolicy.StagePolicy stage = InterviewPromptPolicy.stagePolicy(input);
+        List<String> sections = stage.sections().stream().sorted(Comparator.naturalOrder()).toList();
+        String section = sections.get(Math.floorMod(input.turnIndex(), sections.size()));
         String nextQuestion = input.finalTurn()
-                ? null
+                ? ""
                 : InterviewPromptPolicy.fallbackQuestion(input);
         String feedback = profile.englishOnly()
-                ? profile.feedbackFallback()
+                ? "The answer is clear and relevant; add one specific, verifiable example."
                 : "回答已完成确定性评估：结构清晰，建议补充可验证的事实和结果。";
+        String evidence = profile.englishOnly()
+                ? "The response presents one relevant main idea."
+                : "回答给出了与当前问题相关的明确观点";
+        String comment = profile.englishOnly()
+                ? "Add a concrete example and explain its significance."
+                : "建议补充具体事实、边界和结果";
+        int score = 80 + Math.min(input.turnIndex(), 10);
         return new InterviewEvaluation(
-                80 + Math.min(input.turnIndex(), 10),
+                score,
                 feedback,
-                InterviewPromptPolicy.nextStage(input),
-                nextQuestion).normalized(input);
+                List.of(new DimensionEvaluation(
+                        stage.dimensions().stream().sorted().findFirst().orElseThrow(),
+                        score,
+                        evidence,
+                        comment)),
+                List.of(section),
+                List.of("DETERMINISTIC_TOPIC"),
+                List.of(),
+                input.finalTurn(),
+                nextQuestion,
+                input.finalTurn() ? "" : section,
+                input.finalTurn() ? "" : stage.questionTypes().stream().sorted().findFirst().orElseThrow(),
+                input.finalTurn() ? "" : "DETERMINISTIC_TOPIC");
     }
 }

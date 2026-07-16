@@ -1,10 +1,13 @@
 package icu.sakuracianna.mianba.aiwork.worker;
 
 import icu.sakuracianna.mianba.interview.domain.InterviewType;
+import icu.sakuracianna.mianba.interview.packageflow.JobInterviewPlan;
+import icu.sakuracianna.mianba.interview.packageflow.JobInterviewStage;
 import java.text.Normalizer;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 面试类型对应的可信提示词策略。
@@ -13,6 +16,29 @@ import java.util.Map;
  * 文本通过伪造“下一轮规则”改变面试流程。
  */
 final class InterviewPromptPolicy {
+    private static final JobInterviewPlan JOB_PLAN = JobInterviewPlan.chineseEnterpriseV1();
+    private static final Map<JobInterviewStage, List<String>> JOB_FALLBACK_QUESTIONS = Map.of(
+            JobInterviewStage.TECHNICAL_FIRST,
+            List.of(
+                    "请用两分钟介绍与你应聘岗位最相关的经历。",
+                    "请从简历中选择一个项目，说明你的真实职责和可验证结果。",
+                    "请解释目标岗位最常用的一项基础原理及其适用边界。",
+                    "请口述一道数组算法题的解题思路、复杂度和边界条件，不需要编写代码。"),
+            JobInterviewStage.TECHNICAL_SECOND,
+            List.of(
+                    "请选择一个核心项目，说明最困难的技术问题以及你如何定位根因。",
+                    "如果业务流量增长十倍，你会如何演进这个系统并验证容量？",
+                    "请说明你在性能、一致性和复杂度之间做过的一次真实取舍。",
+                    "请复盘一次线上故障，说明止损、定位、修复和预防过程。",
+                    "这项技术方案最终带来了什么可验证的业务影响？"),
+            JobInterviewStage.HR_FINAL,
+            List.of(
+                    "你为什么考虑这个岗位和这家公司？",
+                    "什么因素会影响你在下一份工作的稳定投入？",
+                    "请讲述一次与不同意见同事协作并达成结果的经历。",
+                    "你未来三年的职业规划是什么？",
+                    "请说明你的薪资预期、依据和可协商范围。",
+                    "针对技术面暴露的风险点，你准备如何补足？"));
     private static final Map<InterviewType, Profile> PROFILES = Map.of(
             InterviewType.JOB,
             new Profile(
@@ -105,6 +131,11 @@ final class InterviewPromptPolicy {
      * 每个轮次的题型不同，因此即使模型重复当前问题，恢复后仍能继续既定面试阶段。
      */
     static String fallbackQuestion(InterviewAiGenerator.InterviewAiInput input) {
+        if (typeOf(input.interviewType()) == InterviewType.JOB) {
+            List<String> questions = JOB_FALLBACK_QUESTIONS.get(jobStage(input));
+            int index = Math.min(Math.max(input.turnIndex() + 1, 0), questions.size() - 1);
+            return questions.get(index);
+        }
         Profile profile = profile(input.interviewType());
         int index = Math.min(input.turnIndex() + 1, profile.fallbackQuestions().size() - 1);
         return profile.fallbackQuestions().get(index);
@@ -157,6 +188,79 @@ final class InterviewPromptPolicy {
         return hasLatinLetter;
     }
 
+    /** 返回只由服务端面试类型和套餐阶段码决定的代码目录。 */
+    static StagePolicy stagePolicy(InterviewAiGenerator.InterviewAiInput input) {
+        InterviewType type = typeOf(input.interviewType());
+        if (type == InterviewType.JOB) {
+            JobInterviewStage stage = jobStage(input);
+            Set<String> sections = Set.copyOf(JOB_PLAN.stage(stage).requiredSections());
+            return new StagePolicy(
+                    stage.name(), jobStageLabel(stage), sections, sections, sections);
+        }
+        return switch (type) {
+            case POSTGRADUATE -> new StagePolicy(
+                    "POSTGRADUATE", "研究生复试",
+                    Set.of("INTRODUCTION", "FOUNDATIONS", "RESEARCH_DESIGN",
+                            "CRITICAL_THINKING", "ACADEMIC_PLANNING"),
+                    Set.of("DOMAIN_FOUNDATIONS", "RESEARCH_POTENTIAL",
+                            "CRITICAL_THINKING", "COMMUNICATION"),
+                    Set.of("INTRODUCTION", "FOUNDATIONS", "RESEARCH_DESIGN",
+                            "CRITICAL_THINKING", "ACADEMIC_PLANNING"));
+            case CIVIL_SERVICE -> new StagePolicy(
+                    "CIVIL_SERVICE", "公务员结构化面试",
+                    Set.of("COMPREHENSIVE_ANALYSIS", "ORGANIZATION_COORDINATION",
+                            "INCIDENT_RESPONSE", "PUBLIC_COMMUNICATION", "ROLE_FIT"),
+                    Set.of("POLITICAL_LITERACY", "ANALYSIS", "EXECUTION",
+                            "COMMUNICATION", "ROLE_FIT"),
+                    Set.of("COMPREHENSIVE_ANALYSIS", "ORGANIZATION_COORDINATION",
+                            "INCIDENT_RESPONSE", "PUBLIC_COMMUNICATION", "ROLE_FIT"));
+            case IELTS -> new StagePolicy(
+                    "IELTS", "IELTS Speaking",
+                    Set.of("PART_1", "PART_2", "PART_3"),
+                    Set.of("TASK_RELEVANCE", "FLUENCY_COHERENCE", "LEXICAL_RESOURCE",
+                            "GRAMMATICAL_RANGE_ACCURACY"),
+                    Set.of("INTRODUCTION", "FAMILIAR_TOPIC", "LONG_TURN",
+                            "FOLLOW_UP", "DISCUSSION", "CRITICAL_DISCUSSION"));
+            case JOB -> throw new IllegalStateException("JOB handled above");
+        };
+    }
+
+    private static JobInterviewStage jobStage(InterviewAiGenerator.InterviewAiInput input) {
+        String explicit = input.jobStageCode();
+        if (explicit != null && !explicit.isBlank()) {
+            try {
+                return JobInterviewStage.valueOf(explicit.strip().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException exception) {
+                throw new AiWorkerException(
+                        "AI_INPUT_INVALID", "工作面试阶段不受支持", false, exception);
+            }
+        }
+        String trustedRound = input.roundName() == null ? "" : input.roundName();
+        if (trustedRound.contains("二面")) {
+            return JobInterviewStage.TECHNICAL_SECOND;
+        }
+        if (trustedRound.toUpperCase(Locale.ROOT).contains("HR")) {
+            return JobInterviewStage.HR_FINAL;
+        }
+        return JobInterviewStage.TECHNICAL_FIRST;
+    }
+
+    private static InterviewType typeOf(String rawType) {
+        try {
+            return InterviewType.valueOf(rawType.strip().toUpperCase(Locale.ROOT));
+        } catch (RuntimeException exception) {
+            throw new AiWorkerException("AI_INPUT_INVALID", "面试类型不受支持", false, exception);
+        }
+    }
+
+    private static String jobStageLabel(JobInterviewStage stage) {
+        return switch (stage) {
+            case TECHNICAL_FIRST -> "技术一面";
+            case TECHNICAL_SECOND -> "技术二面";
+            case HR_FINAL -> "HR 面";
+        };
+    }
+
     private static String stageAt(Profile profile, int requestedIndex) {
         int index = Math.min(Math.max(requestedIndex, 0), profile.stages().size() - 1);
         return profile.stages().get(index);
@@ -182,6 +286,19 @@ final class InterviewPromptPolicy {
         Profile {
             stages = List.copyOf(stages);
             fallbackQuestions = List.copyOf(fallbackQuestions);
+        }
+    }
+
+    record StagePolicy(
+            String code,
+            String label,
+            Set<String> sections,
+            Set<String> dimensions,
+            Set<String> questionTypes) {
+        StagePolicy {
+            sections = Set.copyOf(sections);
+            dimensions = Set.copyOf(dimensions);
+            questionTypes = Set.copyOf(questionTypes);
         }
     }
 }
