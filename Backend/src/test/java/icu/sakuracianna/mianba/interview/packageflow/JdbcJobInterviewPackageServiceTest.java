@@ -67,6 +67,10 @@ class JdbcJobInterviewPackageServiceTest {
                 .containsExactly("IN_PROGRESS", "LOCKED", "LOCKED");
         assertThat(view.stages().getFirst().sessionId()).isEqualTo(fixture.sessionId);
 
+        SqlCall userLock = fixture.jdbc.singleCallContaining("FROM users");
+        assertThat(userLock.sql()).contains("is_active = true", "FOR UPDATE");
+        assertThat(userLock.args()).containsExactly(fixture.userId);
+
         SqlCall materialQuery = fixture.jdbc.singleCallContaining("FROM materials");
         assertThat(materialQuery.sql())
                 .contains("user_id = ?", "status = 'ready'", "interview_type = 'job'")
@@ -86,12 +90,12 @@ class JdbcJobInterviewPackageServiceTest {
         assertThat(materialSnapshot.has("resume_text")).isFalse();
         assertThat(materialSnapshot.has("resume_filename")).isFalse();
         assertThat(materialSnapshot.get("profile_summary").stringValue()).isEqualTo("核心 后端 工程师");
-        assertThat(materialSnapshot.get("job_title").stringValue()).hasSize(160);
-        assertThat(materialSnapshot.get("job_requirements_summary").stringValue()).hasSize(2500);
+        assertCodePointLength(materialSnapshot.get("job_title").stringValue(), 160);
+        assertCodePointLength(materialSnapshot.get("job_requirements_summary").stringValue(), 2500);
         assertThat(materialSnapshot.get("keywords")).hasSize(12);
         assertThat(materialSnapshot.get("keywords").get(0).stringValue()).isEqualTo("Java");
         assertThat(materialSnapshot.get("keywords").get(1).stringValue()).isEqualTo("Spring Boot");
-        assertThat(materialSnapshot.get("keywords").get(2).stringValue()).hasSize(24);
+        assertCodePointLength(materialSnapshot.get("keywords").get(2).stringValue(), 24);
         assertThat(packageInsert.args().get(9)).isEqualTo(Timestamp.from(NOW.plus(30, ChronoUnit.DAYS)));
         assertThat(packageInsert.args().get(10)).isEqualTo(Timestamp.from(NOW));
         assertThat(packageInsert.args().get(11)).isEqualTo(Timestamp.from(NOW));
@@ -322,6 +326,47 @@ class JdbcJobInterviewPackageServiceTest {
     }
 
     @Test
+    void replayCommittedWhileWaitingForUserLockReturnsOriginalWithoutAnyWrite() {
+        Fixture fixture = new Fixture(BillingMode.CREDIT);
+        fixture.jdbc.balance = 8;
+        JobInterviewPackageView original = fixture.service.create(
+                fixture.userId,
+                fixture.packageId,
+                fixture.sessionId,
+                fixture.materialId,
+                "concurrent-key");
+        fixture.jdbc.clearCalls();
+        fixture.jdbc.missNextReplayQueries(1);
+
+        JobInterviewPackageView replayed = fixture.service.create(
+                fixture.userId,
+                fixture.packageId,
+                fixture.sessionId,
+                fixture.materialId,
+                "concurrent-key");
+
+        assertThat(replayed).isEqualTo(original);
+        assertThat(replayed.stages().getFirst().sessionId()).isEqualTo(fixture.sessionId);
+        assertThat(fixture.jdbc.callsContaining("start_idempotency_key = ?")).hasSize(2);
+        int firstReplayIndex = fixture.jdbc.indexOf("start_idempotency_key = ?");
+        int userLockIndex = fixture.jdbc.indexOf("FROM users");
+        int secondReplayIndex = fixture.jdbc.indexOfAfter(
+                "start_idempotency_key = ?", firstReplayIndex + 1);
+        assertThat(firstReplayIndex).isLessThan(userLockIndex);
+        assertThat(userLockIndex).isLessThan(secondReplayIndex);
+        assertThat(fixture.jdbc.updateCalls()).isEmpty();
+        assertThat(fixture.jdbc.callsContaining("INSERT INTO interview_packages")).isEmpty();
+        assertThat(fixture.jdbc.callsContaining("INSERT INTO interview_package_stages")).isEmpty();
+        assertThat(fixture.jdbc.callsContaining("UPDATE users")).isEmpty();
+        assertThat(fixture.jdbc.callsContaining("UPDATE vouchers")).isEmpty();
+        assertThat(fixture.jdbc.callsContaining("INSERT INTO credit_ledger")).isEmpty();
+        assertThat(fixture.jdbc.callsContaining("INSERT INTO sessions")).isEmpty();
+        assertThat(fixture.jdbc.callsContaining("INSERT INTO turns")).isEmpty();
+        assertThat(fixture.jdbc.callsContaining("FROM materials")).isEmpty();
+        assertThat(fixture.jdbc.callsContaining("FROM vouchers")).isEmpty();
+    }
+
+    @Test
     void malformedMaterialKeywordsFailClosedBeforeAnyWrite() {
         Fixture fixture = new Fixture(BillingMode.CREDIT);
         fixture.jdbc.keywordsJson = "{not-an-array}";
@@ -336,6 +381,40 @@ class JdbcJobInterviewPackageServiceTest {
                 .hasMessageContaining("safe job interview package snapshots");
         assertThat(fixture.jdbc.updateCalls()).isEmpty();
         assertThat(fixture.jdbc.callsContaining("FROM vouchers")).isEmpty();
+    }
+
+    @Test
+    void safeSnapshotTruncatesSupplementaryUnicodeByCodePointWithoutOrphanSurrogates()
+            throws Exception {
+        Fixture fixture = new Fixture(BillingMode.CREDIT);
+        String profileCodePoint = "😀";
+        String titleCodePoint = "🚀";
+        String requirementsCodePoint = "🧠";
+        String keywordCodePoint = "🧪";
+        fixture.jdbc.profileSummary = profileCodePoint.repeat(1210);
+        fixture.jdbc.jobTitle = titleCodePoint.repeat(170);
+        fixture.jdbc.jobRequirements = requirementsCodePoint.repeat(2510);
+        fixture.jdbc.keywordsJson = JSON.writeValueAsString(List.of(keywordCodePoint.repeat(30)));
+
+        fixture.service.create(
+                fixture.userId,
+                fixture.packageId,
+                fixture.sessionId,
+                fixture.materialId,
+                "unicode-key");
+
+        SqlCall packageInsert = fixture.jdbc.singleCallContaining("INSERT INTO interview_packages");
+        JsonNode materialSnapshot = JSON.readTree((String) packageInsert.args().get(8));
+        assertSupplementaryTruncation(
+                materialSnapshot.get("profile_summary").stringValue(), profileCodePoint, 1200);
+        assertSupplementaryTruncation(
+                materialSnapshot.get("job_title").stringValue(), titleCodePoint, 160);
+        assertSupplementaryTruncation(
+                materialSnapshot.get("job_requirements_summary").stringValue(),
+                requirementsCodePoint,
+                2500);
+        assertSupplementaryTruncation(
+                materialSnapshot.get("keywords").get(0).stringValue(), keywordCodePoint, 24);
     }
 
     @Test
@@ -496,6 +575,33 @@ class JdbcJobInterviewPackageServiceTest {
         ADMIN
     }
 
+    private static void assertCodePointLength(String value, int expectedCodePoints) {
+        assertThat(value.codePointCount(0, value.length())).isEqualTo(expectedCodePoints);
+        assertThat(hasOrphanSurrogate(value)).isFalse();
+    }
+
+    private static void assertSupplementaryTruncation(
+            String value, String repeatedCodePoint, int expectedCodePoints) {
+        assertCodePointLength(value, expectedCodePoints);
+        assertThat(value).isEqualTo(repeatedCodePoint.repeat(expectedCodePoints));
+    }
+
+    private static boolean hasOrphanSurrogate(String value) {
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (Character.isHighSurrogate(current)) {
+                if (index + 1 >= value.length()
+                        || !Character.isLowSurrogate(value.charAt(index + 1))) {
+                    return true;
+                }
+                index++;
+            } else if (Character.isLowSurrogate(current)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static final class Fixture {
         private final UUID userId = UUID.randomUUID();
         private final UUID packageId = UUID.randomUUID();
@@ -534,6 +640,7 @@ class JdbcJobInterviewPackageServiceTest {
         private String jobRequirements = "熟悉 Spring";
         private String keywordsJson = "[\"Java\",\"Spring\"]";
         private String failOnSql;
+        private int forcedReplayMisses;
         private boolean packageCreated;
         private UUID packageId;
         private String packageKey;
@@ -561,6 +668,10 @@ class JdbcJobInterviewPackageServiceTest {
             try {
                 if (sql.contains("FROM interview_packages")
                         && sql.contains("start_idempotency_key = ?")) {
+                    if (forcedReplayMisses > 0) {
+                        forcedReplayMisses--;
+                        return List.of();
+                    }
                     if (packageCreated && packageKey.equals(args[1])) {
                         ResultSet rs = mock(ResultSet.class);
                         when(rs.getObject("id", UUID.class)).thenReturn(packageId);
@@ -569,7 +680,14 @@ class JdbcJobInterviewPackageServiceTest {
                     }
                     return List.of();
                 }
-                if (sql.contains("FROM users") && sql.contains("FOR UPDATE")) {
+                if (sql.contains("FROM users")) {
+                    if (!sql.contains("is_active = true")
+                            || !sql.contains("FOR UPDATE")
+                            || args.length != 1
+                            || !userId.equals(args[0])) {
+                        throw new AssertionError(
+                                "User billing lookup must lock the active owner row: " + sql);
+                    }
                     if (!userExists) {
                         return List.of();
                     }
@@ -716,6 +834,10 @@ class JdbcJobInterviewPackageServiceTest {
 
         private void clearCalls() {
             calls.clear();
+        }
+
+        private void missNextReplayQueries(int count) {
+            forcedReplayMisses = count;
         }
     }
 }
