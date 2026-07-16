@@ -23,8 +23,8 @@ import {
   logoutAccount,
   requestAccountEmailCode,
   startInterviewSession,
+  streamQuestionSpeech,
   submitInterviewAnswer,
-  synthesizeQuestionSpeech,
   uploadInterviewMaterial,
 } from "./interviewApi";
 import { moduleDetails, modules, states } from "./modules";
@@ -102,6 +102,8 @@ export function InterviewRoom() {
   const startingSessionIdRef = useRef<string | null>(null);
   const exitSessionLockRef = useRef(false);
   const finishingAnswerLockRef = useRef(false);
+  const questionAudioCtxRef = useRef<AudioContext | null>(null);
+  const questionStreamControllerRef = useRef<AbortController | null>(null);
   const isQuestionSpeakingRef = useRef(false);
   const questionAudioRef = useRef<HTMLAudioElement | null>(null);
   const questionSpeechTokenRef = useRef(0);
@@ -164,6 +166,10 @@ export function InterviewRoom() {
       taskRefreshControllerRef.current?.abort();
       exitSessionControllerRef.current?.abort();
       questionSpeechTokenRef.current += 1;
+      questionStreamControllerRef.current?.abort();
+      questionStreamControllerRef.current = null;
+      questionAudioCtxRef.current?.close();
+      questionAudioCtxRef.current = null;
       questionAudioRef.current?.pause();
       questionAudioRef.current = null;
       window.speechSynthesis?.cancel();
@@ -697,6 +703,10 @@ export function InterviewRoom() {
   function beginQuestionSpeech() {
     questionSpeechTokenRef.current += 1;
     const token = questionSpeechTokenRef.current;
+    questionStreamControllerRef.current?.abort();
+    questionStreamControllerRef.current = null;
+    questionAudioCtxRef.current?.close();
+    questionAudioCtxRef.current = null;
     questionAudioRef.current?.pause();
     questionAudioRef.current = null;
     window.speechSynthesis?.cancel();
@@ -709,6 +719,7 @@ export function InterviewRoom() {
     if (token !== questionSpeechTokenRef.current) {
       return;
     }
+    questionAudioCtxRef.current = null;
     questionAudioRef.current = null;
     setQuestionSpeakingState(false);
     setStateIndex(0);
@@ -716,6 +727,10 @@ export function InterviewRoom() {
 
   function stopQuestionSpeech() {
     questionSpeechTokenRef.current += 1;
+    questionStreamControllerRef.current?.abort();
+    questionStreamControllerRef.current = null;
+    questionAudioCtxRef.current?.close();
+    questionAudioCtxRef.current = null;
     questionAudioRef.current?.pause();
     questionAudioRef.current = null;
     window.speechSynthesis?.cancel();
@@ -744,29 +759,53 @@ export function InterviewRoom() {
       return;
     }
     const token = beginQuestionSpeech();
+    const AudioContextClass = window.AudioContext ?? window.webkitAudioContext;
+    if (!AudioContextClass) {
+      speakQuestionWithBrowser(questionText, interviewType, token);
+      return;
+    }
+    const controller = new AbortController();
+    questionStreamControllerRef.current = controller;
     try {
-      const { response, data } = await synthesizeQuestionSpeech(targetSessionId);
-      if (token !== questionSpeechTokenRef.current) {
-        return;
-      }
-      if (!response.ok || !data.audio_base64 || !data.mime_type) {
-        throw new Error(getApiErrorMessage(data, "语音合成失败。"));
-      }
-      const audio = new Audio(`data:${data.mime_type};base64,${data.audio_base64}`);
-      questionAudioRef.current = audio;
-      audio.onended = () => finishQuestionSpeech(token);
-      audio.onerror = () => {
-        if (token === questionSpeechTokenRef.current) {
-          questionAudioRef.current = null;
-          speakQuestionWithBrowser(questionText, interviewType, token);
+      const audioCtx = new AudioContextClass();
+      questionAudioCtxRef.current = audioCtx;
+      let nextStartTime = 0;
+      let lastSource: AudioBufferSourceNode | null = null;
+
+      for await (const chunk of streamQuestionSpeech(targetSessionId, controller.signal)) {
+        if (token !== questionSpeechTokenRef.current) {
+          audioCtx.close();
+          return;
         }
-      };
-      await audio.play();
-    } catch {
-      if (token !== questionSpeechTokenRef.current) {
-        return;
+        const binary = atob(chunk.a);
+        const bytes = new Uint8Array(binary.length);
+        for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+        const buffer = await audioCtx.decodeAudioData(bytes.buffer.slice(0));
+        if (token !== questionSpeechTokenRef.current) {
+          audioCtx.close();
+          return;
+        }
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
+        const startAt = Math.max(audioCtx.currentTime + 0.05, nextStartTime);
+        source.start(startAt);
+        nextStartTime = startAt + buffer.duration;
+        if (chunk.f) {
+          lastSource = source;
+        }
       }
-      questionAudioRef.current = null;
+      if (token !== questionSpeechTokenRef.current) return;
+      if (lastSource) {
+        lastSource.onended = () => finishQuestionSpeech(token);
+      } else {
+        finishQuestionSpeech(token);
+      }
+    } catch (err) {
+      if (token !== questionSpeechTokenRef.current) return;
+      if ((err as Error)?.name === "AbortError") return;
+      questionAudioCtxRef.current?.close();
+      questionAudioCtxRef.current = null;
       setSocketMessage("腾讯云语音合成暂时不可用，已切换为浏览器本地播报。");
       speakQuestionWithBrowser(questionText, interviewType, token);
     }

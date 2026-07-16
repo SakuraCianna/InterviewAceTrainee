@@ -107,6 +107,48 @@ export function synthesizeQuestionSpeech(sessionId: string) {
   });
 }
 
+type TtsChunk = { a: string; m: string; i: number; f: boolean };
+
+/**
+ * 流式语音合成：返回一个 AsyncGenerator，每 yield 一个 chunk 即可立即播放。
+ * 调用方应在 AbortController 中止时 break 循环以释放连接。
+ */
+export async function* streamQuestionSpeech(
+  sessionId: string,
+  signal: AbortSignal,
+): AsyncGenerator<TtsChunk> {
+  const response = await fetch("/api/speech/tts/stream", {
+    method: "POST",
+    credentials: "include",
+    headers: csrfHeaders(jsonHeaders),
+    body: JSON.stringify({ session_id: sessionId }),
+    signal,
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(`TTS stream error: ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.startsWith("data:")) {
+          const json = line.slice(5).trim();
+          if (json) yield JSON.parse(json) as TtsChunk;
+        }
+      }
+    }
+  } finally {
+    reader.cancel();
+  }
+}
+
 export function submitInterviewAnswer(
   sessionId: string,
   answerText: string,

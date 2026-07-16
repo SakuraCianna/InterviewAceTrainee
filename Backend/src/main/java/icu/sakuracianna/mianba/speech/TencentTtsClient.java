@@ -112,4 +112,37 @@ public final class TencentTtsClient {
     /** 语音合成成功结果。 */
     public record Result(String audioBase64, String mimeType, String providerRequestId) {
     }
+
+    /**
+     * 按标点切分文本为有序语音片段。
+     * 强分割符（。！？.!?）立即切；逗号（，,）在达到15字后切；超50字强制切。
+     * 尾部过短碎片（< 5字）合并到前一段；空文本返回空列表。
+     */
+    static java.util.List<String> splitText(String text) {
+        if (text == null || text.isBlank()) {
+            return java.util.List.of();
+        }
+        java.util.List<String> chunks = new java.util.ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            current.append(c);
+            boolean strong = c == '。' || c == '！' || c == '？'
+                    || c == '.' || c == '!' || c == '?';
+            boolean soft = (c == '，' || c == ',') && current.length() >= 15;
+            boolean force = current.length() >= 50;
+            if ((strong || soft || force) && current.length() >= 3) {
+                chunks.add(current.toString());
+                current.setLength(0);
+            }
+        }
+        if (!current.isEmpty()) {
+            if (!chunks.isEmpty() && current.length() < 5) {
+                chunks.set(chunks.size() - 1, chunks.getLast() + current);
+            } else {
+                chunks.add(current.toString());
+            }
+        }
+        return chunks.isEmpty() ? java.util.List.of(text) : java.util.Collections.unmodifiableList(chunks);
+    }
 }
