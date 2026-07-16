@@ -249,8 +249,111 @@ class JobInterviewPackagePostgresIT {
         }
     }
 
+    @Test
+    void reportsRequireExactlyOneUniqueSubject() {
+        UUID userId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID packageId = UUID.randomUUID();
+        try {
+            insertUser(userId);
+            insertCompletedSession(sessionId, userId);
+            insertPackage(packageId, userId, null, 3, "report-subject", "COMPLETED");
+
+            insertReport(UUID.randomUUID(), sessionId, null, "SESSION");
+            assertThatThrownBy(() -> insertReport(
+                    UUID.randomUUID(), sessionId, null, "SESSION"))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+
+            insertReport(UUID.randomUUID(), null, packageId, "PACKAGE");
+            assertThatThrownBy(() -> insertReport(
+                    UUID.randomUUID(), null, packageId, "PACKAGE"))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> insertReport(
+                    UUID.randomUUID(), null, null, "SESSION"))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> insertReport(
+                    UUID.randomUUID(), sessionId, packageId, "SESSION"))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> insertReport(
+                    UUID.randomUUID(), sessionId, null, "PACKAGE"))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+        } finally {
+            deleteUserFixtures(userId);
+        }
+    }
+
+    @Test
+    void reportRevisionsAreUniqueAndRequireObjectJson() {
+        UUID userId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID reportId = UUID.randomUUID();
+        try {
+            insertUser(userId);
+            insertCompletedSession(sessionId, userId);
+            insertReport(reportId, sessionId, null, "SESSION");
+            jdbc.update("""
+                    INSERT INTO report_revisions(report_id, revision_no, source, report_json)
+                    VALUES (?, 1, 'TEMPLATE', '{}'::jsonb)
+                    """, reportId);
+
+            assertThatThrownBy(() -> jdbc.update("""
+                    INSERT INTO report_revisions(report_id, revision_no, source, report_json)
+                    VALUES (?, 1, 'AI_ENHANCEMENT', '{}'::jsonb)
+                    """, reportId))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> jdbc.update("""
+                    INSERT INTO report_revisions(report_id, revision_no, source, report_json)
+                    VALUES (?, 2, 'AI_ENHANCEMENT', '[]'::jsonb)
+                    """, reportId))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+        } finally {
+            deleteUserFixtures(userId);
+        }
+    }
+
+    @Test
+    void structuredReportTablesGrantOnlyRuntimePrivileges() {
+        assertPrivileges(
+                "mianba_api",
+                "report_revisions",
+                List.of("SELECT"),
+                List.of("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"));
+        assertPrivileges(
+                "mianba_api",
+                "turn_dimension_scores",
+                List.of("SELECT"),
+                List.of("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"));
+        assertPrivileges(
+                "mianba_worker",
+                "report_revisions",
+                List.of("SELECT", "INSERT"),
+                List.of("UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"));
+        assertPrivileges(
+                "mianba_worker",
+                "turn_dimension_scores",
+                List.of("SELECT", "INSERT", "UPDATE"),
+                List.of("DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"));
+    }
+
     private void insertUser(UUID userId) {
         jdbc.update("INSERT INTO users(id, email) VALUES (?, ?)", userId, userId + "@example.invalid");
+    }
+
+    private void insertCompletedSession(UUID sessionId, UUID userId) {
+        jdbc.update("""
+                INSERT INTO sessions(
+                    id, user_id, start_idempotency_key, interview_type, status,
+                    total_turns, ended_at)
+                VALUES (?, ?, ?, 'job', 'completed', 1, now())
+                """, sessionId, userId, "report-session-" + sessionId);
+    }
+
+    private void insertReport(UUID reportId, UUID sessionId, UUID packageId, String reportScope) {
+        jdbc.update("""
+                INSERT INTO reports(
+                    id, session_id, package_id, report_scope, total_score, report_json)
+                VALUES (?, ?, ?, ?, 80, '{}'::jsonb)
+                """, reportId, sessionId, packageId, reportScope);
     }
 
     private void insertPackage(
