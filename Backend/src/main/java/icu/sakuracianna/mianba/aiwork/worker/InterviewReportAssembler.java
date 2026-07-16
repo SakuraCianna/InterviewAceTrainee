@@ -27,6 +27,48 @@ final class InterviewReportAssembler {
     private static final int MAX_FEEDBACK_CODE_POINTS = 1_200;
     private static final Pattern DIMENSION_CODE =
             Pattern.compile("[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*");
+    private static final Pattern CHINESE_DECISIVE_OUTCOME = Pattern.compile(
+            "(?:建议|推荐|应该|应当|可以|可予|同意|决定|确认|直接|予以|值得)"
+                    + ".{0,6}(?:录用|聘用)"
+                    + "|(?:已|已经|将|会|确定|确认|决定).{0,4}(?:录用|聘用)"
+                    + "|(?:录用|聘用)(?:该|此|这名)?(?:候选人|应聘者)"
+                    + "|(?:面试|考试|考核|评估)(?:已|已经|顺利|成功)?通过"
+                    + "|(?:已|已经|顺利|成功)?通过(?:了)?(?:本轮|本次|最终)?"
+                    + "(?:面试|考试|考核|评估)"
+                    + "|(?:发放|给予|给出|发送|获得|收到|承诺|保证).{0,6}\\boffer\\b"
+                    + "|(?:承诺|保证|确定).{0,8}(?:薪酬|薪资|工资|年薪|月薪)"
+                    + "|(?:薪酬|薪资|工资|年薪|月薪).{0,4}"
+                    + "(?:承诺|保证|确定为|将为|不低于|至少)",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private static final Pattern ENGLISH_DECISIVE_OUTCOME = Pattern.compile(
+            "\\b(?:recommend|suggest|approve|decide|propose)(?:ed|s|ing)?\\s+"
+                    + "(?:(?:that\\s+(?:we|the\\s+company)\\s+)|to\\s+)?"
+                    + "(?:hire|hired|hiring|employ|employed|employing)\\b"
+                    + "|\\b(?:hire|employ)\\s+(?:the\\s+)?"
+                    + "(?:candidate|applicant|interviewee)\\b"
+                    + "|\\b(?:we|the\\s+company|the\\s+employer)\\s+"
+                    + "(?:should|will|must|can)\\s+(?:hire|employ)\\b"
+                    + "|\\b(?:candidate|applicant|interviewee|they|he|she)\\s+"
+                    + "(?:(?:is|are|was|were|has\\s+been|should\\s+be|will\\s+be)\\s+)"
+                    + "(?:hired|employed)\\b"
+                    + "|\\b(?:recommended|approved)\\s+for\\s+hire\\b"
+                    + "|\\b(?:extend|issue|make|give|send|guarantee|promise|accept|receive)"
+                    + "(?:s|ed|ing)?\\s+(?:the\\s+candidate\\s+)?(?:an?\\s+)?"
+                    + "(?:(?:job|employment)\\s+)?offer\\b"
+                    + "|\\b(?:job|employment)\\s+offer\\b"
+                    + "|\\boffer\\s+(?:the\\s+)?(?:candidate|applicant)\\s+employment\\b"
+                    + "|\\bpass(?:ed|es|ing)?\\s+(?:the\\s+)?"
+                    + "(?:interview|exam|examination|assessment)\\b"
+                    + "|\\b(?:interview|exam|examination|assessment)\\s+"
+                    + "(?:(?:is|was|has\\s+been)\\s+)?passed\\b"
+                    + "|\\b(?:salary|compensation|pay)\\s+(?:commitment|guarantee)\\b"
+                    + "|\\b(?:salary|compensation|pay)\\s+"
+                    + "(?:is|was|will\\s+be|would\\s+be|has\\s+been)\\s+"
+                    + "(?:guaranteed|promised|committed)\\b"
+                    + "|\\b(?:guarantee|promise|commit(?:\\s+to)?)\\s+"
+                    + "(?:a\\s+)?(?:specific\\s+)?"
+                    + "(?:salary|compensation|pay)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
 
     ReportDraft assembleSession(SessionReportInput input) {
         Objects.requireNonNull(input, "input");
@@ -42,7 +84,8 @@ final class InterviewReportAssembler {
         int totalScore = roundedAverage(turns, EvaluatedTurn::overallScore);
         List<DimensionView> dimensions = aggregateDimensions(turns.stream()
                 .flatMap(turn -> turn.dimensions().stream()
-                        .map(dimension -> new DimensionSource(turn.turnIndex(), dimension)))
+                        .map(dimension -> new DimensionSource(
+                                turn.turnIndex(), safeDimension(dimension, copy))))
                 .toList());
         List<String> strengths = dimensionSummaries(dimensions, copy, true);
         List<String> improvements = dimensionSummaries(dimensions, copy, false);
@@ -56,7 +99,7 @@ final class InterviewReportAssembler {
             displayed.put("answer", turn.answer());
             displayed.put("question_type", turn.questionType());
             displayed.put("score", turn.overallScore());
-            displayed.put("feedback", turn.overallFeedback());
+            displayed.put("feedback", safeEvaluationText(turn.overallFeedback(), copy));
             displayedTurns.add(displayed);
         }
 
@@ -107,7 +150,7 @@ final class InterviewReportAssembler {
         List<DimensionView> dimensions = aggregateDimensions(stages.stream()
                 .flatMap(stage -> stage.dimensions().stream()
                         .map(dimension -> new DimensionSource(
-                                stage.stage().sequence(), dimension)))
+                                stage.stage().sequence(), safeDimension(dimension, copy))))
                 .toList());
         List<String> strengths = dimensionSummaries(dimensions, copy, true);
         List<String> improvements = dimensionSummaries(dimensions, copy, false);
@@ -192,6 +235,27 @@ final class InterviewReportAssembler {
             values.add(value);
         }
         return values;
+    }
+
+    /**
+     * 基础报告的可信输出边界。模型自由文本即使已经通过结构校验，也不能形成招聘、
+     * 考试或薪酬决定；命中时使用同语言中性训练反馈，避免报告组装失败。
+     */
+    private static DimensionEvaluation safeDimension(
+            DimensionEvaluation dimension, CopyPolicy copy) {
+        return new DimensionEvaluation(
+                dimension.code(),
+                dimension.score(),
+                safeEvaluationText(dimension.evidence(), copy),
+                safeEvaluationText(dimension.comment(), copy));
+    }
+
+    private static String safeEvaluationText(String value, CopyPolicy copy) {
+        if (CHINESE_DECISIVE_OUTCOME.matcher(value).find()
+                || ENGLISH_DECISIVE_OUTCOME.matcher(value).find()) {
+            return copy.neutralTrainingFeedback();
+        }
+        return value;
     }
 
     private static List<DimensionView> aggregateDimensions(List<DimensionSource> sources) {
@@ -600,6 +664,13 @@ final class InterviewReportAssembler {
                     ? "Algorithm questions assess spoken reasoning, complexity, and edge cases only; "
                             + "no code was executed, compiled, or judged online."
                     : "算法题仅评价口述思路、复杂度与边界，未执行或编译代码，也未进行在线判题。";
+        }
+
+        private String neutralTrainingFeedback() {
+            return english
+                    ? "This evaluation exceeds the practice-feedback boundary; "
+                            + "focus on observable evidence and actionable improvement."
+                    : "该段评价超出训练反馈边界，请仅依据可观察证据继续练习。";
         }
     }
 }

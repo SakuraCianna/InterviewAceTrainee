@@ -13,6 +13,11 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 class AiJobWorkerReportTest {
+    private static final String NEUTRAL_CHINESE_FEEDBACK =
+            "该段评价超出训练反馈边界，请仅依据可观察证据继续练习。";
+    private static final String NEUTRAL_ENGLISH_FEEDBACK =
+            "This evaluation exceeds the practice-feedback boundary; "
+                    + "focus on observable evidence and actionable improvement.";
 
     @Test
     void assemblesSessionReportFromEveryTurnAndAggregatesStableDimensions() throws Exception {
@@ -162,6 +167,143 @@ class AiJobWorkerReportTest {
                 .doesNotContain("question", "answer");
         assertThat(report.get("dimensions").toString())
                 .contains("SYSTEM_DESIGN", "85", "COMMUNICATION", "70");
+    }
+
+    @Test
+    void jobSessionNeutralizesChineseDecisionsAndPreservesSafeTrainingText() {
+        InterviewReportAssembler assembler = new InterviewReportAssembler();
+        InterviewReportAssembler.EvaluatedTurn turn = new InterviewReportAssembler.EvaluatedTurn(
+                0,
+                "综合核验",
+                "请说明一次协作经历。",
+                "我先澄清目标，再协调分工。",
+                "BEHAVIORAL",
+                60,
+                "候选人已通过本轮面试，建议聘用。",
+                List.of(
+                        dimension(
+                                "COMMUNICATION",
+                                40,
+                                "该回答足以证明考试通过，可以发放 Offer。",
+                                "建议录用候选人，并承诺薪酬不低于三万元。"),
+                        dimension(
+                                "SYSTEM_DESIGN",
+                                80,
+                                "通过量化结果说明缓存命中率提升。",
+                                "薪资期望表达清楚，系统设计取舍具体。")),
+                List.of("BEHAVIORAL"),
+                List.of("CROSS_TEAM_COLLABORATION"),
+                List.of());
+
+        Map<String, Object> report = assembler.assembleSession(
+                new InterviewReportAssembler.SessionReportInput(
+                        UUID.randomUUID(), "job", "HR_FINAL", false,
+                        "job-v2", "job-rubric-v1", "turn-evaluation-v2",
+                        false, List.of(turn))).body();
+
+        assertThat(report.toString())
+                .contains(NEUTRAL_CHINESE_FEEDBACK)
+                .contains("通过量化结果说明缓存命中率提升。")
+                .contains("薪资期望表达清楚，系统设计取舍具体。")
+                .doesNotContain(
+                        "建议聘用", "考试通过", "发放 Offer", "建议录用", "承诺薪酬");
+        assertThat(report.get("summary").toString()).contains(NEUTRAL_CHINESE_FEEDBACK);
+        assertThat(report.get("strengths").toString())
+                .contains("薪资期望表达清楚，系统设计取舍具体。");
+        assertThat(report.get("improvements").toString()).contains(NEUTRAL_CHINESE_FEEDBACK);
+        assertThat(report.get("priority_actions").toString()).contains(NEUTRAL_CHINESE_FEEDBACK);
+        assertThat(report.get("dimensions").toString())
+                .contains(NEUTRAL_CHINESE_FEEDBACK)
+                .contains("通过量化结果说明缓存命中率提升。");
+        assertThat(report.get("turns").toString())
+                .contains("feedback=" + NEUTRAL_CHINESE_FEEDBACK);
+    }
+
+    @Test
+    void ieltsSessionNeutralizesEnglishDecisionsWithoutProducingChineseCopy() {
+        InterviewReportAssembler assembler = new InterviewReportAssembler();
+        InterviewReportAssembler.EvaluatedTurn turn = new InterviewReportAssembler.EvaluatedTurn(
+                0,
+                "untrusted stage name",
+                "What makes a good team member?",
+                "A good team member communicates clearly and respects different views.",
+                "IELTS_SPEAKING",
+                72,
+                "Hire the candidate and extend a job offer.",
+                List.of(
+                        dimension(
+                                "COHERENCE",
+                                60,
+                                "The candidate passed the interview.",
+                                "A salary commitment is guaranteed."),
+                        dimension(
+                                "FLUENCY",
+                                84,
+                                "The response can pass data through a clear sequence.",
+                                "Offer a specific example to improve clarity.")),
+                List.of("PART_ONE"),
+                List.of("TEAMWORK"),
+                List.of());
+
+        Map<String, Object> report = assembler.assembleSession(
+                new InterviewReportAssembler.SessionReportInput(
+                        UUID.randomUUID(), "ielts", "IELTS_SPEAKING", false,
+                        "ielts-v2", "ielts-rubric-v2", "turn-evaluation-v2",
+                        false, List.of(turn))).body();
+
+        assertThat(report.toString())
+                .contains(NEUTRAL_ENGLISH_FEEDBACK)
+                .contains("The response can pass data through a clear sequence.")
+                .contains("Offer a specific example to improve clarity.")
+                .doesNotContain(
+                        "Hire the candidate", "job offer", "passed the interview",
+                        "salary commitment")
+                .doesNotContainPattern("[\\p{IsHan}]");
+        assertThat(report.get("summary").toString()).contains(NEUTRAL_ENGLISH_FEEDBACK);
+        assertThat(report.get("turns").toString())
+                .contains("feedback=" + NEUTRAL_ENGLISH_FEEDBACK);
+    }
+
+    @Test
+    void packageNeutralizesChineseAndEnglishDecisionsAcrossDerivedFields() {
+        InterviewReportAssembler assembler = new InterviewReportAssembler();
+        List<InterviewReportAssembler.StageSummary> stages = List.of(
+                stage(JobInterviewStage.TECHNICAL_FIRST, 45,
+                        dimension(
+                                "COMMUNICATION", 45,
+                                "建议直接录用，并保证年薪不低于目标值。",
+                                "候选人面试通过，可以聘用。")),
+                stage(JobInterviewStage.TECHNICAL_SECOND, 65,
+                        dimension(
+                                "SYSTEM_DESIGN", 65,
+                                "Recommend hiring the applicant.",
+                                "The applicant has passed the assessment; salary is guaranteed.")),
+                stage(JobInterviewStage.HR_FINAL, 85,
+                        dimension(
+                                "MOTIVATION", 85,
+                                "通过量化结果说明求职动机与岗位匹配。",
+                                "薪资期望表达清晰，没有作出金额承诺。")));
+
+        Map<String, Object> report = assembler.assemblePackage(
+                new InterviewReportAssembler.PackageReportInput(
+                        UUID.randomUUID(), false, "package-v1", "job-rubric-v1",
+                        "package-report-v1", stages)).body();
+
+        assertThat(report.toString())
+                .contains(NEUTRAL_CHINESE_FEEDBACK)
+                .contains("通过量化结果说明求职动机与岗位匹配。")
+                .contains("薪资期望表达清晰，没有作出金额承诺。")
+                .doesNotContain(
+                        "建议直接录用", "保证年薪", "面试通过", "可以聘用",
+                        "Recommend hiring", "passed the assessment",
+                        "salary is guaranteed");
+        assertThat(report.get("summary").toString()).contains(NEUTRAL_CHINESE_FEEDBACK);
+        assertThat(report.get("dimensions").toString()).contains(NEUTRAL_CHINESE_FEEDBACK);
+        assertThat(report.get("strengths").toString())
+                .contains("薪资期望表达清晰，没有作出金额承诺。");
+        assertThat(report.get("improvements").toString()).contains(NEUTRAL_CHINESE_FEEDBACK);
+        assertThat(report.get("priority_actions").toString())
+                .contains(NEUTRAL_CHINESE_FEEDBACK);
     }
 
     @Test
