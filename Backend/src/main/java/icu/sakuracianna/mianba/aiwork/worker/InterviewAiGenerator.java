@@ -88,9 +88,20 @@ public interface InterviewAiGenerator {
     record ReportTurn(
             int turnIndex,
             String roundName,
-            String question,
-            String answer,
             int score,
             String feedback) {
+
+        /**
+         * Task 5 前兼容旧 Worker 的构造签名；问题和回答在端口边界立即丢弃，绝不进入摘要提示词。
+         */
+        public ReportTurn(
+                int turnIndex,
+                String roundName,
+                String ignoredQuestion,
+                String ignoredAnswer,
+                int score,
+                String feedback) {
+            this(turnIndex, roundName, score, feedback);
+        }
     }
 }

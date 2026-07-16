@@ -133,8 +133,15 @@ final class InterviewPromptPolicy {
     static String fallbackQuestion(InterviewAiGenerator.InterviewAiInput input) {
         if (typeOf(input.interviewType()) == InterviewType.JOB) {
             List<String> questions = JOB_FALLBACK_QUESTIONS.get(jobStage(input));
-            int index = Math.min(Math.max(input.turnIndex() + 1, 0), questions.size() - 1);
-            return questions.get(index);
+            for (String question : questions) {
+                if (!repeatsKnownQuestion(question, input)) {
+                    return question;
+                }
+            }
+            StagePolicy stage = stagePolicy(input);
+            List<String> sections = stage.sections().stream().sorted().toList();
+            String section = sections.get(Math.floorMod(input.turnIndex() + 1, sections.size()));
+            return linkedFallbackQuestion(stage, section, input.turnIndex() + 1);
         }
         Profile profile = profile(input.interviewType());
         int index = Math.min(input.turnIndex() + 1, profile.fallbackQuestions().size() - 1);
@@ -236,6 +243,12 @@ final class InterviewPromptPolicy {
             }
         }
         String trustedRound = input.roundName() == null ? "" : input.roundName();
+        String normalizedRound = trustedRound.strip().toUpperCase(Locale.ROOT);
+        for (JobInterviewPlan.StagePlan stage : JOB_PLAN.stages()) {
+            if (stage.requiredSections().contains(normalizedRound)) {
+                return stage.code();
+            }
+        }
         if (trustedRound.contains("二面")) {
             return JobInterviewStage.TECHNICAL_SECOND;
         }
@@ -243,6 +256,18 @@ final class InterviewPromptPolicy {
             return JobInterviewStage.HR_FINAL;
         }
         return JobInterviewStage.TECHNICAL_FIRST;
+    }
+
+    private static String linkedFallbackQuestion(
+            StagePolicy stage,
+            String section,
+            int ordinal) {
+        if ("HR_FINAL".equals(stage.code())) {
+            return "请围绕%s（%s）完成第%d个关联追问：补充一个此前未提及的真实例子、个人判断和结果。"
+                    .formatted(stage.label(), section, ordinal);
+        }
+        return "请围绕%s（%s）完成第%d个关联追问：补充一个此前未提及的具体证据、关键取舍和验证方式。"
+                .formatted(stage.label(), section, ordinal);
     }
 
     private static InterviewType typeOf(String rawType) {

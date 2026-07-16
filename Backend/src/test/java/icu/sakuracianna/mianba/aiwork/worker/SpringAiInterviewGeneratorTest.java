@@ -3,9 +3,14 @@ package icu.sakuracianna.mianba.aiwork.worker;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import icu.sakuracianna.mianba.interview.packageflow.JobInterviewPlan;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import tools.jackson.databind.ObjectMapper;
 
 class SpringAiInterviewGeneratorTest {
@@ -84,6 +89,42 @@ class SpringAiInterviewGeneratorTest {
     }
 
     @Test
+    void polarityUsesWholeEnglishTokensAndChineseNegativePhrases() throws Exception {
+        String englishNegative = validSecondStageJson()
+                .replace("\"score\":82", "\"score\":90")
+                .replace("\"score\":80", "\"score\":90")
+                .replace("回答给出了具体取舍，但缺少容量依据。",
+                        "The answer is unclear and lacks sufficient evidence.");
+        String chineseNegative = validSecondStageJson()
+                .replace("\"score\":82", "\"score\":90")
+                .replace("\"score\":80", "\"score\":90")
+                .replace("回答给出了具体取舍，但缺少容量依据。",
+                        "回答不清晰、不完整，也不充分，并且缺少关键依据。");
+        String positiveLowScore = validSecondStageJson()
+                .replace("\"score\":82", "\"score\":30")
+                .replace("\"score\":80", "\"score\":30")
+                .replace("回答给出了具体取舍，但缺少容量依据。",
+                        "The answer is clear, specific, strong, and excellent.");
+
+        assertThatThrownBy(() -> parse(englishNegative))
+                .isInstanceOf(AiWorkerException.class)
+                .hasMessage("评分、维度和反馈内容不一致");
+        assertThatThrownBy(() -> parse(chineseNegative))
+                .isInstanceOf(AiWorkerException.class)
+                .hasMessage("评分、维度和反馈内容不一致");
+        assertThatThrownBy(() -> parse(positiveLowScore))
+                .isInstanceOf(AiWorkerException.class)
+                .hasMessage("评分、维度和反馈内容不一致");
+
+        InterviewEvaluation mixed = parse(validSecondStageJson()
+                .replace("\"score\":82", "\"score\":88")
+                .replace("\"score\":80", "\"score\":88")
+                .replace("回答给出了具体取舍，但缺少容量依据。",
+                        "The answer is clear and specific, but it lacks capacity evidence."));
+        assertThat(mixed.score()).isEqualTo(88);
+    }
+
+    @Test
     void parserRejectsNonEnglishIeltsVisibleTextInsteadOfFallingBack() {
         InterviewAiGenerator.InterviewAiInput input = input(
                 "ielts", null, "What do you usually do after work?", List.of());
@@ -106,6 +147,18 @@ class SpringAiInterviewGeneratorTest {
         assertThatThrownBy(() -> SpringAiInterviewGenerator.parseEvaluation(mapper, json, input))
                 .isInstanceOf(AiWorkerException.class)
                 .hasMessageContaining("JSON 契约");
+    }
+
+    @Test
+    void parserRejectsUnverifiableExecutionVariantsInEveryEvaluationTextField() {
+        assertAlgorithmInvalid(validFirstStageJson().replace(
+                "时间复杂度分析正确，但边界说明不足。", "代码编译成功。"));
+        assertAlgorithmInvalid(validFirstStageJson().replace(
+                "口述了二分查找与复杂度", "代码运行成功。"));
+        assertAlgorithmInvalid(validFirstStageJson().replace(
+                "需要补充空数组边界", "所有用例均通过。"));
+        assertAlgorithmInvalid(validFirstStageJson().replace(
+                "需要补充空数组边界", "The code passed the tests."));
     }
 
     @Test
@@ -184,6 +237,88 @@ class SpringAiInterviewGeneratorTest {
     }
 
     @Test
+    void everyJobSectionCodeRecoversItsOwningStageWithoutExplicitStageCode() {
+        JobInterviewPlan plan = JobInterviewPlan.chineseEnterpriseV1();
+
+        plan.stages().forEach(stage -> stage.requiredSections().forEach(section -> {
+            InterviewAiGenerator.InterviewAiInput input = new InterviewAiGenerator.InterviewAiInput(
+                    "job", section, "当前问题", "当前回答", 2, stage.maxTurns(),
+                    Map.of(), List.of(), null);
+
+            assertThat(InterviewPromptPolicy.stagePolicy(input).code())
+                    .as("section %s", section)
+                    .isEqualTo(stage.code().name());
+        }));
+    }
+
+    @Test
+    void secondAndHrStagesRemainStableAcrossGeneratedSectionRoundNames() throws Exception {
+        InterviewAiGenerator.InterviewAiInput secondOpening = legacyJobInput(
+                "技术二面 · 项目深挖", "请介绍核心项目。", 0, 12);
+        InterviewEvaluation secondFirst = SpringAiInterviewGenerator.parseEvaluation(
+                mapper, validSecondStageJson(), secondOpening);
+        InterviewAiGenerator.InterviewAiInput secondFollowUp = legacyJobInput(
+                secondFirst.roundName(), secondFirst.nextQuestion(), 1, 12);
+
+        assertThat(InterviewPromptPolicy.stagePolicy(secondFollowUp).code())
+                .isEqualTo("TECHNICAL_SECOND");
+        InterviewEvaluation secondSecond = SpringAiInterviewGenerator.parseEvaluation(
+                mapper,
+                validSecondStageJson()
+                        .replace("缓存失效时如何保证一致性？", "你会如何验证这个一致性方案？")
+                        .replace("\"nextSection\":\"SYSTEM_DESIGN\"",
+                                "\"nextSection\":\"TRADEOFF\"")
+                        .replace("\"nextQuestionType\":\"SYSTEM_DESIGN\"",
+                                "\"nextQuestionType\":\"TRADEOFF\""),
+                secondFollowUp);
+        assertThat(InterviewPromptPolicy.stagePolicy(legacyJobInput(
+                secondSecond.roundName(), secondSecond.nextQuestion(), 2, 12)).code())
+                .isEqualTo("TECHNICAL_SECOND");
+
+        InterviewAiGenerator.InterviewAiInput hrOpening = legacyJobInput(
+                "HR 面 · 求职动机", "你为什么考虑这个岗位？", 0, 8);
+        InterviewEvaluation hrFirst = SpringAiInterviewGenerator.parseEvaluation(
+                mapper, validHrStageJson(), hrOpening);
+        InterviewAiGenerator.InterviewAiInput hrFollowUp = legacyJobInput(
+                hrFirst.roundName(), hrFirst.nextQuestion(), 1, 8);
+
+        assertThat(InterviewPromptPolicy.stagePolicy(hrFollowUp).code()).isEqualTo("HR_FINAL");
+        InterviewEvaluation hrSecond = SpringAiInterviewGenerator.parseEvaluation(
+                mapper,
+                validHrStageJson()
+                        .replace("哪些因素会影响你在下一份工作的稳定投入？",
+                                "请用一个真实协作案例说明你的价值观取舍。")
+                        .replace("\"nextSection\":\"STABILITY\"",
+                                "\"nextSection\":\"COLLABORATION_VALUES\"")
+                        .replace("\"nextQuestionType\":\"STABILITY\"",
+                                "\"nextQuestionType\":\"COLLABORATION_VALUES\""),
+                hrFollowUp);
+        assertThat(InterviewPromptPolicy.stagePolicy(legacyJobInput(
+                hrSecond.roundName(), hrSecond.nextQuestion(), 2, 8)).code())
+                .isEqualTo("HR_FINAL");
+    }
+
+    @Test
+    void claudeSummaryFallbackAndPromptUseOnlySafeTurnFields() {
+        ObjectProvider<ChatClient.Builder> noBuilder =
+                new StaticListableBeanFactory().getBeanProvider(ChatClient.Builder.class);
+        SpringAiInterviewGenerator generator = new SpringAiInterviewGenerator(noBuilder, mapper);
+        InterviewAiGenerator.ReportTurn legacyTurn = new InterviewAiGenerator.ReportTurn(
+                0, "SYSTEM_DESIGN", "SECRET_QUESTION", "SECRET_ANSWER", 82,
+                "回答给出了缓存取舍证据。");
+
+        assertThat(generator.synthesizeReportSummary(List.of(), "job")).isNull();
+        assertThat(generator.synthesizeReportSummary(List.of(legacyTurn), "job")).isNull();
+        assertThat(InterviewAiGenerator.ReportTurn.class.getRecordComponents())
+                .extracting(java.lang.reflect.RecordComponent::getName)
+                .containsExactly("turnIndex", "roundName", "score", "feedback");
+        assertThat(SpringAiInterviewGenerator.buildReportSummaryPrompt(
+                List.of(legacyTurn), false))
+                .contains("SYSTEM_DESIGN", "82", "回答给出了缓存取舍证据")
+                .doesNotContain("SECRET_QUESTION", "SECRET_ANSWER");
+    }
+
+    @Test
     void materialAndInjectionTextRemainInsideEscapedUntrustedBoundaries() {
         InterviewAiGenerator.InterviewAiInput input = new InterviewAiGenerator.InterviewAiInput(
                 "job", "技术二面", "请介绍项目。",
@@ -217,6 +352,21 @@ class SpringAiInterviewGeneratorTest {
                 .isInstanceOf(Exception.class);
     }
 
+    private void assertAlgorithmInvalid(String json) {
+        InterviewAiGenerator.InterviewAiInput input = input(
+                "job", "TECHNICAL_FIRST", "请口述一个二分查找方案。", List.of());
+        assertThatThrownBy(() -> SpringAiInterviewGenerator.parseEvaluation(mapper, json, input))
+                .isInstanceOf(AiWorkerException.class)
+                .hasMessageContaining("JSON 契约");
+    }
+
+    private static InterviewAiGenerator.InterviewAiInput legacyJobInput(
+            String roundName, String question, int turnIndex, int totalTurns) {
+        return new InterviewAiGenerator.InterviewAiInput(
+                "job", roundName, question, "候选人给出了具体回答。", turnIndex, totalTurns,
+                Map.of(), List.of(), null);
+    }
+
     private static InterviewAiGenerator.InterviewAiInput input(
             String type, String stageCode, String question, List<String> previousQuestions) {
         int totalTurns = "job".equals(type) ? 12 : 6;
@@ -234,6 +384,12 @@ class SpringAiInterviewGeneratorTest {
     private static String validFirstStageJson() {
         return """
                 {"score":78,"feedback":"时间复杂度分析正确，但边界说明不足。","dimensions":[{"code":"ALGORITHM_REASONING","score":78,"evidence":"口述了二分查找与复杂度","comment":"需要补充空数组边界"}],"coveredSections":["ALGORITHM_REASONING"],"coveredTopics":["BINARY_SEARCH"],"riskFlags":["EDGE_CASE_MISSING"],"shouldEndStage":false,"nextQuestion":"如何处理空数组和重复元素？","nextSection":"ALGORITHM_REASONING","nextQuestionType":"ALGORITHM_REASONING","nextTopicCode":"BINARY_SEARCH_EDGE_CASES"}
+                """;
+    }
+
+    private static String validHrStageJson() {
+        return """
+                {"score":82,"feedback":"回答说明了岗位动机，但稳定性依据还可以更具体。","dimensions":[{"code":"MOTIVATION","score":82,"evidence":"说明了岗位与职业目标的关联","comment":"建议补充长期投入的事实依据"}],"coveredSections":["MOTIVATION"],"coveredTopics":["ROLE_MOTIVATION"],"riskFlags":[],"shouldEndStage":false,"nextQuestion":"哪些因素会影响你在下一份工作的稳定投入？","nextSection":"STABILITY","nextQuestionType":"STABILITY","nextTopicCode":"EMPLOYMENT_STABILITY"}
                 """;
     }
 }

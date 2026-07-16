@@ -26,6 +26,10 @@ final class DeterministicInterviewAiGenerator implements InterviewAiGenerator {
         InterviewPromptPolicy.StagePolicy stage = InterviewPromptPolicy.stagePolicy(input);
         List<String> sections = stage.sections().stream().sorted(Comparator.naturalOrder()).toList();
         String section = sections.get(Math.floorMod(input.turnIndex(), sections.size()));
+        String nextSection = sections.get(Math.floorMod(input.turnIndex() + 1, sections.size()));
+        List<String> questionTypes = stage.questionTypes().stream().sorted().toList();
+        String nextQuestionType = questionTypes.get(
+                Math.floorMod(input.turnIndex() + 1, questionTypes.size()));
         String nextQuestion = input.finalTurn()
                 ? ""
                 : InterviewPromptPolicy.fallbackQuestion(input);
@@ -39,7 +43,7 @@ final class DeterministicInterviewAiGenerator implements InterviewAiGenerator {
                 ? "Add a concrete example and explain its significance."
                 : "建议补充具体事实、边界和结果";
         int score = 80 + Math.min(input.turnIndex(), 10);
-        return new InterviewEvaluation(
+        InterviewEvaluation evaluation = new InterviewEvaluation(
                 score,
                 feedback,
                 List.of(new DimensionEvaluation(
@@ -52,8 +56,9 @@ final class DeterministicInterviewAiGenerator implements InterviewAiGenerator {
                 List.of(),
                 input.finalTurn(),
                 nextQuestion,
-                input.finalTurn() ? "" : section,
-                input.finalTurn() ? "" : stage.questionTypes().stream().sorted().findFirst().orElseThrow(),
+                input.finalTurn() ? "" : nextSection,
+                input.finalTurn() ? "" : nextQuestionType,
                 input.finalTurn() ? "" : "DETERMINISTIC_TOPIC");
+        return SpringAiInterviewGenerator.validateEvaluation(evaluation, input);
     }
 }

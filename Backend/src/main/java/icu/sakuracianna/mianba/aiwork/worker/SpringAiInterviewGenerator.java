@@ -39,9 +39,31 @@ public class SpringAiInterviewGenerator implements InterviewAiGenerator {
     private static final Pattern CODE_PATTERN =
             Pattern.compile("[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)*");
     private static final Pattern UNVERIFIED_EXECUTION_CLAIM = Pattern.compile(
-            "(?iu)(已编译|编译通过|已运行|运行通过|测试通过|通过全部测试|全部测试通过|"
-                    + "\\bAC\\b|\\baccepted\\b|compiled successfully|executed successfully|"
-                    + "passed all tests|all tests passed)");
+            "(?:代码)?(?:已经|已)?编译(?:成功|通过)"
+                    + "|(?:代码)?(?:已经|已)?运行(?:成功|通过)"
+                    + "|(?:全部|所有)(?:测试用例|测试|用例)(?:均|都|全部)?(?:已)?通过"
+                    + "|(?:测试用例|测试|用例)(?:均|都|全部)?(?:已)?通过"
+                    + "|通过(?:全部|所有)(?:测试用例|测试|用例)"
+                    + "|\\bAC\\b|\\baccepted\\b"
+                    + "|\\b(?:the\\s+)?code\\s+(?:has\\s+)?passed\\s+(?:all\\s+)?(?:the\\s+)?tests?\\b"
+                    + "|\\b(?:all|every)\\s+(?:test\\s+cases?|tests?)\\s+passed\\b"
+                    + "|\\b(?:the\\s+)?code\\s+(?:compiled|ran|executed)\\s+successfully\\b"
+                    + "|\\bpassed\\s+all\\s+tests\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private static final Pattern ENGLISH_POSITIVE = Pattern.compile(
+            "\\b(?:excellent|outstanding|strong|clear|specific|complete|sufficient|reasonable)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private static final Pattern ENGLISH_NEGATIVE = Pattern.compile(
+            "\\b(?:unclear|lacks?|lacking|weak|poor|missing|insufficient|incomplete|incorrect|vague)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private static final Pattern ENGLISH_NEGATED_POSITIVE = Pattern.compile(
+            "\\b(?:(?:not|never|hardly)\\s+"
+                    + "|(?:lacks?|lacking|without)\\s+(?:a\\s+)?)"
+                    + "(?:excellent|outstanding|strong|clear|specific|complete|sufficient|reasonable)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private static final List<String> CHINESE_NEGATIVE_PHRASES = List.of(
+            "不清晰", "不完整", "不充分", "不具体", "不合理",
+            "不足", "缺少", "缺乏", "薄弱", "模糊", "错误");
     private static final Set<String> OUTPUT_FIELDS = Set.of(
             "score", "feedback", "dimensions", "coveredSections", "coveredTopics",
             "riskFlags", "shouldEndStage", "nextQuestion", "nextSection",
@@ -298,26 +320,11 @@ public class SpringAiInterviewGenerator implements InterviewAiGenerator {
                 root.get("nextQuestionType"), stage.questionTypes(), maximumTurn);
         String nextTopicCode = nextCode(root.get("nextTopicCode"), null, maximumTurn);
 
-        if (!maximumTurn && InterviewPromptPolicy.repeatsKnownQuestion(nextQuestion, input)) {
-            throw invalidOutputContract();
-        }
-        if (InterviewPromptPolicy.profile(input.interviewType()).englishOnly()) {
-            requireEnglish(feedback);
-            if (!maximumTurn || !nextQuestion.isEmpty()) {
-                requireEnglish(nextQuestion);
-            }
-            dimensions.forEach(dimension -> {
-                requireEnglish(dimension.evidence());
-                requireEnglish(dimension.comment());
-            });
-        }
         InterviewEvaluation evaluation = new InterviewEvaluation(
                 score, feedback, dimensions, coveredSections, coveredTopics, riskFlags,
                 shouldEnd.booleanValue(), nextQuestion, nextSection, nextQuestionType,
                 nextTopicCode);
-        validateConsistency(evaluation);
-        validateNoUnverifiedExecutionClaims(evaluation);
-        return evaluation;
+        return validateEvaluation(evaluation, input);
     }
 
     private static List<DimensionEvaluation> parseDimensions(
@@ -435,21 +442,97 @@ public class SpringAiInterviewGenerator implements InterviewAiGenerator {
         }
     }
 
+    /** 让模型解析器与确定性替身共享同一组结构化字段和语义校验。 */
+    static InterviewEvaluation validateEvaluation(
+            InterviewEvaluation evaluation,
+            InterviewAiInput input) {
+        if (evaluation == null || evaluation.score() < 0 || evaluation.score() > 100) {
+            throw invalidOutputContract();
+        }
+        InterviewPromptPolicy.StagePolicy stage = InterviewPromptPolicy.stagePolicy(input);
+        validateStoredText(evaluation.feedback(), MAX_FEEDBACK_CODE_POINTS);
+        if (evaluation.dimensions().isEmpty()
+                || evaluation.dimensions().size() > MAX_DIMENSIONS) {
+            throw invalidOutputContract();
+        }
+        Set<String> dimensionCodes = new HashSet<>();
+        for (DimensionEvaluation dimension : evaluation.dimensions()) {
+            if (dimension == null || dimension.score() < 0 || dimension.score() > 100) {
+                throw invalidOutputContract();
+            }
+            String code = validateCode(dimension.code(), stage.dimensions());
+            if (!dimensionCodes.add(code)) {
+                throw invalidOutputContract();
+            }
+            validateStoredText(dimension.evidence(), MAX_EVIDENCE_CODE_POINTS);
+            validateStoredText(dimension.comment(), MAX_COMMENT_CODE_POINTS);
+        }
+        validateCodeList(evaluation.coveredSections(), stage.sections());
+        validateCodeList(evaluation.coveredTopics(), null);
+        validateCodeList(evaluation.riskFlags(), null);
+
+        boolean maximumTurn = input.finalTurn();
+        if (!maximumTurn || !evaluation.nextQuestion().isEmpty()) {
+            validateStoredText(evaluation.nextQuestion(), MAX_QUESTION_CODE_POINTS);
+        }
+        if (!maximumTurn || !evaluation.nextSection().isEmpty()) {
+            validateCode(evaluation.nextSection(), stage.sections());
+        }
+        if (!maximumTurn || !evaluation.nextQuestionType().isEmpty()) {
+            validateCode(evaluation.nextQuestionType(), stage.questionTypes());
+        }
+        if (!maximumTurn || !evaluation.nextTopicCode().isEmpty()) {
+            validateCode(evaluation.nextTopicCode(), null);
+        }
+        if (!maximumTurn
+                && InterviewPromptPolicy.repeatsKnownQuestion(evaluation.nextQuestion(), input)) {
+            throw invalidOutputContract();
+        }
+
+        if (InterviewPromptPolicy.profile(input.interviewType()).englishOnly()) {
+            requireEnglish(evaluation.feedback());
+            if (!maximumTurn || !evaluation.nextQuestion().isEmpty()) {
+                requireEnglish(evaluation.nextQuestion());
+            }
+            evaluation.dimensions().forEach(dimension -> {
+                requireEnglish(dimension.evidence());
+                requireEnglish(dimension.comment());
+            });
+        }
+        validateConsistency(evaluation);
+        validateNoUnverifiedExecutionClaims(evaluation);
+        return evaluation;
+    }
+
+    private static void validateStoredText(String value, int maxCodePoints) {
+        if (value == null || value.isBlank()
+                || !removeUnsupportedCharacters(value).equals(value)
+                || value.codePointCount(0, value.length()) > maxCodePoints) {
+            throw invalidOutputContract();
+        }
+    }
+
+    private static void validateCodeList(List<String> values, Set<String> allowlist) {
+        if (values.size() > MAX_CODES) {
+            throw invalidOutputContract();
+        }
+        Set<String> seen = new HashSet<>();
+        for (String value : values) {
+            if (!seen.add(validateCode(value, allowlist))) {
+                throw invalidOutputContract();
+            }
+        }
+    }
+
     private static void validateConsistency(InterviewEvaluation evaluation) {
         double average = evaluation.dimensions().stream()
                 .mapToInt(DimensionEvaluation::score)
                 .average()
                 .orElseThrow(SpringAiInterviewGenerator::invalidOutputContract);
-        String feedback = evaluation.feedback().toLowerCase(Locale.ROOT);
-        boolean positive = containsAny(feedback,
-                "优秀", "出色", "充分", "清晰", "具体", "合理",
-                "excellent", "outstanding", "strong", "clear", "specific");
-        boolean negative = containsAny(feedback,
-                "不足", "缺少", "缺乏", "薄弱", "模糊", "错误",
-                "lack", "weak", "poor", "unclear", "missing", "insufficient");
+        Polarity polarity = polarityOf(evaluation.feedback());
         if (Math.abs(evaluation.score() - average) > MAX_SCORE_AVERAGE_DELTA
-                || evaluation.score() >= 82 && negative && !positive
-                || evaluation.score() <= 40 && positive && !negative) {
+                || evaluation.score() >= 82 && polarity.negative() && !polarity.positive()
+                || evaluation.score() <= 40 && polarity.positive() && !polarity.negative()) {
             throw inconsistentOutput();
         }
     }
@@ -463,6 +546,23 @@ public class SpringAiInterviewGenerator implements InterviewAiGenerator {
         }
     }
 
+    private static Polarity polarityOf(String rawFeedback) {
+        String feedback = rawFeedback.toLowerCase(Locale.ROOT);
+        boolean negative = ENGLISH_NEGATIVE.matcher(feedback).find()
+                || ENGLISH_NEGATED_POSITIVE.matcher(feedback).find();
+        String positiveCandidate = ENGLISH_NEGATED_POSITIVE.matcher(feedback).replaceAll(" ");
+        for (String phrase : CHINESE_NEGATIVE_PHRASES) {
+            if (positiveCandidate.contains(phrase)) {
+                negative = true;
+                positiveCandidate = positiveCandidate.replace(phrase, " ");
+            }
+        }
+        boolean positive = ENGLISH_POSITIVE.matcher(positiveCandidate).find()
+                || containsAny(positiveCandidate,
+                        "优秀", "出色", "充分", "清晰", "具体", "合理", "扎实", "完整");
+        return new Polarity(positive, negative);
+    }
+
     private static boolean containsAny(String value, String... markers) {
         for (String marker : markers) {
             if (value.contains(marker)) {
@@ -470,6 +570,9 @@ public class SpringAiInterviewGenerator implements InterviewAiGenerator {
             }
         }
         return false;
+    }
+
+    private record Polarity(boolean positive, boolean negative) {
     }
 
     private static String removeUnsupportedCharacters(String value) {
@@ -558,7 +661,7 @@ public class SpringAiInterviewGenerator implements InterviewAiGenerator {
         }
     }
 
-    private static String buildReportSummaryPrompt(
+    static String buildReportSummaryPrompt(
             List<InterviewAiGenerator.ReportTurn> turns, boolean englishOnly) {
         StringBuilder turnSummaries = new StringBuilder();
         for (InterviewAiGenerator.ReportTurn turn : turns) {
