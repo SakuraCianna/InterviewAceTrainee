@@ -24,7 +24,7 @@ CREATE TABLE interview_packages (
     UNIQUE (user_id, start_idempotency_key),
     CHECK ((charged_credit = 3 AND voucher_id IS NULL)
         OR (charged_credit = 0 AND voucher_id IS NOT NULL)),
-    CHECK (expires_at > created_at AND expires_at <= created_at + interval '30 days')
+    CHECK (expires_at = created_at + interval '30 days')
 );
 CREATE UNIQUE INDEX ux_interview_packages_one_active_user
     ON interview_packages(user_id) WHERE status = 'ACTIVE';
@@ -64,7 +64,10 @@ CREATE TABLE interview_package_stages (
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (package_id, stage_code),
     UNIQUE (package_id, sequence_no),
-    CHECK (min_turns <= max_turns)
+    CHECK (min_turns <= max_turns),
+    CHECK ((stage_code = 'TECHNICAL_FIRST' AND sequence_no = 1)
+        OR (stage_code = 'TECHNICAL_SECOND' AND sequence_no = 2)
+        OR (stage_code = 'HR_FINAL' AND sequence_no = 3))
 );
 CREATE INDEX ix_interview_package_stages_package_status
     ON interview_package_stages(package_id, status, sequence_no);

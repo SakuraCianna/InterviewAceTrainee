@@ -107,11 +107,74 @@ class JobInterviewPackagePostgresIT {
             insertStage(packageId, "TECHNICAL_FIRST", 1, 8, 12, 50);
 
             assertThatThrownBy(() -> insertStage(
-                    packageId, "TECHNICAL_FIRST", 2, 7, 12, 60))
+                    packageId, "TECHNICAL_FIRST", 1, 8, 12, 50))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+
+            List<String> uniqueConstraints = jdbc.queryForList("""
+                    SELECT pg_get_constraintdef(oid)
+                    FROM pg_constraint
+                    WHERE conrelid = 'interview_package_stages'::regclass
+                      AND contype = 'u'
+                    """, String.class);
+            assertThat(uniqueConstraints)
+                    .contains("UNIQUE (package_id, stage_code)")
+                    .contains("UNIQUE (package_id, sequence_no)");
+        } finally {
+            deleteUserFixtures(userId);
+        }
+    }
+
+    @Test
+    void stageRejectsMismatchedCodeAndSequence() {
+        UUID userId = UUID.randomUUID();
+        UUID packageId = UUID.randomUUID();
+        try {
+            insertUser(userId);
+            insertPackage(packageId, userId, null, 3, "stage-order", "ACTIVE");
+
+            assertThatThrownBy(() -> insertStage(
+                    packageId, "TECHNICAL_FIRST", 2, 8, 12, 50))
                     .isInstanceOf(DataIntegrityViolationException.class);
             assertThatThrownBy(() -> insertStage(
-                    packageId, "TECHNICAL_SECOND", 1, 7, 12, 60))
+                    packageId, "TECHNICAL_SECOND", 3, 7, 12, 60))
                     .isInstanceOf(DataIntegrityViolationException.class);
+            assertThatThrownBy(() -> insertStage(
+                    packageId, "HR_FINAL", 1, 5, 8, 25))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+
+            Integer stageCount = jdbc.queryForObject(
+                    "SELECT count(*) FROM interview_package_stages WHERE package_id = ?",
+                    Integer.class,
+                    packageId);
+            assertThat(stageCount).isZero();
+        } finally {
+            deleteUserFixtures(userId);
+        }
+    }
+
+    @Test
+    void packageRejectsAnyExpirationOtherThanExactlyThirtyDays() {
+        UUID userId = UUID.randomUUID();
+        UUID packageId = UUID.randomUUID();
+        try {
+            insertUser(userId);
+
+            assertThatThrownBy(() -> jdbc.update("""
+                    INSERT INTO interview_packages(
+                        id, user_id, start_idempotency_key, request_hash, status,
+                        current_stage_code, charged_credit, plan_version, rubric_version,
+                        material_snapshot, expires_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, 'COMPLETED', 'TECHNICAL_FIRST', 3,
+                            'job-cn-v1', 'job-rubric-v1', '{}'::jsonb,
+                            timestamptz '2026-01-30 00:00:00+00',
+                            timestamptz '2026-01-01 00:00:00+00',
+                            timestamptz '2026-01-01 00:00:00+00')
+                    """, packageId, userId, "twenty-nine-days", "0".repeat(64)))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+
+            Integer packageCount = jdbc.queryForObject(
+                    "SELECT count(*) FROM interview_packages WHERE id = ?", Integer.class, packageId);
+            assertThat(packageCount).isZero();
         } finally {
             deleteUserFixtures(userId);
         }
