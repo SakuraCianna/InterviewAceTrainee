@@ -265,6 +265,48 @@ class AiJobWorkerReportTest {
     }
 
     @Test
+    void offerOutcomePatternsDistinguishHiringDecisionsFromCandidateDiscussion() {
+        InterviewReportAssembler assembler = new InterviewReportAssembler();
+        InterviewReportAssembler.EvaluatedTurn turn = new InterviewReportAssembler.EvaluatedTurn(
+                0,
+                "untrusted stage name",
+                "How would you compare two career opportunities?",
+                "I would compare the role, growth path, and long-term fit.",
+                "IELTS_SPEAKING",
+                70,
+                "We will offer the candidate the position.",
+                List.of(
+                        dimension(
+                                "COHERENCE",
+                                60,
+                                "Offer the applicant a role after this interview.",
+                                "Offer a specific example to improve clarity."),
+                        dimension(
+                                "FLUENCY",
+                                80,
+                                "Compare this job offer with your long-term priorities.",
+                                "Discuss how you would evaluate a job offer.")),
+                List.of("PART_ONE"),
+                List.of("CAREER_CHOICES"),
+                List.of());
+
+        Map<String, Object> report = assembler.assembleSession(
+                new InterviewReportAssembler.SessionReportInput(
+                        UUID.randomUUID(), "ielts", "IELTS_SPEAKING", false,
+                        "ielts-v2", "ielts-rubric-v2", "turn-evaluation-v2",
+                        false, List.of(turn))).body();
+
+        assertThat(report.toString())
+                .contains(NEUTRAL_ENGLISH_FEEDBACK)
+                .contains("Offer a specific example to improve clarity.")
+                .contains("Compare this job offer with your long-term priorities.")
+                .contains("Discuss how you would evaluate a job offer.")
+                .doesNotContain(
+                        "We will offer the candidate the position.",
+                        "Offer the applicant a role after this interview.");
+    }
+
+    @Test
     void packageNeutralizesChineseAndEnglishDecisionsAcrossDerivedFields() {
         InterviewReportAssembler assembler = new InterviewReportAssembler();
         List<InterviewReportAssembler.StageSummary> stages = List.of(
