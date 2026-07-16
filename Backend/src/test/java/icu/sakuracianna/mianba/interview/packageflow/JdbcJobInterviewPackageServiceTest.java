@@ -595,9 +595,13 @@ class JdbcJobInterviewPackageServiceTest {
                 .containsExactly(fixture.packageId, JobInterviewStage.TECHNICAL_SECOND.name());
 
         SqlCall sessionInsert = fixture.jdbc.singleCallContaining("INSERT INTO sessions");
-        assertThat(sessionInsert.sql())
-                .contains("'job'", "'active'", "charged_credit", "voucher_id")
-                .contains("0", "NULL", "false");
+        String normalizedSessionInsert = sessionInsert.sql().replaceAll("\\s+", " ").trim();
+        assertThat(normalizedSessionInsert).contains(
+                "id, user_id, start_idempotency_key, material_id, interview_type, "
+                        + "status, current_turn_index, total_turns, charged_credit, voucher_id, "
+                        + "admin_unlimited_usage, started_at, expires_at, created_at, updated_at) "
+                        + "VALUES (?, ?, ?, ?, 'job', 'active', 0, ?, 0, "
+                        + "NULL, false, ?, ?, ?, ?)");
         assertThat(sessionInsert.args()).containsExactly(
                 fixture.sessionId,
                 fixture.userId,
@@ -711,6 +715,52 @@ class JdbcJobInterviewPackageServiceTest {
                 JobInterviewStage.TECHNICAL_SECOND,
                 differentKey.sessionId,
                 "changed-stage-key"), "idempotency_key_conflict");
+        assertThat(differentKey.jdbc.updateCalls()).isEmpty();
+    }
+
+    @Test
+    void startTechnicalFirstReplaysOnlyExistingBoundSessionAndKeyWithoutWrites() {
+        StageFixture replay = new StageFixture(JobInterviewStage.TECHNICAL_FIRST);
+        replay.jdbc.stageStatus = "IN_PROGRESS";
+        replay.jdbc.boundSessionId = replay.sessionId;
+        replay.jdbc.boundSessionKey = "first-stage-key";
+
+        JobInterviewPackageView view = replay.service.startStage(
+                replay.userId,
+                replay.packageId,
+                JobInterviewStage.TECHNICAL_FIRST,
+                replay.sessionId,
+                "first-stage-key");
+
+        assertThat(view.stages()).singleElement().satisfies(stage -> {
+            assertThat(stage.stageCode()).isEqualTo(JobInterviewStage.TECHNICAL_FIRST);
+            assertThat(stage.status()).isEqualTo("IN_PROGRESS");
+            assertThat(stage.sessionId()).isEqualTo(replay.sessionId);
+        });
+        assertThat(replay.jdbc.updateCalls()).isEmpty();
+
+        StageFixture differentSession = new StageFixture(JobInterviewStage.TECHNICAL_FIRST);
+        differentSession.jdbc.stageStatus = "IN_PROGRESS";
+        differentSession.jdbc.boundSessionId = differentSession.sessionId;
+        differentSession.jdbc.boundSessionKey = "first-stage-key";
+        assertConflict(() -> differentSession.service.startStage(
+                differentSession.userId,
+                differentSession.packageId,
+                JobInterviewStage.TECHNICAL_FIRST,
+                UUID.randomUUID(),
+                "first-stage-key"), "idempotency_key_conflict");
+        assertThat(differentSession.jdbc.updateCalls()).isEmpty();
+
+        StageFixture differentKey = new StageFixture(JobInterviewStage.TECHNICAL_FIRST);
+        differentKey.jdbc.stageStatus = "IN_PROGRESS";
+        differentKey.jdbc.boundSessionId = differentKey.sessionId;
+        differentKey.jdbc.boundSessionKey = "first-stage-key";
+        assertConflict(() -> differentKey.service.startStage(
+                differentKey.userId,
+                differentKey.packageId,
+                JobInterviewStage.TECHNICAL_FIRST,
+                differentKey.sessionId,
+                "changed-first-stage-key"), "idempotency_key_conflict");
         assertThat(differentKey.jdbc.updateCalls()).isEmpty();
     }
 
