@@ -88,11 +88,11 @@ const interviewTypeLabels: Record<string, string> = {
 };
 
 const adminSectionNavItems: { key: AdminSectionKey; label: string; icon: string }[] = [
-  { key: "overview", label: "今日工作台", icon: "material-symbols:dashboard-outline-rounded" },
-  { key: "users", label: "用户中心", icon: "material-symbols:people-outline-rounded" },
+  { key: "overview", label: "今日工作台", icon: "material-symbols:grid-view-rounded" },
+  { key: "users", label: "用户中心", icon: "material-symbols:group-rounded" },
   { key: "credits", label: "权益售后", icon: "material-symbols:support-agent-rounded" },
-  { key: "quality", label: "面试质量", icon: "material-symbols:analytics-outline-rounded" },
-  { key: "ai", label: "AI 健康", icon: "material-symbols:health-and-safety-outline-rounded" },
+  { key: "quality", label: "面试质量", icon: "material-symbols:analytics-rounded" },
+  { key: "ai", label: "AI 健康", icon: "material-symbols:monitor-heart-rounded" },
   { key: "audit", label: "风控审计", icon: "material-symbols:security-rounded" },
   { key: "system", label: "配置中心", icon: "material-symbols:tune-rounded" },
 ];

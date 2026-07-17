@@ -6,6 +6,7 @@ import { AppIcon } from "../../components/AppIcon";
 import { AvatarStage } from "../../components/AvatarStage";
 import { BrandLogo } from "../../components/BrandLogo";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { Select } from "../../components/Select";
 import { TaskProgress } from "./components/TaskProgress";
 import { InterviewReport } from "./components/InterviewReport";
 import { RecordingControls } from "./components/RecordingControls";
@@ -1220,7 +1221,14 @@ export function InterviewRoom() {
   ) : null;
 
   const accountSettingsPanel = currentUser && isSettingsOpen && shouldShowWorkspaceHeader ? (
-    <AccountSettingsPanel
+    <div
+      className={roomClasses("settings-overlay")}
+      role="dialog"
+      aria-modal="true"
+      aria-label="账户设置"
+      onClick={(e) => { if (e.target === e.currentTarget) setIsSettingsOpen(false); }}
+    >
+      <AccountSettingsPanel
       email={currentUser.email}
       code={accountCode}
       newPassword={accountNewPassword}
@@ -1233,6 +1241,7 @@ export function InterviewRoom() {
       onRequestCode={() => void requestAccountCode()}
       onSubmit={changeAccountPassword}
     />
+    </div>
   ) : null;
 
   if (routeStage === "check") {
@@ -1299,17 +1308,19 @@ export function InterviewRoom() {
 
             <label className={roomClasses("microphone-select")}>
               <span>麦克风</span>
-              <select value={selectedMicrophoneId} onChange={(event) => handleMicrophoneChange(event.currentTarget.value)}>
-                {microphoneDevices.length === 0 ? (
-                  <option value="">使用系统默认麦克风</option>
-                ) : (
-                  microphoneDevices.map((device, index) => (
-                    <option key={device.deviceId || `device-${index}`} value={device.deviceId}>
-                      {microphoneLabel(device, index)}
-                    </option>
-                  ))
-                )}
-              </select>
+              <Select
+                value={selectedMicrophoneId}
+                options={
+                  microphoneDevices.length === 0
+                    ? [{ value: "", label: "使用系统默认麦克风" }]
+                    : microphoneDevices.map((device, index) => ({
+                        value: device.deviceId,
+                        label: microphoneLabel(device, index),
+                      }))
+                }
+                onChange={handleMicrophoneChange}
+                ariaLabel="选择麦克风"
+              />
             </label>
 
             <MicrophoneLevelMeter

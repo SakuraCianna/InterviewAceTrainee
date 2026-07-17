@@ -2607,15 +2607,34 @@
   }
 }
 
-@media (max-width: 760px) {
-
-  .file-picker-control {
-    grid-template-columns: 1fr;
-    gap: 7px;
-    min-height: auto;
-    padding: 10px;
-  }
+/* Settings modal overlay */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 80px 16px 16px;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(6px);
+  animation: settingsOverlayIn 180ms ease;
 }
+
+@keyframes settingsOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.settings-overlay > * {
+  animation: settingsCardIn 200ms cubic-bezier(0.34, 1.2, 0.64, 1);
+}
+
+@keyframes settingsCardIn {
+  from { opacity: 0; transform: scale(0.96) translateY(-8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
 
 @media (max-width: 760px) {
 

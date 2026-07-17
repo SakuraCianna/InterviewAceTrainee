@@ -40,7 +40,6 @@ export function AdminSidebar({
       </a>
 
       <nav className={adminClasses("admin-sidebar-nav")} aria-label="后台导航">
-        <p className={adminClasses("admin-sidebar-nav-label")}>导航</p>
         {navItems.map((item) => (
           <button
             type="button"
