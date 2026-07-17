@@ -52,6 +52,13 @@ import trendingUp from "@iconify-icons/lucide/trending-up";
 import users from "@iconify-icons/lucide/users";
 import volume2 from "@iconify-icons/lucide/volume-2";
 import zap from "@iconify-icons/lucide/zap";
+import x from "@iconify-icons/lucide/x";
+import chevronRight from "@iconify-icons/lucide/chevron-right";
+import search from "@iconify-icons/lucide/search";
+import shieldBan from "@iconify-icons/lucide/shield-ban";
+import shieldAlert from "@iconify-icons/lucide/shield-alert";
+import shieldQuestion from "@iconify-icons/lucide/shield-question";
+import serverCog from "@iconify-icons/lucide/server-cog";
 import type { IconifyIcon } from "@iconify/types";
 
 const icons: Record<string, IconifyIcon> = {
@@ -112,6 +119,15 @@ const icons: Record<string, IconifyIcon> = {
   "lucide:volume-2": volume2,
   "lucide:waveform": waves,
   "lucide:zap": zap,
+  "lucide:x": x,
+  "lucide:chevron-right": chevronRight,
+  "lucide:search": search,
+  "lucide:shield-ban": shieldBan,
+  "lucide:shield-alert": shieldAlert,
+  "lucide:shield-question": shieldQuestion,
+  "lucide:bot-off": bot,
+  "lucide:server-cog": serverCog,
+  "lucide:circle-check-big": checkCircle2,
   "solar:soundwave-circle-bold-duotone": waves,
 };
 

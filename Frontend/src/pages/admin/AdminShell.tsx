@@ -505,6 +505,9 @@ export function AdminShell() {
   const [creditsSubTab, setCreditsSubTab] = useState<"adjust" | "refunds">("adjust");
   const [auditSubTab, setAuditSubTab] = useState<"login" | "safety" | "operations">("login");
   const [auditLoginFilter, setAuditLoginFilter] = useState("");
+  const [loginLogFilter, setLoginLogFilter] = useState<"all" | "success" | "failed">("all");
+  const [safetyLogFilter, setSafetyLogFilter] = useState<"all" | "high" | "medium" | "low">("all");
+  const [aiLogFilter, setAiLogFilter] = useState<"all" | "success" | "failed">("all");
   const [aiTasks, setAiTasks] = useState<AiTask[]>([]);
   const [areAiTasksLoading, setAreAiTasksLoading] = useState(false);
   const loadedSectionsRef = useRef(new Set<AdminSectionKey>());
@@ -1448,6 +1451,9 @@ export function AdminShell() {
     setCreditsSubTab("adjust");
     setAuditSubTab("login");
     setAuditLoginFilter("");
+    setLoginLogFilter("all");
+    setSafetyLogFilter("all");
+    setAiLogFilter("all");
     setMessage("已退出后台，请重新完成管理员后台登录。");
     window.location.assign("/");
   }
@@ -2080,19 +2086,35 @@ export function AdminShell() {
                       <h3>最近模型调用</h3>
                       <p>失败、延迟、token、成本和音频时长用于定位服务退化。</p>
                     </div>
+                    <div className={adminClasses("admin2-log-filter-bar")}>
+                      {(["all", "success", "failed"] as const).map((f) => (
+                        <button key={f} type="button" className={adminClasses("admin2-log-filter-btn", aiLogFilter === f && "is-active")} onClick={() => setAiLogFilter(f)}>
+                          {f === "all" ? "全部" : f === "success" ? "成功" : "失败"}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className={adminClasses("admin2-log-list")}>
                     {aiCallLogs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无模型调用记录。</p>}
-                    {aiCallLogs.slice(0, 14).map((entry) => (
-                      <article className={adminClasses("admin2-log-row")} key={entry.id}>
-                        <div>
-                          <strong>{entry.provider_name} / {entry.model_name}</strong>
-                          <span>{entry.session_id ?? "无会话"} · {businessLabel(entry.purpose)}{entry.provider_request_id ? ` · ${entry.provider_request_id}` : ""}</span>
-                        </div>
-                        <StatusChip tone={entry.success ? "good" : "danger"}>{entry.success ? "成功" : getApiErrorMessage({ detail: entry.error_code ?? undefined }, "调用失败")}</StatusChip>
-                        <span>{entry.latency_ms != null ? `${entry.latency_ms}ms` : "未记录延迟"} · {entry.input_tokens ?? 0}/{entry.output_tokens ?? 0} tokens · {formatDateTime(entry.created_at)}</span>
-                      </article>
-                    ))}
+                    {aiCallLogs
+                      .filter((e) => aiLogFilter === "all" || (aiLogFilter === "success" ? e.success : !e.success))
+                      .slice(0, 20)
+                      .map((entry) => (
+                        <article className={adminClasses("admin2-log-row", entry.success ? "admin2-log-row--success" : "admin2-log-row--danger")} key={entry.id}>
+                          <div className={adminClasses("admin2-log-main")}>
+                            <strong>{entry.provider_name} / {entry.model_name}</strong>
+                            <span>{businessLabel(entry.purpose)} · {entry.session_id ?? "无会话"}{entry.provider_request_id ? ` · ${entry.provider_request_id}` : ""}</span>
+                          </div>
+                          <StatusChip tone={entry.success ? "good" : "danger"}>
+                            {entry.success ? "成功" : getApiErrorMessage({ detail: entry.error_code ?? undefined }, "调用失败")}
+                          </StatusChip>
+                          <div className={adminClasses("admin2-log-meta")}>
+                            <span>{entry.latency_ms != null ? `${entry.latency_ms} ms` : "—"}</span>
+                            <span>{entry.input_tokens ?? 0}/{entry.output_tokens ?? 0} tok</span>
+                            <time className={adminClasses("admin2-log-time")}>{formatDateTime(entry.created_at)}</time>
+                          </div>
+                        </article>
+                      ))}
                   </div>
                 </section>
               </div>
@@ -2151,8 +2173,16 @@ export function AdminShell() {
                         <h3>登录日志</h3>
                         <p>关注异常 IP、验证码失败和管理员账号尝试。</p>
                       </div>
+                      <div className={adminClasses("admin2-log-filter-bar")}>
+                        {(["all", "success", "failed"] as const).map((f) => (
+                          <button key={f} type="button" className={adminClasses("admin2-log-filter-btn", loginLogFilter === f && "is-active")} onClick={() => setLoginLogFilter(f)}>
+                            {f === "all" ? "全部" : f === "success" ? "成功" : "失败"}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                     <div className={adminClasses("admin2-audit-filter")}>
+                      <AppIcon icon="lucide:search" size={16} />
                       <input
                         type="search"
                         value={auditLoginFilter}
@@ -2168,17 +2198,22 @@ export function AdminShell() {
                     <div className={adminClasses("admin2-log-list")}>
                       {authLoginLogs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无登录日志。</p>}
                       {authLoginLogs
-                        .filter((e) => !auditLoginFilter || e.email.includes(auditLoginFilter))
+                        .filter((e) => {
+                          if (auditLoginFilter && !e.email.includes(auditLoginFilter)) return false;
+                          if (loginLogFilter === "success") return e.success;
+                          if (loginLogFilter === "failed") return !e.success;
+                          return true;
+                        })
                         .map((entry) => (
-                          <article className={adminClasses("admin2-log-row")} key={entry.id}>
-                            <div>
+                          <article className={adminClasses("admin2-log-row", entry.success ? "admin2-log-row--success" : "admin2-log-row--danger")} key={entry.id}>
+                            <div className={adminClasses("admin2-log-main")}>
                               <strong>{entry.email}</strong>
                               <span>{businessLabel(entry.auth_method)} · {businessLabel(entry.role)} · {entry.ip_address ?? "未知 IP"}</span>
                             </div>
                             <StatusChip tone={entry.success ? "good" : "danger"}>
                               {entry.success ? "成功" : getApiErrorMessage({ detail: entry.failure_reason ?? undefined }, "失败")}
                             </StatusChip>
-                            <small>{formatDateTime(entry.created_at)}</small>
+                            <time className={adminClasses("admin2-log-time")}>{formatDateTime(entry.created_at)}</time>
                           </article>
                         ))}
                     </div>
@@ -2192,22 +2227,31 @@ export function AdminShell() {
                         <h3>内容安全</h3>
                         <p>复核高风险输入来源、命中类别和用户会话。</p>
                       </div>
+                      <div className={adminClasses("admin2-log-filter-bar")}>
+                        {(["all", "high", "medium", "low"] as const).map((f) => (
+                          <button key={f} type="button" className={adminClasses("admin2-log-filter-btn", safetyLogFilter === f && "is-active", f === "high" && "admin2-log-filter-btn--danger", f === "medium" && "admin2-log-filter-btn--warning")} onClick={() => setSafetyLogFilter(f)}>
+                            {f === "all" ? "全部" : f === "high" ? "高风险" : f === "medium" ? "中风险" : "低风险"}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                     <div className={adminClasses("admin2-log-list")}>
                       {contentSafetyLogs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无内容安全记录。</p>}
-                      {contentSafetyLogs.map((entry) => (
-                        <article className={adminClasses("admin2-log-row")} key={entry.id}>
-                          <div>
-                            <strong>{entry.user_email ?? "未知用户"} / {entry.source}</strong>
-                            <span>{entry.session_id ?? "无会话"} · {entry.categories.map((item) => businessLabel(item)).join(" / ")}</span>
-                            {entry.content_excerpt && <em style={{ display: "block", marginTop: "2px", color: "#94a3b8", fontSize: "12px" }}>{entry.content_excerpt}</em>}
-                          </div>
-                          <StatusChip tone={entry.risk_level === "high" ? "danger" : "warning"}>
-                            {businessLabel(entry.action)} / {businessLabel(entry.risk_level)}
-                          </StatusChip>
-                          <small>{formatDateTime(entry.created_at)}</small>
-                        </article>
-                      ))}
+                      {contentSafetyLogs
+                        .filter((e) => safetyLogFilter === "all" || e.risk_level === safetyLogFilter)
+                        .map((entry) => (
+                          <article className={adminClasses("admin2-log-row", entry.risk_level === "high" ? "admin2-log-row--danger" : "admin2-log-row--warning")} key={entry.id}>
+                            <div className={adminClasses("admin2-log-main")}>
+                              <strong>{entry.user_email ?? "未知用户"} · {entry.source}</strong>
+                              <span>{entry.session_id ?? "无会话"} · {entry.categories.map((item) => businessLabel(item)).join(" / ")}</span>
+                              {entry.content_excerpt && <em className={adminClasses("admin2-log-excerpt")}>{entry.content_excerpt}</em>}
+                            </div>
+                            <StatusChip tone={entry.risk_level === "high" ? "danger" : "warning"}>
+                              {businessLabel(entry.action)} / {businessLabel(entry.risk_level)}
+                            </StatusChip>
+                            <time className={adminClasses("admin2-log-time")}>{formatDateTime(entry.created_at)}</time>
+                          </article>
+                        ))}
                     </div>
                   </section>
                 )}
