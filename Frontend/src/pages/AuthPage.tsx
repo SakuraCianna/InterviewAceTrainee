@@ -2,9 +2,16 @@ import { FormEvent, useLayoutEffect, useRef, useState } from "react";
 import { Button, SafeArea } from "antd-mobile";
 import { gsap } from "gsap";
 import { AppIcon } from "../components/AppIcon";
+import {
+  HCaptchaChallenge,
+  INITIAL_HCAPTCHA_STATE,
+  hCaptchaTokenForRequest,
+  type HCaptchaChallengeHandle,
+} from "../components/HCaptchaChallenge/HCaptchaChallenge";
 import { useEmailCodeCooldown } from "../hooks/useEmailCodeCooldown";
 import { getApiErrorMessage } from "../lib/api";
 import { normalizeEmail, retryAfterSeconds } from "../lib/emailCooldown";
+import { authClasses } from "./authStyles";
 
 type AuthMode = "login" | "register";
 
@@ -13,8 +20,8 @@ type AuthPageProps = {
 };
 
 type AuthResponse = {
-  access_token?: string;
-  token_type?: string;
+  email?: string;
+  role?: string;
   dev_code?: string;
   detail?: string;
   message?: string;
@@ -44,12 +51,15 @@ export function AuthPage({ mode }: AuthPageProps) {
   const [message, setMessage] = useState(mode === "login" ? "默认使用密码登录, 也可以切换邮箱验证码" : "先填写邮箱获取验证码, 再完成注册");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRequestingCode, setIsRequestingCode] = useState(false);
+  const [captchaState, setCaptchaState] = useState(INITIAL_HCAPTCHA_STATE);
   const { cooldownSeconds: codeCooldownSeconds, startCooldown: startCodeCooldown } = useEmailCodeCooldown({
     email,
     storagePrefix: CODE_REQUEST_STORAGE_PREFIX,
     defaultSeconds: CODE_REQUEST_COOLDOWN_SECONDS,
   });
   const pageRef = useRef<HTMLElement | null>(null);
+  const captchaRef = useRef<HCaptchaChallengeHandle | null>(null);
+  const authActionInFlightRef = useRef(false);
   const backRef = useRef<HTMLAnchorElement | null>(null);
   const eyebrowRef = useRef<HTMLSpanElement | null>(null);
   const descRef = useRef<HTMLParagraphElement | null>(null);
@@ -102,13 +112,13 @@ export function AuthPage({ mode }: AuthPageProps) {
         tl.to(fadeItems, { opacity: 1, duration: 0.24, stagger: 0.025 });
         return;
       }
-      tl.to(backRef.current, { opacity: 1, y: 0, duration: 0.45 })
-        .to(eyebrowRef.current, { opacity: 1, y: 0, duration: 0.36 }, "-=0.2")
-        .to(titleLines, { opacity: 1, y: 0, duration: 0.56, stagger: 0.08 }, "-=0.08")
-        .to(descRef.current, { opacity: 1, y: 0, duration: 0.42 }, "-=0.22")
-        .to(statusCardRef.current, { opacity: 1, y: 0, duration: 0.42 }, "-=0.18")
-        .to(authCardRef.current, { opacity: 1, x: 0, scale: 1, filter: "blur(0px)", duration: 0.64 }, "-=0.4")
-        .to(formItems, { opacity: 1, y: 0, duration: 0.34, stagger: 0.055 }, "-=0.32");
+      tl.to(backRef.current, { opacity: 1, y: 0, duration: 0.28 })
+        .to(eyebrowRef.current, { opacity: 1, y: 0, duration: 0.22 }, "-=0.12")
+        .to(titleLines, { opacity: 1, y: 0, duration: 0.34, stagger: 0.05 }, "-=0.05")
+        .to(descRef.current, { opacity: 1, y: 0, duration: 0.26 }, "-=0.14")
+        .to(statusCardRef.current, { opacity: 1, y: 0, duration: 0.26 }, "-=0.12")
+        .to(authCardRef.current, { opacity: 1, x: 0, scale: 1, filter: "blur(0px)", duration: 0.38 }, "-=0.24")
+        .to(formItems, { opacity: 1, y: 0, duration: 0.22, stagger: 0.035 }, "-=0.2");
     }, pageRef);
 
     return () => ctx.revert();
@@ -135,6 +145,9 @@ export function AuthPage({ mode }: AuthPageProps) {
   }, [loginMethod, isResetMode, mode]);
 
   async function requestCode() {
+    if (authActionInFlightRef.current || isRequestingCode || isSubmitting) {
+      return;
+    }
     const normalizedEmail = normalizeEmail(email);
     if (!normalizedEmail) {
       setMessage("请先填写邮箱");
@@ -144,48 +157,69 @@ export function AuthPage({ mode }: AuthPageProps) {
       setMessage(`验证码已发送, ${codeCooldownSeconds} 秒后可以重新获取`);
       return;
     }
+    const captchaToken = hCaptchaTokenForRequest(captchaState);
+    if (captchaToken === null) {
+      setMessage("请先完成人机验证，再获取邮箱验证码");
+      return;
+    }
 
+    authActionInFlightRef.current = true;
     setIsRequestingCode(true);
     setMessage("正在发送验证码...");
-    let response: Response;
     try {
-      response = await fetch("/api/auth/email-code/request", {
+      const response = await fetch("/api/auth/email-code/request", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail }),
+        body: JSON.stringify({ email: normalizedEmail, captcha_token: captchaToken }),
       });
-    } catch {
-      setIsRequestingCode(false);
-      setMessage("网络连接异常, 请稍后再试");
-      return;
-    }
-    const data = await parseAuthResponse(response);
-    setIsRequestingCode(false);
+      const data = await parseAuthResponse(response);
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        const retryAfter = retryAfterSeconds(response, CODE_REQUEST_COOLDOWN_SECONDS);
-        startCodeCooldown(retryAfter);
-        setMessage(`获取太频繁, 请 ${retryAfter} 秒后再试`);
+      if (!response.ok) {
+        if (response.status === 429) {
+          const retryAfter = retryAfterSeconds(response, CODE_REQUEST_COOLDOWN_SECONDS);
+          startCodeCooldown(retryAfter);
+          setMessage(`获取太频繁, 请 ${retryAfter} 秒后再试`);
+          return;
+        }
+        const errorMessage = getApiErrorMessage(data, "请稍后再试");
+        setMessage(`验证码发送失败: ${errorMessage}`);
         return;
       }
-      const errorMessage = getApiErrorMessage(data, "请稍后再试");
-      setMessage(`验证码发送失败: ${errorMessage}`);
-      return;
-    }
 
-    setCode(data.dev_code ?? "");
-    startCodeCooldown(CODE_REQUEST_COOLDOWN_SECONDS);
-    setMessage(data.dev_code ? `开发验证码: ${data.dev_code}` : "验证码已发送, 5 分钟内有效, 请查看邮箱");
+      setCode(data.dev_code ?? "");
+      startCodeCooldown(CODE_REQUEST_COOLDOWN_SECONDS);
+      setMessage(data.dev_code ? `开发验证码: ${data.dev_code}` : "验证码已发送, 5 分钟内有效, 请查看邮箱");
+    } catch {
+      setMessage("网络连接异常, 请稍后再试");
+    } finally {
+      setIsRequestingCode(false);
+      authActionInFlightRef.current = false;
+      captchaRef.current?.reset();
+    }
   }
 
   async function submitForm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (mode === "login" && isResetMode) {
-      await submitPasswordReset();
+    if (authActionInFlightRef.current || isSubmitting || isRequestingCode) {
       return;
     }
+    if (mode === "login" && isResetMode) {
+      authActionInFlightRef.current = true;
+      try {
+        await submitPasswordReset();
+      } finally {
+        authActionInFlightRef.current = false;
+      }
+      return;
+    }
+    const requiresCaptcha = mode === "login" && loginMethod === "password";
+    const captchaToken = requiresCaptcha ? hCaptchaTokenForRequest(captchaState) : "";
+    if (requiresCaptcha && captchaToken === null) {
+      setMessage("请先完成人机验证，再使用密码登录");
+      return;
+    }
+    authActionInFlightRef.current = true;
     setIsSubmitting(true);
     setMessage("正在验证账户信息...");
 
@@ -199,35 +233,37 @@ export function AuthPage({ mode }: AuthPageProps) {
       mode === "register"
         ? { email: normalizeEmail(email), password, code }
         : loginMethod === "password"
-          ? { email: normalizeEmail(email), password }
+          ? { email: normalizeEmail(email), password, captcha_token: captchaToken }
           : { email: normalizeEmail(email), code };
 
-    let response: Response;
     try {
-      response = await fetch(endpoint, {
+      const response = await fetch(endpoint, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      const data = await parseAuthResponse(response);
+
+      if (!response.ok || !data.email) {
+        const errorMessage = getApiErrorMessage(data, "请检查输入信息");
+        setMessage(`认证失败: ${errorMessage}`);
+        return;
+      }
+
+      setMessage("认证成功, 正在进入训练空间");
+      window.setTimeout(() => {
+        window.location.href = "/interview";
+      }, 350);
     } catch {
-      setIsSubmitting(false);
       setMessage("网络连接异常, 请稍后再试");
-      return;
+    } finally {
+      setIsSubmitting(false);
+      authActionInFlightRef.current = false;
+      if (requiresCaptcha) {
+        captchaRef.current?.reset();
+      }
     }
-    const data = await parseAuthResponse(response);
-    setIsSubmitting(false);
-
-    if (!response.ok || !data.access_token) {
-      const errorMessage = getApiErrorMessage(data, "请检查输入信息");
-      setMessage(`认证失败: ${errorMessage}`);
-      return;
-    }
-
-    setMessage("认证成功, 正在进入训练空间");
-    window.setTimeout(() => {
-      window.location.href = "/interview";
-    }, 350);
   }
 
   async function submitPasswordReset() {
@@ -279,7 +315,9 @@ export function AuthPage({ mode }: AuthPageProps) {
   }
 
   const codeButtonText = isRequestingCode ? "发送中" : codeCooldownSeconds > 0 ? `${codeCooldownSeconds}s` : "获取";
-  const codeButtonDisabled = isRequestingCode || codeCooldownSeconds > 0;
+  const captchaToken = hCaptchaTokenForRequest(captchaState);
+  const codeButtonDisabled = isRequestingCode || isSubmitting || codeCooldownSeconds > 0 || captchaToken === null;
+  const passwordLoginRequiresCaptcha = mode === "login" && !isResetMode && loginMethod === "password";
   const authTitleLines = mode === "login" ? ["欢迎来到面霸", "练习生"] : ["创建练习生", "账户"];
   const statusItems = [
     { icon: "lucide:mic-2", label: "语音模拟面试" },
@@ -288,23 +326,23 @@ export function AuthPage({ mode }: AuthPageProps) {
   ];
 
   return (
-    <main className="auth-page" ref={pageRef}>
-      <div className="auth-ambient" aria-hidden="true">
-        <span ref={(node) => { glowRefs.current[0] = node; }} className="auth-glow auth-glow-blue" />
-        <span ref={(node) => { glowRefs.current[1] = node; }} className="auth-glow auth-glow-lime" />
-        <span ref={(node) => { glowRefs.current[2] = node; }} className="auth-glow auth-glow-fog" />
+    <main className={authClasses("auth-page")} ref={pageRef}>
+      <div className={authClasses("auth-ambient")} aria-hidden="true">
+        <span ref={(node) => { glowRefs.current[0] = node; }} className={authClasses("auth-glow auth-glow-blue")} />
+        <span ref={(node) => { glowRefs.current[1] = node; }} className={authClasses("auth-glow auth-glow-lime")} />
+        <span ref={(node) => { glowRefs.current[2] = node; }} className={authClasses("auth-glow auth-glow-fog")} />
       </div>
-      <a className="back-link auth-anim-back" href="/" ref={backRef}>
+      <a className={authClasses("back-link auth-anim-back")} href="/" ref={backRef}>
         <AppIcon icon="lucide:arrow-left" size={18} />
         返回首页
       </a>
-      <section className="auth-shell">
-        <div className="auth-narrative">
-          <span className="eyebrow" ref={eyebrowRef}>Secure Practice</span>
-          <h1 className="auth-title-login">
+      <section className={authClasses("auth-shell")}>
+        <div className={authClasses("auth-narrative")}>
+          <span className={authClasses("eyebrow")} ref={eyebrowRef}>Secure Practice</span>
+          <h1 className={authClasses("auth-title-login")}>
             {authTitleLines.map((line, index) => (
               <span
-                className="auth-title-line"
+                className={authClasses("auth-title-line")}
                 key={line}
                 ref={(node) => {
                   titleLineRefs.current[index] = node;
@@ -315,7 +353,7 @@ export function AuthPage({ mode }: AuthPageProps) {
             ))}
           </h1>
           <p ref={descRef}>使用邮箱进入训练空间, 完成语音模拟, 查看复盘报告, 也可以回到未完成的训练继续推进</p>
-          <div className="auth-status-card" ref={statusCardRef} aria-label="训练能力状态">
+          <div className={authClasses("auth-status-card")} ref={statusCardRef} aria-label="训练能力状态">
             {statusItems.map((item) => (
               <span key={item.label}>
                 <AppIcon icon={item.icon} size={18} />
@@ -325,24 +363,24 @@ export function AuthPage({ mode }: AuthPageProps) {
           </div>
         </div>
 
-        <form className="auth-card auth-glass-card" onSubmit={submitForm} ref={authCardRef}>
-          <div className="auth-card-heading auth-anim-field">
+        <form className={authClasses("auth-card auth-glass-card")} onSubmit={submitForm} ref={authCardRef}>
+          <div className={authClasses("auth-card-heading auth-anim-field")}>
             <span>{mode === "login" ? (isResetMode ? "重置密码" : "登录") : "注册"}</span>
             {mode === "login" && isResetMode ? (
-              <button type="button" className="auth-heading-link" onClick={closeResetMode}>返回登录</button>
+              <button type="button" className={authClasses("auth-heading-link")} onClick={closeResetMode}>返回登录</button>
             ) : (
               <a href={mode === "login" ? "/register" : "/login"}>{mode === "login" ? "创建账户" : "已有账户"}</a>
             )}
           </div>
 
           {mode === "login" && !isResetMode && (
-            <div className="auth-segmented-control auth-anim-field" role="tablist" aria-label="登录方式">
-              <span className="auth-tab-indicator" ref={tabIndicatorRef} aria-hidden="true" />
+            <div className={authClasses("auth-segmented-control auth-anim-field")} role="tablist" aria-label="登录方式">
+              <span className={authClasses("auth-tab-indicator")} ref={tabIndicatorRef} aria-hidden="true" />
               <button
                 type="button"
                 role="tab"
                 aria-selected={loginMethod === "password"}
-                className={loginMethod === "password" ? "is-active" : ""}
+                className={authClasses(loginMethod === "password" && "is-active")}
                 onClick={() => setLoginMethod("password")}
               >
                 密码登录
@@ -351,7 +389,7 @@ export function AuthPage({ mode }: AuthPageProps) {
                 type="button"
                 role="tab"
                 aria-selected={loginMethod === "code"}
-                className={loginMethod === "code" ? "is-active" : ""}
+                className={authClasses(loginMethod === "code" && "is-active")}
                 onClick={() => setLoginMethod("code")}
               >
                 验证码登录
@@ -359,26 +397,26 @@ export function AuthPage({ mode }: AuthPageProps) {
             </div>
           )}
 
-          <div className="auth-form-body" ref={formBodyRef}>
-            <label className="auth-anim-field">
+          <div className={authClasses("auth-form-body")} ref={formBodyRef}>
+            <label className={authClasses("auth-anim-field")}>
               邮箱
-              <div className="input-shell">
+              <div className={authClasses("input-shell")}>
                 <AppIcon icon="lucide:mail" size={18} />
                 <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required />
               </div>
             </label>
 
             {(mode === "register" || isResetMode) && (
-              <label className="auth-anim-field">
+              <label className={authClasses("auth-anim-field")}>
                 验证码
-                <div className="code-row">
-                  <div className="input-shell">
+                <div className={authClasses("code-row")}>
+                  <div className={authClasses("input-shell")}>
                     <AppIcon icon="lucide:key-round" size={18} />
                     <input value={code} onChange={(event) => setCode(event.target.value)} placeholder="6 位验证码" minLength={6} maxLength={6} required />
                   </div>
                   <Button
                     type="button"
-                    className="code-button"
+                    className={authClasses("code-button")}
                     fill="outline"
                     shape="rounded"
                     loading={isRequestingCode}
@@ -392,9 +430,9 @@ export function AuthPage({ mode }: AuthPageProps) {
             )}
 
             {(mode === "register" || loginMethod === "password" || isResetMode) && (
-              <label className="auth-anim-field">
+              <label className={authClasses("auth-anim-field")}>
                 {isResetMode ? "新密码" : "密码"}
-                <div className="input-shell">
+                <div className={authClasses("input-shell")}>
                   <AppIcon icon="lucide:key-round" size={18} />
                   <input
                     type="password"
@@ -409,16 +447,16 @@ export function AuthPage({ mode }: AuthPageProps) {
             )}
 
             {mode === "login" && !isResetMode && loginMethod === "code" && (
-              <label className="auth-anim-field">
+              <label className={authClasses("auth-anim-field")}>
                 验证码
-                <div className="code-row">
-                  <div className="input-shell">
+                <div className={authClasses("code-row")}>
+                  <div className={authClasses("input-shell")}>
                     <AppIcon icon="lucide:key-round" size={18} />
                     <input value={code} onChange={(event) => setCode(event.target.value)} placeholder="6 位验证码" minLength={6} maxLength={6} required />
                   </div>
                   <Button
                     type="button"
-                    className="code-button"
+                    className={authClasses("code-button")}
                     fill="outline"
                     shape="rounded"
                     loading={isRequestingCode}
@@ -432,15 +470,33 @@ export function AuthPage({ mode }: AuthPageProps) {
             )}
 
             {mode === "login" && !isResetMode && loginMethod === "password" && (
-              <div className="auth-inline-actions auth-anim-field">
+              <div className={authClasses("auth-inline-actions auth-anim-field")}>
                 <button type="button" onClick={openResetMode}>忘记密码?</button>
               </div>
             )}
 
-            <Button className="auth-submit auth-anim-field" color="primary" loading={isSubmitting} shape="rounded" disabled={isSubmitting} type="submit" block>
+            <HCaptchaChallenge
+              ref={captchaRef}
+              label={passwordLoginRequiresCaptcha ? "登录安全验证" : "验证码发送安全验证"}
+              onStateChange={setCaptchaState}
+            />
+
+            <Button
+              className={authClasses("auth-submit auth-anim-field")}
+              color="primary"
+              loading={isSubmitting}
+              shape="rounded"
+              disabled={
+                isSubmitting
+                || isRequestingCode
+                || (passwordLoginRequiresCaptcha && captchaToken === null)
+              }
+              type="submit"
+              block
+            >
               {isSubmitting ? "处理中" : mode === "login" ? (isResetMode ? "重置密码" : "进入账户") : "完成注册"}
             </Button>
-            <p className="auth-message auth-anim-field" role="status" aria-live="polite">{message}</p>
+            <p className={authClasses("auth-message auth-anim-field")} role="status" aria-live="polite">{message}</p>
           </div>
         </form>
       </section>

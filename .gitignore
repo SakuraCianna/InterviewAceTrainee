@@ -1,17 +1,11 @@
-.venv/
-Backend/.venv/
-Backend/.uv-cache/
-__pycache__/
-.ruff_cache/
-.mypy_cache/
-*.pyc
-
 Frontend/node_modules/
 Frontend/dist/
 Frontend/.vite/
 Frontend/*.tsbuildinfo
 
 database_backups/
+secrets/
+runtime-config/
 nginx/certs/
 nginx/*.key
 nginx/*.csr
@@ -20,3 +14,8 @@ nginx/*.pem
 
 .env
 .env.*
+!/.env.example
+# 生产 secret 仅保存在目标服务器，禁止进入 Git。
+deploy/secrets/
+deploy/certs/
+*.secret

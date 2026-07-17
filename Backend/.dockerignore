@@ -1,8 +1,10 @@
-.venv
-.uv-cache
-.ruff_cache
-__pycache__
-*.pyc
-database_backups
+target
+src/test
+*.log
+.idea
+.vscode
+.classpath
+.project
+.settings
 .env
 .env.*

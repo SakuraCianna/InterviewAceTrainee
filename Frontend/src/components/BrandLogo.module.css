@@ -1,0 +1,6 @@
+/* 品牌图标自身的稳定视觉约束，尺寸由组件属性控制。 */
+.logo {
+  display: block;
+  flex: 0 0 auto;
+  object-fit: contain;
+}

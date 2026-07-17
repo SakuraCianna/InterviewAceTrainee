@@ -1,130 +1,477 @@
 name: mianba
 
+# 生产 Compose 只消费 CI 预构建镜像。真实凭据来自服务器本地 secret 文件，
+# 不进入环境变量、Git 仓库、镜像层或 docker inspect 输出。
 x-logging: &default-logging
   driver: json-file
   options:
-    max-size: "100m"
+    max-size: "10m"
     max-file: "3"
+
+x-java-security: &java-security
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=96m,mode=1777
+  pids_limit: 256
+  logging: *default-logging
 
 services:
   postgres:
-    image: pgvector/pgvector:pg18
-    container_name: mianba-postgres
+    image: pgvector/pgvector:0.8.5-pg18-bookworm@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0
     restart: unless-stopped
     environment:
-      POSTGRES_DB: mianba
-      POSTGRES_USER: mianba
-      POSTGRES_PASSWORD: mianba
-      PGDATA: /var/lib/postgresql/data
+      POSTGRES_DB: mianba_prod
+      POSTGRES_USER: mianba_owner
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_owner_password
+    secrets:
+      - postgres_owner_password
+      - postgres_api_password
+      - postgres_worker_password
+    command:
+      - postgres
+      - -c
+      - max_connections=40
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - wal_buffers=8MB
+      - -c
+      - log_min_duration_statement=750
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      # PostgreSQL 18 将版本目录置于 /var/lib/postgresql 下。
+      - postgres-data:/var/lib/postgresql
+      - ${MIANBA_RUNTIME_CONFIG_DIR:?MIANBA_RUNTIME_CONFIG_DIR is required}/postgres-init/001-create-app-role.sh:/docker-entrypoint-initdb.d/001-create-app-role.sh:ro
+    networks:
+      - data
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /var/run/postgresql:size=8m,mode=3777
+    security_opt:
+      - no-new-privileges:true
+    shm_size: 128m
+    mem_limit: 960m
+    memswap_limit: 1152m
+    cpus: "1.10"
+    pids_limit: 192
+    stop_grace_period: 60s
     logging: *default-logging
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mianba -d mianba"]
+      test: ["CMD-SHELL", "pg_isready -q -U mianba_owner -d mianba_prod"]
       interval: 10s
       timeout: 5s
-      retries: 5
-
-  redis:
-    image: redis:8-alpine
-    container_name: mianba-redis
-    restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - redis-data:/data
-    logging: *default-logging
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  backend:
-    build:
-      context: ./Backend
-    image: mianba-backend:local
-    container_name: mianba-backend
-    restart: unless-stopped
-    env_file:
-      - ./Backend/.env
-    environment:
-      APP_ENV: production
-      DATABASE_URL: postgresql+psycopg://mianba:mianba@postgres:5432/mianba
-      REDIS_URL: redis://redis:6379/0
-      AUTH_COOKIE_SECURE: "true"
-      EXPOSE_DEV_EMAIL_CODES: "false"
-      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
-      UVICORN_LIMIT_CONCURRENCY: ${UVICORN_LIMIT_CONCURRENCY:-800}
-      DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-8}
-      DATABASE_MAX_OVERFLOW: ${DATABASE_MAX_OVERFLOW:-4}
-      DATABASE_POOL_TIMEOUT_SECONDS: ${DATABASE_POOL_TIMEOUT_SECONDS:-5}
-      DATABASE_POOL_RECYCLE_SECONDS: ${DATABASE_POOL_RECYCLE_SECONDS:-1800}
-      LLM_CONCURRENCY_LIMIT: ${LLM_CONCURRENCY_LIMIT:-24}
-      LLM_CAPACITY_LEASE_SECONDS: ${LLM_CAPACITY_LEASE_SECONDS:-45}
-      REALTIME_ASR_CONCURRENCY_LIMIT: ${REALTIME_ASR_CONCURRENCY_LIMIT:-80}
-      REALTIME_ASR_CAPACITY_LEASE_SECONDS: ${REALTIME_ASR_CAPACITY_LEASE_SECONDS:-420}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./database_backups:/app/database_backups
-    logging: *default-logging
-    expose:
-      - "8000"
+      retries: 10
+      start_period: 30s
 
   migrate:
-    build:
-      context: ./Backend
-    image: mianba-backend:local
-    container_name: mianba-migrate
+    image: ${MIANBA_APP_IMAGE:?MIANBA_APP_IMAGE is required}
     restart: "no"
-    profiles:
-      - migrate
-    env_file:
-      - ./Backend/.env
     environment:
-      DATABASE_URL: postgresql+psycopg://mianba:mianba@postgres:5432/mianba
-      REDIS_URL: redis://redis:6379/0
+      MIANBA_RUNTIME_ROLE: migrate
+      MIANBA_RUNTIME_PRODUCTION: "true"
+      SPRING_PROFILES_ACTIVE: production
+      SPRING_MAIN_WEB_APPLICATION_TYPE: none
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/mianba_prod
+      SPRING_DATASOURCE_USERNAME: mianba_owner
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "2"
+      SPRING_FLYWAY_ENABLED: "true"
+      JAVA_TOOL_OPTIONS: >-
+        -Xms64m -Xmx192m -XX:MaxMetaspaceSize=128m -XX:+UseG1GC
+        -XX:+ExitOnOutOfMemoryError -Djava.io.tmpdir=/tmp
+    secrets:
+      - source: postgres_owner_password
+        target: spring.datasource.password
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - data
+    <<: *java-security
+    mem_limit: 320m
+    memswap_limit: 384m
+    cpus: "0.50"
+
+  redis:
+    image: redis:8.8.0-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/opt/mianba/redis-entrypoint.sh"]
+    secrets:
+      - redis_app_password
     volumes:
-      - ./database_backups:/app/database_backups
+      - redis-data:/data
+      - ${MIANBA_RUNTIME_CONFIG_DIR:?MIANBA_RUNTIME_CONFIG_DIR is required}/redis-entrypoint.sh:/opt/mianba/redis-entrypoint.sh:ro
+    networks:
+      - data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+      - /run/redis:size=2m,mode=0750
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    memswap_limit: 320m
+    cpus: "0.25"
+    pids_limit: 64
+    stop_grace_period: 30s
     logging: *default-logging
-    command: ["python", "-m", "app.cli.safe_migrate"]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - redis-cli --user mianba_app --pass "$$(cat /run/secrets/redis_app_password)" --no-auth-warning ping | grep -q PONG
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  rabbitmq:
+    image: rabbitmq:4.3.2-management@sha256:c1e33461287f4c53049ce525575f0df77b2a00a88e2593776afbb6c1489bdb81
+    restart: unless-stopped
+    environment:
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2 +sbwt none +sbwtdcpu none +sbwtdio none"
+    secrets:
+      - source: rabbitmq_definitions
+        target: rabbitmq-definitions.json
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ${MIANBA_RUNTIME_CONFIG_DIR:?MIANBA_RUNTIME_CONFIG_DIR is required}/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    networks:
+      - data
+    expose:
+      - "5672"
+      - "15672"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /var/log/rabbitmq:size=16m,mode=0755
+      - /etc/rabbitmq/conf.d:size=2m,mode=0755
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 384m
+    memswap_limit: 512m
+    cpus: "0.40"
+    pids_limit: 256
+    stop_grace_period: 60s
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  material-parser:
+    image: ${MIANBA_APP_IMAGE:?MIANBA_APP_IMAGE is required}
+    restart: unless-stopped
+    entrypoint:
+      - java
+      - -Dloader.main=icu.sakuracianna.mianba.interview.material.MaterialParserMain
+      - -jar
+      - /app/app.jar
+    environment:
+      MIANBA_MATERIAL_PARSER_HOST: 0.0.0.0
+      MIANBA_MATERIAL_PARSER_PORT: "8090"
+      MIANBA_MATERIAL_PARSER_PARSE_TIMEOUT_SECONDS: "8"
+      MIANBA_MATERIAL_PARSER_TOKEN_FILE: /run/secrets/material-parser-token
+      JAVA_TOOL_OPTIONS: >-
+        -Xms32m -Xmx96m -XX:MaxMetaspaceSize=64m -XX:ReservedCodeCacheSize=32m
+        -Xss256k -XX:ActiveProcessorCount=1 -XX:+UseSerialGC
+        -XX:+ExitOnOutOfMemoryError -Djava.io.tmpdir=/tmp
+    secrets:
+      - source: material_parser_token
+        target: material-parser-token
+    networks:
+      - data
+    expose:
+      - "8090"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    mem_limit: 256m
+    memswap_limit: 384m
+    cpus: "0.35"
+    pids_limit: 32
+    stop_grace_period: 10s
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8090/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  api:
+    image: ${MIANBA_APP_IMAGE:?MIANBA_APP_IMAGE is required}
+    restart: unless-stopped
+    environment:
+      MIANBA_RUNTIME_ROLE: api
+      MIANBA_RUNTIME_PRODUCTION: "true"
+      SPRING_PROFILES_ACTIVE: production
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      SERVER_PORT: "8000"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/mianba_prod
+      SPRING_DATASOURCE_USERNAME: mianba_api
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${API_DB_POOL_SIZE:?API_DB_POOL_SIZE is required}
+      SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: ${API_DB_MIN_IDLE:?API_DB_MIN_IDLE is required}
+      SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT: ${DB_CONNECTION_TIMEOUT_MS:?DB_CONNECTION_TIMEOUT_MS is required}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      SPRING_DATA_REDIS_USERNAME: mianba_app
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: mianba_api
+      SPRING_RABBITMQ_VIRTUAL_HOST: /mianba
+      SPRING_FLYWAY_ENABLED: "false"
+      SPRING_AI_MODEL_CHAT: none
+      SERVER_TOMCAT_THREADS_MAX: ${API_TOMCAT_MAX_THREADS:?API_TOMCAT_MAX_THREADS is required}
+      SERVER_TOMCAT_ACCEPT_COUNT: ${API_TOMCAT_ACCEPT_COUNT:?API_TOMCAT_ACCEPT_COUNT is required}
+      MIANBA_SECURITY_COOKIE_SECURE: "true"
+      MIANBA_CORS_ALLOWED_ORIGINS: ${MIANBA_CORS_ALLOWED_ORIGINS:?MIANBA_CORS_ALLOWED_ORIGINS is required}
+      MIANBA_HCAPTCHA_ENABLED: "true"
+      MIANBA_MATERIAL_PARSER_BASE_URL: http://material-parser:8090
+      MIANBA_MATERIAL_PARSER_CONNECT_TIMEOUT: 2s
+      MIANBA_MATERIAL_PARSER_REQUEST_TIMEOUT: 10s
+      JAVA_TOOL_OPTIONS: >-
+        -Xms128m -Xmx448m -XX:MaxMetaspaceSize=160m -XX:+UseG1GC
+        -XX:+ExitOnOutOfMemoryError -Djava.io.tmpdir=/tmp
+    secrets:
+      - source: postgres_api_password
+        target: spring.datasource.password
+      - source: redis_app_password
+        target: spring.data.redis.password
+      - source: rabbitmq_api_password
+        target: spring.rabbitmq.password
+      - source: jwt_secret
+        target: mianba.security.jwt-secret
+      - source: resend_api_key
+        target: mianba.identity.resend-api-key
+      - source: mail_from
+        target: mianba.identity.mail-from
+      - source: tencent_app_id
+        target: mianba.speech.tencent-app-id
+      - source: tencent_secret_id
+        target: mianba.speech.tencent-secret-id
+      - source: tencent_secret_key
+        target: mianba.speech.tencent-secret-key
+      - source: hcaptcha_site_key
+        target: mianba.hcaptcha.site-key
+      - source: hcaptcha_secret
+        target: mianba.hcaptcha.secret
+      - source: material_parser_token
+        target: material-parser-token
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      material-parser:
+        condition: service_healthy
+    networks:
+      edge:
+        gw_priority: 1
+      data:
+        gw_priority: 0
+    expose:
+      - "8000"
+    <<: *java-security
+    mem_limit: 768m
+    memswap_limit: 1024m
+    cpus: "1.25"
+    stop_grace_period: 45s
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          response_file=$$(mktemp) &&
+          trap 'rm -f -- "$$response_file"' EXIT &&
+          http_status=$$(curl --silent --show-error --max-time 5 --max-filesize 65536
+          --output "$$response_file" --write-out '%{http_code}'
+          http://127.0.0.1:8000/actuator/health/readiness) &&
+          test "$$http_status" = '200' &&
+          grep -Eq '"status"[[:space:]]*:[[:space:]]*"UP"' "$$response_file"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  worker:
+    image: ${MIANBA_APP_IMAGE:?MIANBA_APP_IMAGE is required}
+    restart: unless-stopped
+    environment:
+      MIANBA_RUNTIME_ROLE: worker
+      MIANBA_RUNTIME_PRODUCTION: "true"
+      SPRING_PROFILES_ACTIVE: production
+      SPRING_MAIN_WEB_APPLICATION_TYPE: none
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/mianba_prod
+      SPRING_DATASOURCE_USERNAME: mianba_worker
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${WORKER_DB_POOL_SIZE:?WORKER_DB_POOL_SIZE is required}
+      SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: ${WORKER_DB_MIN_IDLE:?WORKER_DB_MIN_IDLE is required}
+      SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT: ${DB_CONNECTION_TIMEOUT_MS:?DB_CONNECTION_TIMEOUT_MS is required}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: mianba_worker
+      SPRING_RABBITMQ_VIRTUAL_HOST: /mianba
+      SPRING_RABBITMQ_LISTENER_SIMPLE_CONCURRENCY: ${WORKER_CONSUMER_CONCURRENCY:?WORKER_CONSUMER_CONCURRENCY is required}
+      SPRING_RABBITMQ_LISTENER_SIMPLE_MAX_CONCURRENCY: ${WORKER_CONSUMER_MAX_CONCURRENCY:?WORKER_CONSUMER_MAX_CONCURRENCY is required}
+      SPRING_RABBITMQ_LISTENER_SIMPLE_PREFETCH: "1"
+      SPRING_RABBITMQ_LISTENER_SIMPLE_ACKNOWLEDGE_MODE: manual
+      SPRING_FLYWAY_ENABLED: "false"
+      SPRING_AI_MODEL_CHAT: deepseek
+      JAVA_TOOL_OPTIONS: >-
+        -Xms96m -Xmx352m -XX:MaxMetaspaceSize=144m -XX:+UseG1GC
+        -XX:+ExitOnOutOfMemoryError -Djava.io.tmpdir=/tmp
+    secrets:
+      - source: postgres_worker_password
+        target: spring.datasource.password
+      - source: rabbitmq_worker_password
+        target: spring.rabbitmq.password
+      - source: deepseek_api_key
+        target: spring.ai.deepseek.api-key
+    depends_on:
+      api:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      data:
+        gw_priority: 0
+      egress:
+        gw_priority: 1
+    <<: *java-security
+    mem_limit: 640m
+    memswap_limit: 896m
+    cpus: "0.75"
+    pids_limit: 192
+    stop_grace_period: 60s
 
   frontend:
-    build:
-      context: ./Frontend
-      args:
-        VITE_ADMIN_ENTRY_PATH: /sakuracianna
-        VITE_ICP_NUMBER: ${VITE_ICP_NUMBER:-湘ICP备2025151258号-1}
-        VITE_POLICE_RECORD_NUMBER: ${VITE_POLICE_RECORD_NUMBER:-}
-    container_name: mianba-frontend
+    image: ${MIANBA_FRONTEND_IMAGE:?MIANBA_FRONTEND_IMAGE is required}
     restart: unless-stopped
-    logging: *default-logging
+    networks:
+      - edge
     expose:
       - "80"
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=16m,mode=0755
+      - /var/run:size=2m,mode=0755
+      - /tmp:size=8m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+    memswap_limit: 96m
+    cpus: "0.10"
+    pids_limit: 64
+    stop_grace_period: 20s
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   nginx:
-    image: nginx:1.29-alpine
-    container_name: mianba-nginx
+    image: nginx:1.29.7-alpine@sha256:e7257f1ef28ba17cf7c248cb8ccf6f0c6e0228ab9c315c152f9c203cd34cf6d1
     restart: unless-stopped
     depends_on:
-      - backend
-      - frontend
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./nginx/main.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./nginx/sakuracianna.icu_bundle.pem:/etc/nginx/certs/sakuracianna.icu_bundle.pem:ro
-      - ./nginx/sakuracianna.icu.key:/etc/nginx/certs/sakuracianna.icu.key:ro
+      - ./nginx/security-headers.conf:/etc/nginx/snippets/security-headers.conf:ro
+      - ${MIANBA_CERTS_DIR:?MIANBA_CERTS_DIR is required}/sakuracianna.icu_bundle.pem:/etc/nginx/certs/sakuracianna.icu_bundle.pem:ro
+      - ${MIANBA_CERTS_DIR:?MIANBA_CERTS_DIR is required}/sakuracianna.icu.key:/etc/nginx/certs/sakuracianna.icu.key:ro
+    networks:
+      - edge
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=24m,mode=0755
+      - /var/run:size=2m,mode=0755
+      - /tmp:size=8m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+    memswap_limit: 96m
+    cpus: "0.10"
+    pids_limit: 64
+    stop_grace_period: 20s
     logging: *default-logging
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  edge:
+    driver: bridge
+  data:
+    driver: bridge
+    internal: true
+  egress:
+    driver: bridge
 
 volumes:
   postgres-data:
+    name: mianba-postgres-data
   redis-data:
+    name: mianba-redis-data
+  rabbitmq-data:
+    name: mianba-rabbitmq-data
+
+secrets:
+  postgres_owner_password:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/postgres_owner_password
+  postgres_api_password:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/postgres_api_password
+  postgres_worker_password:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/postgres_worker_password
+  redis_app_password:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/redis_app_password
+  rabbitmq_api_password:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/rabbitmq_api_password
+  rabbitmq_worker_password:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/rabbitmq_worker_password
+  rabbitmq_definitions:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/rabbitmq-definitions.json
+  jwt_secret:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/jwt_secret
+  deepseek_api_key:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/deepseek_api_key
+  resend_api_key:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/resend_api_key
+  mail_from:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/mail_from
+  tencent_app_id:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/tencent_app_id
+  tencent_secret_id:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/tencent_secret_id
+  tencent_secret_key:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/tencent_secret_key
+  hcaptcha_site_key:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/hcaptcha-site-key
+  hcaptcha_secret:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/hcaptcha-secret
+  material_parser_token:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/material-parser-token

@@ -1,2 +1,0 @@
-"""Mianba backend package."""
-

@@ -31,13 +31,20 @@ export type InterviewStateResponse = {
   current_step_index: number;
   total_steps: number;
   current_question: InterviewQuestion | null;
+  active_task?: import("../../lib/api").AiTask | null;
   report: InterviewReport | null;
-  balance_after?: number;
-  voucher_applied?: boolean;
-  voucher_id?: string | null;
+  expires_at?: string | null;
   detail?: string;
   message?: string;
 };
+
+export type InterviewAnswerTaskResponse = {
+  request_id?: string;
+  session?: InterviewStateResponse;
+  task: import("../../lib/api").AiTask;
+};
+
+export type InterviewAnswerResponse = InterviewStateResponse | InterviewAnswerTaskResponse;
 
 export type CurrentUserResponse = {
   email: string;
@@ -115,4 +122,25 @@ export type ApiPayload = {
   detail?: string;
   message?: string;
   dev_code?: string;
+};
+
+export type PackageStage = {
+  stage_code: "TECHNICAL_FIRST" | "TECHNICAL_SECOND" | "HR_FINAL";
+  sequence: number;
+  status: "LOCKED" | "UNLOCKED" | "IN_PROGRESS" | "COMPLETED" | "EXPIRED" | "CANCELLED";
+  session_id: string | null;
+  min_turns: number;
+  max_turns: number;
+  target_duration_minutes: number;
+  required_sections: string[];
+};
+
+export type InterviewPackage = {
+  package_id: string;
+  status: "ACTIVE" | "COMPLETED" | "EXPIRED" | "CANCELLED";
+  current_stage_code: "TECHNICAL_FIRST" | "TECHNICAL_SECOND" | "HR_FINAL";
+  charged_credit: number;
+  admin_unlimited_usage: boolean;
+  expires_at: string;
+  stages: PackageStage[];
 };

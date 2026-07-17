@@ -17,7 +17,8 @@ export type ProviderConfig = {
 };
 
 export type AdminLoginResponse = {
-  access_token?: string;
+  email?: string;
+  role?: string;
   detail?: string;
   message?: string;
   dev_code?: string;
@@ -70,7 +71,7 @@ export type AICallLogEntry = {
   audio_duration_ms?: number | null;
   characters?: number | null;
   estimated_cost_cents?: number | null;
-  error_message?: string | null;
+  error_code?: string | null;
   created_at: string;
 };
 
@@ -135,6 +136,15 @@ export type AdminUserSearchItem = {
   total_interviews: number;
   completed_interviews: number;
   last_interview_at?: string | null;
+};
+
+export type AdminUserListResponse = {
+  items: AdminUserSearchItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  total_is_estimated: boolean;
 };
 
 export type AdminInterviewHistoryItem = {
@@ -279,4 +289,4 @@ export type AdminDashboardStats = {
   top_users: AdminTopUserUsage[];
 };
 
-export type AdminSectionKey = "overview" | "credits" | "users" | "ai" | "system" | "audit";
+export type AdminSectionKey = "overview" | "users" | "credits" | "quality" | "ai" | "audit" | "system";
