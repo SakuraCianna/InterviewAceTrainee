@@ -88,13 +88,13 @@ const interviewTypeLabels: Record<string, string> = {
 };
 
 const adminSectionNavItems: { key: AdminSectionKey; label: string; icon: string }[] = [
-  { key: "overview", label: "今日工作台", icon: "material-symbols:grid-view-rounded" },
-  { key: "users", label: "用户中心", icon: "material-symbols:group-rounded" },
-  { key: "credits", label: "权益售后", icon: "material-symbols:support-agent-rounded" },
-  { key: "quality", label: "面试质量", icon: "material-symbols:analytics-rounded" },
-  { key: "ai", label: "AI 健康", icon: "material-symbols:monitor-heart-rounded" },
-  { key: "audit", label: "风控审计", icon: "material-symbols:security-rounded" },
-  { key: "system", label: "配置中心", icon: "material-symbols:tune-rounded" },
+  { key: "overview", label: "今日工作台", icon: "lucide:layout-dashboard" },
+  { key: "users", label: "用户中心", icon: "lucide:users" },
+  { key: "credits", label: "权益售后", icon: "lucide:headphones" },
+  { key: "quality", label: "面试质量", icon: "lucide:bar-chart-2" },
+  { key: "ai", label: "AI 健康", icon: "lucide:activity" },
+  { key: "audit", label: "风控审计", icon: "lucide:shield-check" },
+  { key: "system", label: "配置中心", icon: "lucide:settings-2" },
 ];
 
 const creditReasonOptions = [
