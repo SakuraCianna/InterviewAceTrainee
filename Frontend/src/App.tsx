@@ -1,6 +1,14 @@
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { productConfig } from "./config/productConfig";
+import { CSRF_COOKIE_NAME, getCookie } from "./lib/api";
+
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  if (!getCookie(CSRF_COOKIE_NAME)) {
+    return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
+}
 
 const AdminShell = lazy(() => import("./pages/admin/AdminShell").then((module) => ({ default: module.AdminShell })));
 const AuthPage = lazy(() => import("./pages/AuthPage").then((module) => ({ default: module.AuthPage })));
@@ -15,9 +23,9 @@ export default function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<AuthPage mode="login" />} />
         <Route path="/register" element={<AuthPage mode="register" />} />
-        <Route path="/interview" element={<InterviewRoom />} />
-        <Route path="/interview/check" element={<InterviewRoom />} />
-        <Route path="/interview/room" element={<InterviewRoom />} />
+        <Route path="/interview" element={<RequireAuth><InterviewRoom /></RequireAuth>} />
+        <Route path="/interview/check" element={<RequireAuth><InterviewRoom /></RequireAuth>} />
+        <Route path="/interview/room" element={<RequireAuth><InterviewRoom /></RequireAuth>} />
         <Route path={productConfig.adminEntryPath} element={<AdminShell />} />
         <Route path="/terms" element={<LegalPage type="terms" />} />
         <Route path="/privacy" element={<LegalPage type="privacy" />} />
