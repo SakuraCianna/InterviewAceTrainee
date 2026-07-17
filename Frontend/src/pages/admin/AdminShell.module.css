@@ -2029,3 +2029,181 @@ body:has(.admin-page--authed) {
     justify-content: flex-start;
   }
 }
+
+/* ─── MD3 Sidebar Additions ──────────────────────────────────── */
+
+/* Brand area: logo + title + subtitle */
+.admin-page.admin-page--authed .admin-sidebar-brand div {
+  display: grid;
+  gap: 1px;
+}
+
+.admin-page.admin-page--authed .admin-sidebar-brand span {
+  color: var(--admin2-text);
+  font-size: 15px;
+  font-weight: 780;
+  line-height: 1.2;
+}
+
+.admin-page.admin-page--authed .admin-sidebar-brand em {
+  color: var(--admin2-muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* Nav section label */
+.admin-sidebar-nav-label {
+  margin: 0 0 4px;
+  padding: 0 16px;
+  color: var(--admin2-subtle);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Nav icon container */
+.admin-sidebar-nav-icon {
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+/* Sidebar spacer to push user section to bottom */
+.admin-sidebar-spacer {
+  flex: 1;
+  min-height: 12px;
+}
+
+/* User identity section (replaces status card) */
+.admin-page.admin-page--authed .admin-sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: var(--admin2-blue-soft);
+}
+
+.admin-page.admin-page--authed .admin-sidebar-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--admin2-blue);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 780;
+  user-select: none;
+}
+
+.admin-page.admin-page--authed .admin-sidebar-user-info {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.admin-page.admin-page--authed .admin-sidebar-user-info strong {
+  display: block;
+  overflow: hidden;
+  color: var(--admin2-blue-strong);
+  font-size: 13px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-page.admin-page--authed .admin-sidebar-user-info span {
+  color: #5f6368;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* ─── MD3 Metric Card Improvements ────────────────────────────── */
+
+.admin2-metric {
+  border-radius: 16px !important;
+  padding: 20px !important;
+  transition: box-shadow 180ms ease, transform 180ms ease;
+}
+
+.admin2-metric:hover {
+  box-shadow: 0 2px 8px rgba(60, 64, 67, 0.18), 0 6px 20px rgba(60, 64, 67, 0.08) !important;
+  transform: translateY(-1px);
+}
+
+.admin2-metric-icon {
+  width: 40px !important;
+  height: 40px !important;
+  border-radius: 12px !important;
+  margin-bottom: 4px;
+}
+
+.admin2-metric strong {
+  font-size: 28px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.5px !important;
+}
+
+.admin2-metric > span:not(.admin2-metric-icon) {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--admin2-muted);
+}
+
+.admin2-metric em {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--admin2-soft);
+  font-size: 11px !important;
+  font-weight: 600 !important;
+}
+
+/* ─── MD3 Panel Improvements ──────────────────────────────────── */
+
+.admin2-panel {
+  border-radius: 16px !important;
+  border-color: var(--admin2-soft-line) !important;
+}
+
+.admin2-panel-head {
+  padding-bottom: 14px !important;
+}
+
+.admin2-panel-head h3 {
+  font-size: 16px !important;
+  font-weight: 700 !important;
+}
+
+/* ─── MD3 Task Item Improvements ─────────────────────────────── */
+
+.admin2-task {
+  border-radius: 12px !important;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.admin2-task:hover {
+  border-color: #a8c7fa !important;
+  background: var(--admin2-blue-soft) !important;
+  transform: translateX(3px);
+}
+
+/* ─── Dashboard grid with side panel ─────────────────────────── */
+@media (min-width: 1280px) {
+  .admin2-grid--dashboard {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .admin2-grid--dashboard .admin2-panel--wide {
+    grid-column: 1 / -1;
+  }
+}
+
