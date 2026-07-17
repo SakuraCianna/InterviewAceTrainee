@@ -502,6 +502,9 @@ export function AdminShell() {
   const [interviewCoreHealthMessage, setInterviewCoreHealthMessage] = useState("面试核心健康检查尚未读取。");
   const [isLoading, setIsLoading] = useState(false);
   const [activeAdminSection, setActiveAdminSection] = useState<AdminSectionKey>("overview");
+  const [creditsSubTab, setCreditsSubTab] = useState<"adjust" | "refunds">("adjust");
+  const [auditSubTab, setAuditSubTab] = useState<"login" | "safety" | "operations">("login");
+  const [auditLoginFilter, setAuditLoginFilter] = useState("");
   const [aiTasks, setAiTasks] = useState<AiTask[]>([]);
   const [areAiTasksLoading, setAreAiTasksLoading] = useState(false);
   const loadedSectionsRef = useRef(new Set<AdminSectionKey>());
@@ -1442,6 +1445,9 @@ export function AdminShell() {
     setRefundAmountYuan("");
     setRefundCreditAdjustment("");
     setRefundSessionId("");
+    setCreditsSubTab("adjust");
+    setAuditSubTab("login");
+    setAuditLoginFilter("");
     setMessage("已退出后台，请重新完成管理员后台登录。");
     window.location.assign("/");
   }
@@ -1772,108 +1778,179 @@ export function AdminShell() {
 
           {activeAdminSection === "credits" && (
             <section className={adminClasses("admin2-section")}>
-              <div className={adminClasses("admin2-grid admin2-grid--ops")}>
-                <form className={adminClasses("admin2-panel admin2-form")} onSubmit={submitCreditGrant}>
-                  <div className={adminClasses("admin2-panel-head")}>
-                    <div>
-                      <h3>次数调整</h3>
-                      <p>用于人工开通、售后补偿、退款退回和余额修正。</p>
-                    </div>
-                  </div>
-                  <label>用户邮箱<input type="email" value={creditUser} onChange={(event) => setCreditUser(event.target.value)} placeholder="user@example.com" required /></label>
-                  <label>次数变化<input type="number" value={creditAmount} onChange={(event) => setCreditAmount(event.target.value)} required /></label>
-                  <div className={adminClasses("admin2-field")}>
-                    <span>调整原因</span>
-                    <AdminSelect ariaLabel="选择次数调整原因" value={creditReason} options={creditReasonOptions} onChange={setCreditReason} />
-                    <small>{selectedCreditReason.help}</small>
-                  </div>
-                  <label>处理备注<input value={creditNote} onChange={(event) => setCreditNote(event.target.value)} placeholder="例如：微信沟通后补发 1 次" maxLength={240} /></label>
-                  <div className={adminClasses("admin2-actions")}>
-                  <button type="submit" className={adminClasses("admin2-primary-button")} disabled={isLocked("credit-adjust")}>
-                    {isLocked("credit-adjust") ? "提交中" : "提交调整"}
+              <div className={adminClasses("admin2-tabs")}>
+                <nav className={adminClasses("admin2-tab-nav")} aria-label="权益售后子功能">
+                  <button
+                    type="button"
+                    className={adminClasses("admin2-tab-button", creditsSubTab === "adjust" && "is-active")}
+                    onClick={() => setCreditsSubTab("adjust")}
+                  >
+                    积分操作
                   </button>
-                    <button type="button" className={adminClasses("admin2-secondary-button")} onClick={() => loadCreditLedger()}>查看流水</button>
-                  </div>
-                </form>
-
-                <form className={adminClasses("admin2-panel admin2-form")} onSubmit={submitVoucherIssue}>
-                  <div className={adminClasses("admin2-panel-head")}>
-                    <div>
-                      <h3>体验券发放</h3>
-                      <p>适合内测激励、客服补偿和活动批次，不改变次数余额。</p>
-                    </div>
-                  </div>
-                  <label className={adminClasses("admin2-check")}><input type="checkbox" checked={voucherAllUsers} onChange={(event) => setVoucherAllUsers(event.target.checked)} />发放给全部启用中的普通用户</label>
-                  <label>用户邮箱<textarea value={voucherEmails} onChange={(event) => setVoucherEmails(event.target.value)} placeholder="多个邮箱可用换行、空格或逗号分隔" disabled={voucherAllUsers} rows={4} /></label>
-                  <label>每人发放张数<input type="number" min={1} max={20} value={voucherQuantity} onChange={(event) => setVoucherQuantity(event.target.value)} required /></label>
-                  <div className={adminClasses("admin2-field")}>
-                    <span>发放原因</span>
-                    <AdminSelect ariaLabel="选择体验券发放原因" value={voucherReason} options={voucherReasonOptions} onChange={setVoucherReason} />
-                    <small>{selectedVoucherReason.help}</small>
-                  </div>
-                  <label>处理备注<input value={voucherNote} onChange={(event) => setVoucherNote(event.target.value)} placeholder="例如：首批内测用户体验券" maxLength={240} /></label>
-                  <button type="submit" className={adminClasses("admin2-primary-button")} disabled={isLocked("voucher-issue")}>
-                    {isLocked("voucher-issue") ? "发放中" : "发放体验券"}
+                  <button
+                    type="button"
+                    className={adminClasses("admin2-tab-button", creditsSubTab === "refunds" && "is-active")}
+                    onClick={() => setCreditsSubTab("refunds")}
+                  >
+                    退款工单
+                    {refundCases.filter((entry) => entry.status === "open" || entry.status === "processing").length > 0 && (
+                      <span className={adminClasses("admin2-tab-badge")}>
+                        {refundCases.filter((entry) => entry.status === "open" || entry.status === "processing").length}
+                      </span>
+                    )}
                   </button>
-                </form>
+                </nav>
 
-                <section className={adminClasses("admin2-panel admin2-form")}>
-                  <div className={adminClasses("admin2-panel-head")}>
-                    <div>
-                      <h3>客服备注</h3>
-                      <p>{selectedUserEmail ? `当前用户：${selectedUserEmail}` : "先在用户中心选择用户，再写入售后备注。"}</p>
-                    </div>
-                  </div>
-                  <form className={adminClasses("admin2-nested-form")} onSubmit={submitCustomerServiceNote}>
-                    <div className={adminClasses("admin2-field")}>
-                      <span>备注类型</span>
-                      <AdminSelect ariaLabel="选择客服备注类型" value={noteCategory} options={noteCategoryOptions} onChange={setNoteCategory} />
-                    </div>
-                    <label>关联训练 ID<input value={noteSessionId} onChange={(event) => setNoteSessionId(event.target.value)} placeholder="可选，复制 session_id" /></label>
-                    <label>沟通内容<textarea value={noteContent} onChange={(event) => setNoteContent(event.target.value)} placeholder="记录用户来源、沟通结论、补偿口径或后续跟进点" rows={5} /></label>
-                    <button
-                      type="submit"
-                      className={adminClasses("admin2-primary-button")}
-                      disabled={Boolean(selectedUserEmail && isLocked(`note-create:${selectedUserEmail}`))}
-                    >
-                      {selectedUserEmail && isLocked(`note-create:${selectedUserEmail}`) ? "保存中" : "保存备注"}
-                    </button>
-                  </form>
-                </section>
+                {creditsSubTab === "adjust" && (
+                  <div className={adminClasses("admin2-grid admin2-grid--ops")}>
+                    <form className={adminClasses("admin2-panel admin2-form")} onSubmit={submitCreditGrant}>
+                      <div className={adminClasses("admin2-panel-head")}>
+                        <div>
+                          <h3>次数调整</h3>
+                          <p>用于人工开通、售后补偿、退款退回和余额修正。</p>
+                        </div>
+                      </div>
+                      <label>用户邮箱<input type="email" value={creditUser} onChange={(event) => setCreditUser(event.target.value)} placeholder="user@example.com" required /></label>
+                      <label>次数变化<input type="number" value={creditAmount} onChange={(event) => setCreditAmount(event.target.value)} required /></label>
+                      <div className={adminClasses("admin2-field")}>
+                        <span>调整原因</span>
+                        <AdminSelect ariaLabel="选择次数调整原因" value={creditReason} options={creditReasonOptions} onChange={setCreditReason} />
+                        <small>{selectedCreditReason.help}</small>
+                      </div>
+                      <label>处理备注<input value={creditNote} onChange={(event) => setCreditNote(event.target.value)} placeholder="例如：微信沟通后补发 1 次" maxLength={240} /></label>
+                      <div className={adminClasses("admin2-actions")}>
+                        <button type="submit" className={adminClasses("admin2-primary-button")} disabled={isLocked("credit-adjust")}>
+                          {isLocked("credit-adjust") ? "提交中" : "提交调整"}
+                        </button>
+                        <button type="button" className={adminClasses("admin2-secondary-button")} onClick={() => loadCreditLedger()}>查看流水</button>
+                      </div>
+                    </form>
 
-                <section className={adminClasses("admin2-panel admin2-form")}>
-                  <div className={adminClasses("admin2-panel-head")}>
-                    <div>
-                      <h3>退款纠纷</h3>
-                      <p>{selectedUserEmail ? "创建后会进入审计与售后队列，仅用于记录和跟进。" : "先在用户中心选择用户，再创建纠纷记录。"}</p>
-                    </div>
+                    <form className={adminClasses("admin2-panel admin2-form")} onSubmit={submitVoucherIssue}>
+                      <div className={adminClasses("admin2-panel-head")}>
+                        <div>
+                          <h3>体验券发放</h3>
+                          <p>适合内测激励、客服补偿和活动批次，不改变次数余额。</p>
+                        </div>
+                      </div>
+                      <label className={adminClasses("admin2-check")}><input type="checkbox" checked={voucherAllUsers} onChange={(event) => setVoucherAllUsers(event.target.checked)} />发放给全部启用中的普通用户</label>
+                      <label>用户邮箱<textarea value={voucherEmails} onChange={(event) => setVoucherEmails(event.target.value)} placeholder="多个邮箱可用换行、空格或逗号分隔" disabled={voucherAllUsers} rows={4} /></label>
+                      <label>每人发放张数<input type="number" min={1} max={20} value={voucherQuantity} onChange={(event) => setVoucherQuantity(event.target.value)} required /></label>
+                      <div className={adminClasses("admin2-field")}>
+                        <span>发放原因</span>
+                        <AdminSelect ariaLabel="选择体验券发放原因" value={voucherReason} options={voucherReasonOptions} onChange={setVoucherReason} />
+                        <small>{selectedVoucherReason.help}</small>
+                      </div>
+                      <label>处理备注<input value={voucherNote} onChange={(event) => setVoucherNote(event.target.value)} placeholder="例如：首批内测用户体验券" maxLength={240} /></label>
+                      <button type="submit" className={adminClasses("admin2-primary-button")} disabled={isLocked("voucher-issue")}>
+                        {isLocked("voucher-issue") ? "发放中" : "发放体验券"}
+                      </button>
+                    </form>
                   </div>
-                  <aside className={adminClasses("admin2-accounting-boundary")} role="note" aria-label="退款工单账务边界">
-                    <strong>账务边界</strong>
-                    <ul>
-                      {REFUND_ACCOUNTING_BOUNDARY_ITEMS.map((item) => <li key={item}>{item}</li>)}
-                    </ul>
-                  </aside>
-                  <form className={adminClasses("admin2-nested-form")} onSubmit={submitRefundCase}>
-                    <div className={adminClasses("admin2-field")}>
-                      <span>原因</span>
-                      <AdminSelect ariaLabel="选择退款纠纷原因" value={refundReason} options={refundReasonOptions} onChange={setRefundReason} />
-                    </div>
-                    <div className={adminClasses("admin2-form-grid")}>
-                      <label>退款金额<input value={refundAmountYuan} onChange={(event) => setRefundAmountYuan(event.target.value)} placeholder="例如 19.90，可空" inputMode="decimal" /></label>
-                      <label>{REFUND_CREDIT_FIELD_LABEL}<input value={refundCreditAdjustment} onChange={(event) => setRefundCreditAdjustment(event.target.value)} placeholder="例如 1，可空" inputMode="numeric" /></label>
-                    </div>
-                    <label>关联训练 ID<input value={refundSessionId} onChange={(event) => setRefundSessionId(event.target.value)} placeholder="可选" /></label>
-                    <label>纠纷描述<textarea value={refundDescription} onChange={(event) => setRefundDescription(event.target.value)} placeholder="记录用户诉求、核对依据、处理口径和下一步动作" rows={5} /></label>
-                    <button
-                      type="submit"
-                      className={adminClasses("admin2-primary-button")}
-                      disabled={Boolean(selectedUserEmail && isLocked(`refund-create:${selectedUserEmail}`))}
-                    >
-                      {selectedUserEmail && isLocked(`refund-create:${selectedUserEmail}`) ? "创建中" : "创建纠纷记录"}
-                    </button>
-                  </form>
-                </section>
+                )}
+
+                {creditsSubTab === "refunds" && (
+                  <div className={adminClasses("admin2-grid admin2-grid--ops")}>
+                    <section className={adminClasses("admin2-panel")}>
+                      <div className={adminClasses("admin2-panel-head")}>
+                        <div>
+                          <h3>退款工单列表</h3>
+                          <p>待处理工单需优先核查训练报告、积分流水和沟通记录。</p>
+                        </div>
+                      </div>
+                      {refundCases.length === 0 ? (
+                        <p className={adminClasses("admin2-empty")}>暂无退款纠纷记录。</p>
+                      ) : (
+                        <div className={adminClasses("admin2-refund-table-panel")}>
+                          <div className={adminClasses("admin2-refund-head")}>
+                            <span>用户</span>
+                            <span>原因</span>
+                            <span>金额</span>
+                            <span>次数</span>
+                            <span>状态</span>
+                            <span>操作</span>
+                          </div>
+                          {refundCases.map((entry) => (
+                            <div className={adminClasses("admin2-refund-row")} key={entry.id}>
+                              <div>
+                                <strong style={{ display: "block", fontSize: "13px", fontWeight: 700, color: "#0f172a" }}>{entry.user_email}</strong>
+
+                                <span style={{ display: "block", fontSize: "11px", color: "#94a3b8" }}>{formatDateTime(entry.created_at)}</span>
+                              </div>
+                              <span style={{ fontSize: "12px", color: "#475569" }}>{businessLabel(entry.reason)}</span>
+                              <span style={{ fontSize: "13px", fontWeight: 680 }}>{formatCents(entry.amount_cents, entry.currency)}</span>
+                              <span style={{ fontSize: "13px", color: "#475569" }}>{entry.credit_adjustment ?? 0}</span>
+                              <StatusChip tone={entry.status === "resolved" ? "good" : entry.status === "rejected" ? "neutral" : "warning"}>
+                                {businessLabel(entry.status)}
+                              </StatusChip>
+                              <div className={adminClasses("admin2-row-actions")}>
+                                <button type="button" disabled={isLocked(`refund-status:${entry.id}`)} onClick={() => void updateRefundCaseStatus(entry, "processing")}>处理中</button>
+                                <button type="button" disabled={isLocked(`refund-status:${entry.id}`)} onClick={() => void updateRefundCaseStatus(entry, "resolved")}>解决</button>
+                                <button type="button" disabled={isLocked(`refund-status:${entry.id}`)} onClick={() => void updateRefundCaseStatus(entry, "rejected")}>驳回</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+
+                    <section className={adminClasses("admin2-panel admin2-form")}>
+                      <div className={adminClasses("admin2-panel-head")}>
+                        <div>
+                          <h3>客服备注</h3>
+                          <p>{selectedUserEmail ? `当前用户：${selectedUserEmail}` : "先在用户中心选择用户，再写入售后备注。"}</p>
+                        </div>
+                      </div>
+                      <form className={adminClasses("admin2-nested-form")} onSubmit={submitCustomerServiceNote}>
+                        <div className={adminClasses("admin2-field")}>
+                          <span>备注类型</span>
+                          <AdminSelect ariaLabel="选择客服备注类型" value={noteCategory} options={noteCategoryOptions} onChange={setNoteCategory} />
+                        </div>
+                        <label>关联训练 ID<input value={noteSessionId} onChange={(event) => setNoteSessionId(event.target.value)} placeholder="可选，复制 session_id" /></label>
+                        <label>沟通内容<textarea value={noteContent} onChange={(event) => setNoteContent(event.target.value)} placeholder="记录用户来源、沟通结论、补偿口径或后续跟进点" rows={4} /></label>
+                        <button
+                          type="submit"
+                          className={adminClasses("admin2-primary-button")}
+                          disabled={Boolean(selectedUserEmail && isLocked(`note-create:${selectedUserEmail}`))}
+                        >
+                          {selectedUserEmail && isLocked(`note-create:${selectedUserEmail}`) ? "保存中" : "保存备注"}
+                        </button>
+                      </form>
+
+                      <div className={adminClasses("admin2-panel-head")} style={{ marginTop: "8px" }}>
+                        <div>
+                          <h3>新建退款纠纷</h3>
+                          <p>{selectedUserEmail ? "创建后进入审计与售后队列。" : "先在用户中心选择用户。"}</p>
+                        </div>
+                      </div>
+                      <aside className={adminClasses("admin2-accounting-boundary")} role="note" aria-label="退款工单账务边界">
+                        <strong>账务边界</strong>
+                        <ul>
+                          {REFUND_ACCOUNTING_BOUNDARY_ITEMS.map((item) => <li key={item}>{item}</li>)}
+                        </ul>
+                      </aside>
+                      <form className={adminClasses("admin2-nested-form")} onSubmit={submitRefundCase}>
+                        <div className={adminClasses("admin2-field")}>
+                          <span>原因</span>
+                          <AdminSelect ariaLabel="选择退款纠纷原因" value={refundReason} options={refundReasonOptions} onChange={setRefundReason} />
+                        </div>
+                        <div className={adminClasses("admin2-form-grid")}>
+                          <label>退款金额<input value={refundAmountYuan} onChange={(event) => setRefundAmountYuan(event.target.value)} placeholder="例如 19.90，可空" inputMode="decimal" /></label>
+                          <label>{REFUND_CREDIT_FIELD_LABEL}<input value={refundCreditAdjustment} onChange={(event) => setRefundCreditAdjustment(event.target.value)} placeholder="例如 1，可空" inputMode="numeric" /></label>
+                        </div>
+                        <label>关联训练 ID<input value={refundSessionId} onChange={(event) => setRefundSessionId(event.target.value)} placeholder="可选" /></label>
+                        <label>纠纷描述<textarea value={refundDescription} onChange={(event) => setRefundDescription(event.target.value)} placeholder="记录用户诉求、核对依据和处理口径" rows={4} /></label>
+                        <button
+                          type="submit"
+                          className={adminClasses("admin2-primary-button")}
+                          disabled={Boolean(selectedUserEmail && isLocked(`refund-create:${selectedUserEmail}`))}
+                        >
+                          {selectedUserEmail && isLocked(`refund-create:${selectedUserEmail}`) ? "创建中" : "创建纠纷记录"}
+                        </button>
+                      </form>
+                    </section>
+                  </div>
+                )}
               </div>
             </section>
           )}
@@ -2027,75 +2104,156 @@ export function AdminShell() {
               <div className={adminClasses("admin2-metrics-grid admin2-metrics-grid--four")}>
                 <MetricCard label="管理员操作" value={auditLogs.length} detail="最近审计日志" icon="lucide:shield-check" />
                 <MetricCard label="登录失败" value={authLoginLogs.filter((entry) => !entry.success).length} detail="最近认证日志" icon="lucide:key-round" tone="warning" />
-                <MetricCard label="内容安全" value={contentSafetyLogs.length} detail="风险观察记录，不自动误杀" icon="lucide:shield-ban" tone="warning" />
+                <MetricCard label="内容安全" value={contentSafetyLogs.length} detail="风险观察记录" icon="lucide:shield-ban" tone="warning" />
                 <MetricCard label="售后纠纷" value={refundCases.filter((entry) => entry.status !== "resolved").length} detail="未解决/处理中" icon="lucide:receipt-text" tone="warning" />
               </div>
-              <div className={adminClasses("admin2-grid admin2-grid--audit")}>
-                <section className={adminClasses("admin2-panel")}>
-                  <div className={adminClasses("admin2-panel-head")}><h3>操作审计</h3></div>
-                  <div className={adminClasses("admin2-log-list")}>
-                    {auditLogs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无后台操作记录。</p>}
-                    {auditLogs.slice(0, 14).map((entry) => (
-                      <article className={adminClasses("admin2-log-row")} key={entry.id}>
-                        <div><strong>{businessLabel(entry.action)}</strong><span>{entry.admin_email} · {businessLabel(entry.target_type)}</span></div>
-                        <span>{entry.target_id}</span>
-                        <small>{formatDateTime(entry.created_at)}</small>
-                      </article>
-                    ))}
+
+              <div className={adminClasses("admin2-tabs")}>
+                <nav className={adminClasses("admin2-tab-nav")} aria-label="风控审计子功能">
+                  <button
+                    type="button"
+                    className={adminClasses("admin2-tab-button", auditSubTab === "login" && "is-active")}
+                    onClick={() => setAuditSubTab("login")}
+                  >
+                    登录日志
+                    {authLoginLogs.filter((e) => !e.success).length > 0 && (
+                      <span className={adminClasses("admin2-tab-badge")}>
+                        {authLoginLogs.filter((e) => !e.success).length}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className={adminClasses("admin2-tab-button", auditSubTab === "safety" && "is-active")}
+                    onClick={() => setAuditSubTab("safety")}
+                  >
+                    内容安全
+                    {contentSafetyLogs.filter((e) => e.risk_level === "high").length > 0 && (
+                      <span className={adminClasses("admin2-tab-badge")}>
+                        {contentSafetyLogs.filter((e) => e.risk_level === "high").length}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className={adminClasses("admin2-tab-button", auditSubTab === "operations" && "is-active")}
+                    onClick={() => setAuditSubTab("operations")}
+                  >
+                    管理操作
+                    <span className={adminClasses("admin2-tab-badge admin2-tab-badge--neutral")}>{auditLogs.length}</span>
+                  </button>
+                </nav>
+
+                {auditSubTab === "login" && (
+                  <section className={adminClasses("admin2-audit-tab-panel")}>
+                    <div className={adminClasses("admin2-panel-head")}>
+                      <div>
+                        <h3>登录日志</h3>
+                        <p>关注异常 IP、验证码失败和管理员账号尝试。</p>
+                      </div>
+                    </div>
+                    <div className={adminClasses("admin2-audit-filter")}>
+                      <input
+                        type="search"
+                        value={auditLoginFilter}
+                        onChange={(e) => setAuditLoginFilter(e.target.value)}
+                        placeholder="按邮箱筛选..."
+                      />
+                      {auditLoginFilter && (
+                        <button type="button" className={adminClasses("admin2-secondary-button")} onClick={() => setAuditLoginFilter("")}>
+                          清除
+                        </button>
+                      )}
+                    </div>
+                    <div className={adminClasses("admin2-log-list")}>
+                      {authLoginLogs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无登录日志。</p>}
+                      {authLoginLogs
+                        .filter((e) => !auditLoginFilter || e.email.includes(auditLoginFilter))
+                        .map((entry) => (
+                          <article className={adminClasses("admin2-log-row")} key={entry.id}>
+                            <div>
+                              <strong>{entry.email}</strong>
+                              <span>{businessLabel(entry.auth_method)} · {businessLabel(entry.role)} · {entry.ip_address ?? "未知 IP"}</span>
+                            </div>
+                            <StatusChip tone={entry.success ? "good" : "danger"}>
+                              {entry.success ? "成功" : getApiErrorMessage({ detail: entry.failure_reason ?? undefined }, "失败")}
+                            </StatusChip>
+                            <small>{formatDateTime(entry.created_at)}</small>
+                          </article>
+                        ))}
+                    </div>
+                  </section>
+                )}
+
+                {auditSubTab === "safety" && (
+                  <section className={adminClasses("admin2-audit-tab-panel")}>
+                    <div className={adminClasses("admin2-panel-head")}>
+                      <div>
+                        <h3>内容安全</h3>
+                        <p>复核高风险输入来源、命中类别和用户会话。</p>
+                      </div>
+                    </div>
+                    <div className={adminClasses("admin2-log-list")}>
+                      {contentSafetyLogs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无内容安全记录。</p>}
+                      {contentSafetyLogs.map((entry) => (
+                        <article className={adminClasses("admin2-log-row")} key={entry.id}>
+                          <div>
+                            <strong>{entry.user_email ?? "未知用户"} / {entry.source}</strong>
+                            <span>{entry.session_id ?? "无会话"} · {entry.categories.map((item) => businessLabel(item)).join(" / ")}</span>
+                            {entry.content_excerpt && <em style={{ display: "block", marginTop: "2px", color: "#94a3b8", fontSize: "12px" }}>{entry.content_excerpt}</em>}
+                          </div>
+                          <StatusChip tone={entry.risk_level === "high" ? "danger" : "warning"}>
+                            {businessLabel(entry.action)} / {businessLabel(entry.risk_level)}
+                          </StatusChip>
+                          <small>{formatDateTime(entry.created_at)}</small>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {auditSubTab === "operations" && (
+                  <div className={adminClasses("admin2-grid admin2-grid--audit")}>
+                    <section className={adminClasses("admin2-panel")}>
+                      <div className={adminClasses("admin2-panel-head")}><h3>管理操作日志</h3></div>
+                      <div className={adminClasses("admin2-log-list")}>
+                        {auditLogs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无后台操作记录。</p>}
+                        {auditLogs.slice(0, 20).map((entry) => (
+                          <article className={adminClasses("admin2-log-row")} key={entry.id}>
+                            <div>
+                              <strong>{businessLabel(entry.action)}</strong>
+                              <span>{entry.admin_email} · {businessLabel(entry.target_type)}</span>
+                            </div>
+                            <span style={{ fontSize: "12px", color: "#64748b", wordBreak: "break-all" }}>{entry.target_id}</span>
+                            <small>{formatDateTime(entry.created_at)}</small>
+                          </article>
+                        ))}
+                      </div>
+                    </section>
+                    <section className={adminClasses("admin2-panel")}>
+                      <div className={adminClasses("admin2-panel-head")}><h3>退款纠纷（审计视图）</h3></div>
+                      <div className={adminClasses("admin2-log-list")}>
+                        {refundCases.length === 0 && <p className={adminClasses("admin2-empty")}>暂无退款纠纷。</p>}
+                        {refundCases.slice(0, 14).map((entry) => (
+                          <article className={adminClasses("admin2-log-row")} key={entry.id}>
+                            <div>
+                              <strong>{entry.user_email}</strong>
+                              <span>
+                                {businessLabel(entry.reason)} · {formatCents(entry.amount_cents, entry.currency)} · {REFUND_CREDIT_FIELD_LABEL}：{entry.credit_adjustment ?? 0}
+                              </span>
+                            </div>
+                            <StatusChip tone={entry.status === "resolved" ? "good" : entry.status === "rejected" ? "neutral" : "warning"}>{businessLabel(entry.status)}</StatusChip>
+                            <div className={adminClasses("admin2-row-actions")}>
+                              <button type="button" disabled={isLocked(`refund-status:${entry.id}`)} onClick={() => void updateRefundCaseStatus(entry, "processing")}>处理中</button>
+                              <button type="button" disabled={isLocked(`refund-status:${entry.id}`)} onClick={() => void updateRefundCaseStatus(entry, "resolved")}>已解决</button>
+                              <button type="button" disabled={isLocked(`refund-status:${entry.id}`)} onClick={() => void updateRefundCaseStatus(entry, "rejected")}>驳回</button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </section>
                   </div>
-                </section>
-                <section className={adminClasses("admin2-panel")}>
-                  <div className={adminClasses("admin2-panel-head")}><h3>登录日志</h3></div>
-                  <div className={adminClasses("admin2-log-list")}>
-                    {authLoginLogs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无登录日志。</p>}
-                    {authLoginLogs.slice(0, 14).map((entry) => (
-                      <article className={adminClasses("admin2-log-row")} key={entry.id}>
-                        <div><strong>{entry.email}</strong><span>{businessLabel(entry.auth_method)} · {businessLabel(entry.role)} · {entry.ip_address ?? "未知 IP"}</span></div>
-                        <StatusChip tone={entry.success ? "good" : "danger"}>{entry.success ? "成功" : getApiErrorMessage({ detail: entry.failure_reason ?? undefined }, "失败")}</StatusChip>
-                        <small>{formatDateTime(entry.created_at)}</small>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-                <section className={adminClasses("admin2-panel")}>
-                  <div className={adminClasses("admin2-panel-head")}><h3>内容安全</h3></div>
-                  <div className={adminClasses("admin2-log-list")}>
-                    {contentSafetyLogs.length === 0 && <p className={adminClasses("admin2-empty")}>暂无内容安全记录。</p>}
-                    {contentSafetyLogs.slice(0, 14).map((entry) => (
-                      <article className={adminClasses("admin2-log-row")} key={entry.id}>
-                        <div>
-                          <strong>{entry.user_email ?? "未知用户"} / {entry.source}</strong>
-                          <span>{entry.session_id ?? "无会话"} · {entry.categories.map((item) => businessLabel(item)).join(" / ")}</span>
-                          {entry.content_excerpt && <em>{entry.content_excerpt}</em>}
-                        </div>
-                        <StatusChip tone={entry.risk_level === "high" ? "danger" : "warning"}>{businessLabel(entry.action)} / {businessLabel(entry.risk_level)}</StatusChip>
-                        <small>{formatDateTime(entry.created_at)}</small>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-                <section className={adminClasses("admin2-panel")}>
-                  <div className={adminClasses("admin2-panel-head")}><h3>退款纠纷</h3></div>
-                  <div className={adminClasses("admin2-log-list")}>
-                    {refundCases.length === 0 && <p className={adminClasses("admin2-empty")}>暂无退款纠纷。</p>}
-                    {refundCases.slice(0, 14).map((entry) => (
-                      <article className={adminClasses("admin2-log-row")} key={entry.id}>
-                        <div>
-                          <strong>{entry.user_email}</strong>
-                          <span>
-                            {businessLabel(entry.reason)} · {formatCents(entry.amount_cents, entry.currency)} · {REFUND_CREDIT_FIELD_LABEL}：{entry.credit_adjustment ?? 0}
-                          </span>
-                        </div>
-                        <StatusChip tone={entry.status === "resolved" ? "good" : "warning"}>{businessLabel(entry.status)}</StatusChip>
-                        <div className={adminClasses("admin2-row-actions")}>
-                          <button type="button" disabled={isLocked(`refund-status:${entry.id}`)} onClick={() => void updateRefundCaseStatus(entry, "processing")}>处理中</button>
-                          <button type="button" disabled={isLocked(`refund-status:${entry.id}`)} onClick={() => void updateRefundCaseStatus(entry, "resolved")}>已解决</button>
-                          <button type="button" disabled={isLocked(`refund-status:${entry.id}`)} onClick={() => void updateRefundCaseStatus(entry, "rejected")}>驳回</button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </section>
+                )}
               </div>
             </section>
           )}

@@ -2492,6 +2492,160 @@ body:has(.admin-page--authed) {
   line-height: 1.5 !important;
 }
 
+/* ─── Sub-tabs (权益售后 / 风控审计) ───────────────────────────── */
+
+.admin2-tabs {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.admin2-tab-nav {
+  display: flex;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f1f5f9;
+  width: fit-content;
+}
+
+.admin2-tab-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 8px;
+  color: #64748b;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 640;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 130ms ease, color 130ms ease, box-shadow 130ms ease;
+}
+
+.admin2-tab-button:hover {
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.admin2-tab-button.is-active {
+  color: #1d4ed8;
+  background: #ffffff;
+  font-weight: 720;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+}
+
+.admin2-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #dc2626;
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1;
+}
+
+.admin2-tab-badge--neutral {
+  background: #e2e8f0;
+  color: #64748b;
+}
+
+/* Full-width refund table panel */
+.admin2-refund-table-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.admin2-refund-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(100px, 0.8fr) 80px 96px 120px auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 13px;
+}
+
+.admin2-refund-row:hover {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.admin2-refund-head {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(100px, 0.8fr) 80px 96px 120px auto;
+  gap: 12px;
+  padding: 0 14px 8px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+/* Audit sub-tab: single wide panel */
+.admin2-audit-tab-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.admin2-audit-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin2-audit-filter input {
+  flex: 1 1 220px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #0f172a;
+  background: #f8fafc;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.admin2-audit-filter input:focus {
+  border-color: #93c5fd;
+  background: #fff;
+}
+
+@media (max-width: 900px) {
+  .admin2-refund-row,
+  .admin2-refund-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .admin2-refund-head span:not(:first-child),
+  .admin2-refund-head span:not(:last-child) {
+    display: none;
+  }
+}
+
 /* ─── Task queue items ───────────────────────────────────────── */
 
 .admin2-task {
