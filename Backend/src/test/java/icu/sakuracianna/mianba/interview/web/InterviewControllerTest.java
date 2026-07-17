@@ -121,7 +121,8 @@ class InterviewControllerTest {
         InterviewView session = new InterviewView(
                 sessionId, "civil_service", "awaiting_ai", 0, 5,
                 new InterviewView.Question(0, "结构化模拟", "请分析该现象。"), null, null,
-                Instant.parse("2026-07-14T12:00:00Z"));
+                Instant.parse("2026-07-14T12:00:00Z"),
+                Instant.parse("2026-07-15T12:00:00Z"));
         TaskView task = new TaskView(
                 taskId, sessionId, "GENERATE_FOLLOW_UP", "QUEUED", "WAITING_FOR_WORKER",
                 0, 0, 3, true, 0, null, null,

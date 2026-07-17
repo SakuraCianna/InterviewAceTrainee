@@ -21,4 +21,9 @@ public interface MaterialService {
             String targetSchool,
             String major,
             String researchDirection);
+
+    /**
+     * 返回指定用户和面试类型最新的 ready 状态材料；不存在时返回 null。
+     */
+    MaterialView getLatestByType(UUID userId, String interviewType);
 }

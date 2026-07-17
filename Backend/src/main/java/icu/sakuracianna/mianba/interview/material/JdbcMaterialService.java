@@ -63,6 +63,19 @@ public class JdbcMaterialService implements MaterialService {
     }
 
     @Override
+    public MaterialView getLatestByType(UUID userId, String interviewType) {
+        String type = normalizeType(interviewType);
+        return jdbc.query("""
+                SELECT id, interview_type, job_title, target_school, major, research_direction,
+                       resume_text, profile_summary, keywords::text AS keywords_json
+                FROM materials
+                WHERE user_id = ? AND interview_type = ? AND status = 'ready'
+                ORDER BY created_at DESC LIMIT 1
+                """, this::mapView, userId, type)
+                .stream().findFirst().orElse(null);
+    }
+
+    @Override
     public MaterialView upload(
             UUID userId,
             String idempotencyKey,

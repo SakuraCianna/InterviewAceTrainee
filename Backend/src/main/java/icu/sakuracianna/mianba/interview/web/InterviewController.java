@@ -98,7 +98,7 @@ public class InterviewController {
             @Valid @RequestBody AnswerRequest request,
             @AuthenticationPrincipal AuthenticatedUser principal,
             @RequestHeader(value = "X-Request-ID", required = false) String requestId) {
-        String safeRequestId = requestId == null || requestId.isBlank() ? "unknown" : requestId;
+        String safeRequestId = requestId == null || requestId.isBlank() ? UUID.randomUUID().toString() : requestId;
         AnswerAcceptance accepted = service.answer(
                 principal.userId(), sessionId, idempotencyKey,
                 request.turnIndex(), request.answerText(), safeRequestId);

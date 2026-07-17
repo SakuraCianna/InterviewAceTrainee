@@ -7,6 +7,17 @@
 [![CI](https://github.com/SakuraCianna/InterviewAceTrainee/actions/workflows/ci.yml/badge.svg)](https://github.com/SakuraCianna/InterviewAceTrainee/actions/workflows/ci.yml)
 [![Prepare or Deploy Production](https://github.com/SakuraCianna/InterviewAceTrainee/actions/workflows/deploy-production.yml/badge.svg)](https://github.com/SakuraCianna/InterviewAceTrainee/actions/workflows/deploy-production.yml)
 
+## 功能概览
+
+- 四类面试场景：工作面试（三阶段套餐）、研究生复试、考公结构化面试、雅思口语
+- 实时语音识别（腾讯云 ASR WebSocket）+ 边说边转写
+- AI 问题播报（腾讯云 TTS 流式推送）
+- 每轮 AI 评分与逐轮反馈（DeepSeek）
+- 完整复盘报告：总分、维度评分、亮点、改进建议、推荐练习
+- 断线后可恢复未完成训练；AI 任务支持手动重试
+- 工作面试三阶段套餐：技术一面 → 技术二面 → HR 终面
+- 管理后台：用户管理、积分调整、退款工单、AI 调用日志、任务监控
+
 ## 当前架构
 
 当前生产基线是模块化 Java 单体加独立 AI Worker，API 与 Worker 使用同一构建产物，以运行角色区分，不在 4 核 4 GB 单机上拆成微服务。
@@ -102,9 +113,67 @@ npm ci
 npm run dev
 ```
 
+## 核心 API 接口
+
+### 认证
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/auth/register` | 注册新用户 |
+| `POST` | `/api/auth/login` | 密码登录 |
+| `POST` | `/api/auth/email-code/request` | 发送邮箱验证码 |
+| `POST` | `/api/auth/email-code/login` | 验证码登录 |
+| `POST` | `/api/auth/logout` | 退出登录 |
+| `GET` | `/api/auth/me` | 当前用户信息（积分、体验券）|
+| `POST` | `/api/auth/password/change` | 凭验证码修改密码 |
+
+### 面试素材
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/interview-materials` | 上传并解析面试素材（简历、院校信息）|
+| `GET` | `/api/interview-materials?type={type}` | 获取当前用户最新的指定类型素材；不存在时返回 204 |
+
+### 单场面试会话
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/interviews` | 创建面试会话（需幂等键）|
+| `GET` | `/api/interviews/active` | 查询当前未结束会话；无则 204 |
+| `GET` | `/api/interviews/history` | 最近 50 条历史记录 |
+| `GET` | `/api/interviews/{sessionId}` | 查询指定会话快照（含 `expires_at`）|
+| `DELETE` | `/api/interviews/{sessionId}` | 删除/终止指定会话 |
+| `POST` | `/api/interviews/{sessionId}/answers` | 提交本轮回答，返回 202 + AI 任务 |
+
+### 工作面试三阶段套餐
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/interview-packages` | 创建套餐并启动技术一面（消耗 3 积分或体验券）|
+| `GET` | `/api/interview-packages/active` | 查询当前活跃套餐；无则 204 |
+| `GET` | `/api/interview-packages/{packageId}` | 查询指定套餐及各阶段状态 |
+| `POST` | `/api/interview-packages/{packageId}/stages/{stageCode}/start` | 显式启动下一阶段 |
+
+套餐阶段流程：`TECHNICAL_FIRST` → `TECHNICAL_SECOND` → `HR_FINAL`，每个阶段对应独立的 `sessions`，有效期 30 天。
+
+### AI 异步任务
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/tasks/{taskId}` | 轮询任务状态 |
+| `POST` | `/api/tasks/{taskId}/retry` | 手动重试可重试失败任务 |
+
+### 语音服务
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/speech/tts` | 一次性语音合成（返回 base64 音频）|
+| `POST` | `/api/speech/tts/stream` | 流式语音合成（SSE，边合成边推送）|
+| `WS` | `/api/ws/speech/asr/{sessionId}` | 实时语音识别 WebSocket |
+
 ## 运行配置
 
-生产配置由服务器上的 `shared/secrets` ConfigTree 文件与非敏感发布变量提供，仓库不保存真实值。基础 Secret 文件由 `deploy/prepare-server-secrets.sh` 在缺失时创建，外部凭据由运维人员单独写入；脚本和工作流都不会回传内容。Secret 父目录使用 0700，容器运行文件使用只读 0444：普通 Compose 的文件型 Secret 不重映射 UID，0444 让不同非 root 容器可读，而宿主机其他用户仍无法穿越 0700 父目录。
+生产配置由服务器上的 `shared/secrets` ConfigTree 文件与非敏感发布变量提供，仓库不保存真实值。基础 Secret 文件由 `deploy/prepare-server-secrets.sh` 在缺失时创建，外部凭据由运维人员单独写入；脚本和工作流都不会回传内容。Secret 父目录使用 0700，容器运行文件使用只读 0444。
 
 | Secret 文件 | 用途 |
 | --- | --- |
@@ -113,26 +182,19 @@ npm run dev
 | `rabbitmq_api_password`, `rabbitmq_worker_password` | RabbitMQ 发布/声明账号与只消费 Worker 账号 |
 | `jwt_secret` | JWT 签名密钥 |
 | `material-parser-token` | API 调用内网材料解析进程的随机认证令牌 |
-| `hcaptcha-site-key` | 前端通过公开配置接口读取的 hCaptcha 站点标识；它不是服务端凭据，但仍由运行时注入 |
-| `hcaptcha-secret` | API 调用 hCaptcha Siteverify 的服务端密钥，不进入前端、镜像或日志 |
+| `hcaptcha-site-key` | 前端通过公开配置接口读取的 hCaptcha 站点标识 |
+| `hcaptcha-secret` | API 调用 hCaptcha Siteverify 的服务端密钥 |
 | `deepseek_api_key` | Worker 的 DeepSeek 模型调用 |
 | `resend_api_key`, `mail_from` | 验证码邮件交付 |
 | `tencent_app_id`, `tencent_secret_id`, `tencent_secret_key` | API 实时 ASR 与 TTS |
 
-`rabbitmq-definitions.json` 不是人工维护的 Secret。脚本从两个 RabbitMQ 密码文件派生该运行配置，并通过同目录临时文件和原子重命名刷新；生成失败时保留旧配置。
-
-根目录 `.env.example` 与 `deploy/compose.env.example` 使用完全相同的 15 个生产 Compose 字段，字段名称和顺序由 `scripts/check-env-schema.ps1` 自动核对。本机 `.env` 只是同结构的忽略文件，不提供 localhost 变体、不保存 Secret，也绝不会被生产发布读取。服务器唯一的非敏感配置事实来源是 `<PRODUCTION_PATH>/shared/compose.env`：它必须是非符号链接的 0600 普通文件，字段、顺序和相邻中文注释与示例完全一致，且注释只使用英文标点。`deploy/validate-compose-env.sh` 以 UTF-8 严格解析该文件，不执行 `source`、不展开命令语法，也不打印字段值。
-
-生产脚本每次调用 Compose 都显式传入 `--env-file`，并先从子进程环境移除全部 19 个同名字段，防止 SSH、运维 Shell 或工作流环境污染覆盖服务器文件。其中六个 commit 专属镜像标签和 `secret`、证书、稳定 runtime-config 三个派生目录由发布脚本重新注入；CORS、API/Worker 连接池、数据库等待时间、Tomcat 线程/队列和 Worker 消费并发等其余 10 项只来自服务器 `shared/compose.env`。Compose 对全部 19 项使用缺失即失败的插值。一次性 `migrate` 角色使用数据库所有者执行 Flyway；API 与 Worker 分别使用 `mianba_api`、`mianba_worker` 且关闭 Flyway，数据库与 RabbitMQ 权限互相隔离。生产 Cookie 强制 Secure。迁移期间保留的 `Backend/.env` 与 `Frontend/.env` 只作为旧 Python/前端部署配置备份，不参与新 Spring Boot Compose 启动。
-
-管理员固定入口与备案展示定义在 `Frontend/src/config/productConfig.ts`，随前端版本审计发布，不属于服务器容量配置，也不接受 `VITE_*` 构建环境临时覆盖。
+根目录 `.env.example` 与 `deploy/compose.env.example` 使用完全相同的 15 个生产 Compose 字段；`deploy/validate-compose-env.sh` 以 UTF-8 严格解析服务器配置文件，不执行 `source`、不展开命令语法。
 
 ### hCaptcha 人机验证
 
 - `GET /api/auth/hcaptcha/config` 只返回是否启用与公开站点标识；前端镜像不编译任何实际站点值。
-- 未登录用户请求邮箱验证码、密码登录和管理员登录时必须提交一次 hCaptcha token；已登录用户在账号设置中请求邮箱验证码不重复挑战。
-- API 在账号查询、密码校验、验证码发送或登录事务前调用官方 Siteverify，并同时校验 token、客户端 IP 与本站点标识。验证服务超时、畸形响应、重复/过期 token 或配置缺失均失败关闭。
-- Nginx 内容安全策略只放行 hCaptcha 官方脚本、Frame、样式与连接域名；服务端密钥永不返回浏览器。
+- 未登录用户请求邮箱验证码、密码登录和管理员登录时必须提交 hCaptcha token；已登录用户在账号设置中请求验证码不重复挑战。
+- API 在账号查询、密码校验、验证码发送或登录事务前调用官方 Siteverify，并同时校验 token、客户端 IP 与本站点标识。
 
 ## AI 异步任务
 
@@ -150,18 +212,11 @@ QUEUED -> RUNNING -> SUCCEEDED
 
 - `GET /api/interviews/active` 与会话快照中的 `active_task` 用于页面刷新恢复；`GET /api/tasks/{taskId}` 是异步状态的事实来源
 - `POST /api/tasks/{taskId}/retry` 只允许可重试的失败任务，并要求 CSRF 与新的幂等键
-- 页面隐藏或离线时暂停轮询，重新可见或恢复联网后立即同步；写请求响应丢失时只读取会话权威状态，不重放答案正文或创建新的计费操作
-- `WS /api/ws/speech/asr/{sessionId}` 只桥接实时语音转写；断线时已有部分转写可安全收尾，没有文本则要求重新回答，不把不连续 PCM 自动拼成答案
-- Nginx 对 API 响应设置 `no-store`，任务轮询另有独立限流，202 与轮询结果不得被中间缓存
+- 页面隐藏或离线时暂停轮询，重新可见或恢复联网后立即同步
+- `WS /api/ws/speech/asr/{sessionId}` 只桥接实时语音转写；断线时已有部分转写可安全收尾
+- Nginx 对 API 响应设置 `no-store`，任务轮询另有独立限流
 - Worker 使用单消费者、prefetch 1、手动 ACK；数据库提交成功后才 ACK
-- API 将经过裁剪的材料摘要、岗位要求或院校/专业信息作为不可变 `input_ref` 快照，Worker 无需读取材料表；提示词把快照、历史问题、当前问题和回答统一放入不可闭合的不可信数据区
 - 工作面试、研究生复试、考公和 IELTS 使用独立阶段与评分维度；IELTS 的首题、追问、阶段名、反馈和最终报告全部强制英文
-- 模型只能返回 `score`、`feedback`、`roundName`、`nextQuestion` 四字段 JSON；服务端拒绝重复键、未知字段、错误类型、尾随内容和超长输出，并用可信阶段表与去重兜底题归一化结果
-- 每轮评分与反馈持久化到轮次，最终报告的总分是所有已评轮次的四舍五入平均值，并逐轮给出证据与改进建议
-
-RabbitMQ 拓扑使用 `mianba.ai.v1`、`mianba.ai.jobs.v1` 和 `mianba.ai.dlq.v1`。延迟重试由 PostgreSQL Outbox 的 `available_at` 调度，不维护额外 retry queue。主队列满时使用 `reject-publish` 让 Outbox 退避重试，API 还会对账长时间 `QUEUED` 的任务。消息持久化、publisher confirm、Outbox 与幂等收件箱共同保证至少一次投递下不重复扣次数或生成重复报告。
-
-PostgreSQL 镜像包含 pgvector，但当前发布没有 embedding 生成与 RAG 检索流水线；管理员能力健康页会明确返回 `rag_not_implemented`，不会把零向量/零召回探针显示为就绪。现阶段材料个性化只使用上述受控快照。
 
 ## 材料配额与数据留存
 
@@ -170,9 +225,30 @@ API 对每个用户执行以下材料配额和内容擦除规则：
 - 24 小时内最多新建 10 份材料，30 天内最多新建 30 份材料
 - 同时最多保留 20 份 `ready` 材料
 - 材料创建 30 天后擦除简历、岗位、院校等内容并标记删除；标记删除满 7 天且无会话或任务引用时物理删除记录
-- 文件解析不在 API JVM 内执行：独立 Parser 仅接入内部网络，使用随机 Bearer token、单并发、Xmx 96 MiB 和 256 MiB 容器上限；单次解析超过 8 秒会强制终止 Parser，由容器自动拉起，异常文件不会重启 API
-- 用户删除面试后，会话先进入 `deleting`；任何阶段中断时，每小时运行的留存任务会继续完成任务、轮次、报告和会话内容擦除
-- `completed`、`cancelled` 或 `deleted` 会话结束满 90 天后擦除问答、报告和 AI 任务输入输出，但保留不含训练正文的会话状态用于一致性与审计
+- 文件解析不在 API JVM 内执行：独立 Parser 仅接入内部网络，使用随机 Bearer token、单并发、Xmx 96 MiB 和 256 MiB 容器上限；单次解析超过 8 秒会强制终止 Parser，由容器自动拉起
+- 面试会话有效期 24 小时；`completed`、`cancelled` 或 `deleted` 会话结束满 90 天后擦除问答、报告和 AI 任务输入输出
+- 工作面试套餐有效期 30 天；过期后内容按相同留存策略擦除
+
+## 前端架构
+
+### 关键 hooks
+
+| Hook | 位置 | 职责 |
+| --- | --- | --- |
+| `useMaterialUpload` | `pages/interview/hooks/useMaterialUpload.ts` | 素材上传状态、幂等重传、挂载时恢复历史素材 |
+| `useMicrophoneCheck` | `pages/interview/hooks/useMicrophoneCheck.ts` | 麦克风枚举、检测、音量分析、设备切换 |
+| `useAudioRecorder` | `pages/interview/hooks/useAudioRecorder.ts` | 实时 ASR 录音、静默超时、自动提交 |
+| `useInterviewTask` | `pages/interview/hooks/useInterviewTask.ts` | AI 任务轮询、重试、失败回调 |
+
+### 关键页面和组件
+
+| 路径 | 说明 |
+| --- | --- |
+| `pages/interview/InterviewRoom.tsx` | 主训练房间（场景选择→设备检测→面试→报告）|
+| `pages/interview/components/InterviewReport.tsx` | 复盘报告（支持中文/英文双模式）|
+| `pages/interview/components/TaskProgress.tsx` | AI 任务进度卡片（轮询+重试）|
+| `pages/interview/components/RecordingControls.tsx` | 录音控制按钮组 |
+| `pages/admin/AdminShell.tsx` | 管理后台主壳（ERP 风格多 Tab）|
 
 ## 首次管理员
 
@@ -191,7 +267,6 @@ API 对每个用户执行以下材料配额和内容擦除规则：
 | Nginx + Frontend | 128 MiB | 192 MiB | 0.20 | 静态强缓存, API 分级限流 |
 
 所有服务还配置了 PID 限制、日志轮转、停止宽限期和只读根文件系统。PostgreSQL、Redis、RabbitMQ 的数据目录使用持久卷；JVM 临时目录与 Nginx/RabbitMQ 运行目录使用受限 tmpfs。
-稳定容器的物理内存硬上限合计 3392 MiB，内存与 Swap 合计上限为 4480 MiB。当前生产机实际约有 3.6 GiB 物理内存和 1.9 GiB Swap；极端情况下物理硬上限只给宿主机留下约 0.3 GiB，但这些数值不是预留量，正常常驻 RSS 应显著低于上限。Swap 只吸收短时峰值，不能作为提高 JVM 堆或长期超配的依据。一次性迁移容器在 API、Parser 与 Worker 启动前退出。
 
 ## CI 与生产交付
 
@@ -203,26 +278,22 @@ API 对每个用户执行以下材料配额和内容擦除规则：
 - Pull Request 到 `main`
 - 手动触发
 
-门禁包括 Java 21 Maven test/package、hCaptcha 验证器契约、前端 `npm ci`/audit/test/typecheck/build、无 `.env` 文件的 Compose config 校验、使用临时自签证书的真实 `nginx -t`、部署脚本语法检查，以及 Java/前端 Docker 镜像构建和完整拓扑 readiness。CI 只使用随机占位 Secret 并关闭真实 hCaptcha 外呼；Java 镜像在官方 Maven + Temurin 21 builder 中构建，不依赖 Windows-only `mvnw.cmd`。任一步失败都不应进入发布。
+门禁包括 Java 21 Maven test/package、hCaptcha 验证器契约、前端 `npm ci`/audit/test/typecheck/build、无 `.env` 文件的 Compose config 校验、使用临时自签证书的真实 `nginx -t`、部署脚本语法检查，以及 Java/前端 Docker 镜像构建和完整拓扑 readiness。
 
 ### 预构建生产交付
 
-当前仓库没有已确认可用的镜像仓库配置，因此不虚构 registry push/pull 流程。`deploy-production.yml` 提供受控的无仓库策略:
+`deploy-production.yml` 提供受控的无仓库策略:
 
 1. 操作者输入 `sakuracianna` 上完整 40 位 commit SHA
 2. 工作流验证该 commit 属于 `origin/sakuracianna`，以 detached HEAD 锁定同一 commit
 3. 重跑 Java 与前端门禁，在 GitHub runner 构建两个镜像
-4. 将 Java、前端、PostgreSQL、Redis、RabbitMQ、Nginx 六个运行镜像保存为带 SHA 的本地标签 tar，生成 SHA-256，并保留 7 天 artifact；第三方内容在 runner 侧按固定 digest 拉取，服务器不依赖现场 registry
+4. 将六个运行镜像保存为带 SHA 的本地标签 tar，生成 SHA-256，并保留 7 天 artifact
 5. `prepare` 只生成候选包；`deploy` 需要 `production` Environment 审批后才传输
-6. 生成 runtime allowlist 包，仅含 Compose、Nginx 和部署脚本；构建阶段拒绝任何 test/spec 文件
-7. 服务器在唯一 staging 内校验包与脚本 SHA-256，只创建不存在的 `releases/<SHA>`，不覆盖同 SHA、不创建 Git 仓库、不接收源码或测试
-8. 候选 release 先通过 Compose/Nginx 配置、API/Worker 深度 readiness 和 HTTPS 边缘探测，然后才原子切换 `current`；失败会恢复 `previous`
-9. 生产只执行 `docker load`；常驻服务的 `docker compose up --no-build --pull never` 与一次性迁移的 `docker compose run --pull never` 都只使用六个 commit 专属本地镜像，不现场运行 Maven、npm、测试、Docker build 或隐式 registry pull；精确清理本次 staging、最多保留 5 个 release，不执行全局 prune
+6. 服务器在唯一 staging 内校验包与脚本 SHA-256，只创建不存在的 `releases/<SHA>`
+7. 候选 release 先通过深度 readiness 和 HTTPS 边缘探测，然后才原子切换 `current`；失败会恢复 `previous`
+8. 生产只执行 `docker load`；`docker compose up --no-build --pull never` 不现场构建
 
-生产工作流还会通过 GitHub Actions API 要求同一 commit 已在 `sakuracianna` 完整 CI 中成功，历史 SHA 不能绕过 Compose 拓扑和业务烟测直接发布。
-生产观察命令统一通过 runtime 包内的 `deploy/production-compose.sh` 解析 `current`、固定 project 名和两个自建镜像标签；该入口不开放 `up`、`down`、`pull`、`rm` 等状态变更，避免手工环境变量漂移。
-
-启用自动传输前必须由仓库管理员配置并验证以下待配置项:
+启用自动传输前必须由仓库管理员配置以下待配置项:
 
 | GitHub 配置 | 用途 |
 | --- | --- |
@@ -232,21 +303,15 @@ API 对每个用户执行以下材料配额和内容擦除规则：
 | `PRODUCTION_PORT` | SSH 端口, 未设置时使用 22 |
 | `PRODUCTION_SSH_KEY` | 部署私钥 |
 | `PRODUCTION_KNOWN_HOSTS` | 固定主机指纹 |
-| `PRODUCTION_PATH` | 服务器上经核验的发布根目录, 例如 `/srv/mianba` |
-| `PRODUCTION_HEALTH_URL` | 可选健康 URL |
-| `PRODUCTION_READINESS_URL` | 可选就绪 URL |
+| `PRODUCTION_PATH` | 服务器上经核验的发布根目录 |
 
-这些配置未就绪时只能运行 `prepare` 并通过获批准的离线渠道交付 artifact，不能声称已经自动部署。发布、生产重建、逐卷清理、健康验证和回滚步骤见 [生产重建 runbook](docs/operations/production-rebuild-runbook.md)。
+详见 [生产重建 runbook](docs/operations/production-rebuild-runbook.md)。
 
 ## 数据重建与备份原则
 
-本次从旧 Python schema 切换到 Java/Flyway 新 schema，项目所有者已明确授权重建生产业务数据，不执行 Alembic 原地升级。这项授权只适用于本次重构，不应被解释为永久允许丢弃数据。
-
-- 本次重建已获明确授权删除旧项目容器、项目网络、项目镜像与业务数据；操作前仍必须核验主机、Compose project、每个容器/网络/卷/镜像及其挂载关系
-- 服务器上的 `.env`、密钥目录和证书目录必须保留；只逐项删除已确认属于旧项目的 Docker 对象，不执行无目标的 `docker system prune` 或批量卷清理
-- 今后所有迁移、升级和重建默认必须先备份并验证恢复路径，除非项目所有者再次明确书面授权
+- 今后所有迁移、升级和重建默认必须先备份并验证恢复路径
 - 发布流程本身不删除卷、不删除备份、不执行数据库迁移清理
-- 正式扩大用户范围前必须配置 PostgreSQL 加密异机备份、恢复演练、磁盘/内存/队列/5xx 告警及证书到期告警；未配置备份目的地时不能把本机卷称为备份
+- 正式扩大用户范围前必须配置 PostgreSQL 加密异机备份、恢复演练和告警
 
 ## 支付与退款边界
 
@@ -257,13 +322,10 @@ API 对每个用户执行以下材料配额和内容擦除规则：
 - 不提交 `.env`、密钥、Token、Cookie、私钥、证书内容或生产连接串
 - RabbitMQ 管理端、PostgreSQL 与 Redis 在生产 Compose 中不发布宿主机端口
 - 简历、JD、回答、音频元数据和模型输出都视为不可信输入
-- 开放面试会话 24 小时后自动取消；材料、面试内容和运行记录按“材料配额与数据留存”中的期限分批擦除或清理
 - 生产错误只返回稳定错误码、可理解消息与 request ID，不泄露 SQL、栈、Provider 响应或内部 URL
-- Nginx 保留正式域名与证书路径，限制连接、速率、请求体和超时，并对静态指纹资源使用长期缓存
-- 高风险匿名认证入口在分级限流后执行 hCaptcha 服务端验证；验证异常时不继续账号或邮件业务
-- 服务器发布目录不包含 `src/test`、前端测试、旧 Python tests、源码构建缓存或 Git 元数据
+- 高风险匿名认证入口在分级限流后执行 hCaptcha 服务端验证
 
-注释约定见 [代码注释规范](docs/development/commenting-standard.md)。公开类型应说明职责，事务、锁、幂等、ACK 顺序和安全失败策略必须说明原因。
+注释约定见 [代码注释规范](docs/development/commenting-standard.md)。
 
 ## 许可证
 

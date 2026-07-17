@@ -30,6 +30,14 @@ async function retryNetworkOnce<T>(request: () => Promise<T>, signal?: AbortSign
   }
 }
 
+export function getLatestInterviewMaterial(interviewType: string, signal?: AbortSignal) {
+  return requestJson<InterviewMaterialResponse | null>(
+    `/api/interview-materials?type=${encodeURIComponent(interviewType)}`,
+    { ...credentials, signal },
+    null,
+  );
+}
+
 export function getCurrentAccount(signal?: AbortSignal) {
   return requestJson<CurrentUserResponse & ApiPayload>("/api/auth/me", { ...credentials, signal });
 }
@@ -59,6 +67,8 @@ export function listInterviewHistory(signal?: AbortSignal) {
 export function deleteInterviewHistoryItem(sessionId: string, signal?: AbortSignal) {
   return requestJson<void>(`/api/interviews/${encodeURIComponent(sessionId)}`, {
     method: "DELETE",
+    credentials: "include",
+    headers: csrfHeaders(),
     signal,
   }).then(({ response }) => response);
 }
@@ -125,7 +135,12 @@ export async function* streamQuestionSpeech(
     signal,
   });
   if (!response.ok || !response.body) {
-    throw new Error(`TTS stream error: ${response.status}`);
+    const statusMessages: Record<number, string> = {
+      401: "语音合成：登录已过期，请刷新页面重试",
+      429: "语音合成：请求过于频繁，请稍后再试",
+      503: "语音合成服务暂时不可用，请稍后重试",
+    };
+    throw new Error(statusMessages[response.status] ?? `语音合成服务异常（${response.status}）`);
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -179,5 +194,48 @@ export function getInterviewSession(sessionId: string, signal?: AbortSignal) {
 export function logoutAccount() {
   return requestJson<void>("/api/auth/logout", {
     method: "POST",
+    credentials: "include",
+    headers: csrfHeaders(),
   }).then(({ response }) => response);
+}
+
+export function getActiveInterviewPackage(signal?: AbortSignal) {
+  return requestJson<import("./types").InterviewPackage | null>(
+    "/api/interview-packages/active",
+    { ...credentials, signal },
+    null,
+  );
+}
+
+export function createInterviewPackage(
+  payload: { package_id: string; first_session_id: string; material_id: string },
+  options: OperationRequestOptions,
+) {
+  return requestJson<import("./types").InterviewPackage>("/api/interview-packages", {
+    method: "POST",
+    credentials: "include",
+    headers: csrfHeaders(jsonHeaders),
+    idempotencyKey: options.idempotencyKey,
+    signal: options.signal,
+    body: JSON.stringify(payload),
+  });
+}
+
+export function startPackageNextStage(
+  packageId: string,
+  stageCode: string,
+  sessionId: string,
+  options: OperationRequestOptions,
+) {
+  return requestJson<import("./types").InterviewPackage>(
+    `/api/interview-packages/${encodeURIComponent(packageId)}/stages/${encodeURIComponent(stageCode)}/start`,
+    {
+      method: "POST",
+      credentials: "include",
+      headers: csrfHeaders(jsonHeaders),
+      idempotencyKey: options.idempotencyKey,
+      signal: options.signal,
+      body: JSON.stringify({ session_id: sessionId }),
+    },
+  );
 }

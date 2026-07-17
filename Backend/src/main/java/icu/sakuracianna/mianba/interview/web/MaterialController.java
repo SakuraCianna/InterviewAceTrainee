@@ -9,8 +9,10 @@ import jakarta.validation.constraints.Size;
 import java.util.UUID;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -27,6 +29,17 @@ public class MaterialController {
 
     public MaterialController(MaterialService materials) {
         this.materials = materials;
+    }
+
+    /**
+     * 返回当前用户指定面试类型最新的 ready 材料；不存在时响应 204。
+     */
+    @GetMapping(path = "/api/interview-materials")
+    public ResponseEntity<MaterialView> latest(
+            @RequestParam("type") @NotBlank String interviewType,
+            @AuthenticationPrincipal AuthenticatedUser principal) {
+        MaterialView view = materials.getLatestByType(principal.userId(), interviewType);
+        return view != null ? ResponseEntity.ok(view) : ResponseEntity.noContent().build();
     }
 
     /**

@@ -214,7 +214,7 @@ public class JdbcInterviewService implements InterviewService {
     public InterviewView get(UUID userId, UUID sessionId) {
         InterviewView view = jdbc.query("""
                 SELECT s.id, s.interview_type, s.status, s.current_turn_index, s.total_turns,
-                       s.updated_at, t.turn_index, t.round_name, t.question_text,
+                       s.updated_at, s.expires_at, t.turn_index, t.round_name, t.question_text,
                        r.report_json::text AS report_json
                 FROM sessions s
                 LEFT JOIN turns t
@@ -440,6 +440,7 @@ public class JdbcInterviewService implements InterviewService {
                 ? null
                 : new InterviewView.Question(
                         turnIndex, resultSet.getString("round_name"), resultSet.getString("question_text"));
+        java.sql.Timestamp expiresTs = resultSet.getTimestamp("expires_at");
         return new InterviewView(
                 resultSet.getObject("id", UUID.class),
                 resultSet.getString("interview_type"),
@@ -449,7 +450,8 @@ public class JdbcInterviewService implements InterviewService {
                 question,
                 null,
                 report,
-                resultSet.getTimestamp("updated_at").toInstant());
+                resultSet.getTimestamp("updated_at").toInstant(),
+                expiresTs == null ? null : expiresTs.toInstant());
     }
 
     private void insertOutbox(UUID jobId, long version, String requestId, Instant now)

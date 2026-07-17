@@ -27,20 +27,19 @@ import {
   startInterviewSession,
   streamQuestionSpeech,
   submitInterviewAnswer,
-  uploadInterviewMaterial,
 } from "./interviewApi";
 import { moduleDetails, modules, states } from "./modules";
 import { createSessionId, formatHistoryDate, microphoneLabel, moduleByType, statusLabel } from "./roomUtils";
 import { roomClasses } from "./roomStyles";
 import { useInterviewTask } from "./hooks/useInterviewTask";
 import { useAudioRecorder } from "./hooks/useAudioRecorder";
+import { useMicrophoneCheck } from "./hooks/useMicrophoneCheck";
+import { useMaterialUpload } from "./hooks/useMaterialUpload";
 import type {
   CurrentUserResponse,
   InterviewHistoryItem,
-  InterviewMaterialResponse,
   InterviewStateResponse,
   InterviewType,
-  MicrophoneTestSession,
 } from "./types";
 
 declare global {
@@ -75,23 +74,29 @@ export function InterviewRoom() {
   const [deletingHistorySessionId, setDeletingHistorySessionId] = useState("");
   const [interviewState, setInterviewState] = useState<InterviewStateResponse | null>(null);
   const [activeSession, setActiveSession] = useState<InterviewStateResponse | null>(null);
-  const [materialsByType, setMaterialsByType] = useState<Partial<Record<InterviewType, InterviewMaterialResponse>>>({});
-  const [jobResumeFile, setJobResumeFile] = useState<File | null>(null);
-  const [jobTitle, setJobTitle] = useState("");
-  const [jobRequirements, setJobRequirements] = useState("");
-  const [postgraduateSchool, setPostgraduateSchool] = useState("");
-  const [postgraduateMajor, setPostgraduateMajor] = useState("");
-  const [postgraduateDirection, setPostgraduateDirection] = useState("");
-  const [isPreparingMaterial, setIsPreparingMaterial] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const {
+    materialsByType,
+    jobResumeFile,
+    jobTitle,
+    jobRequirements,
+    postgraduateSchool,
+    postgraduateMajor,
+    postgraduateDirection,
+    isPreparingMaterial,
+    setJobResumeFile,
+    setJobTitle,
+    setJobRequirements,
+    setPostgraduateSchool,
+    setPostgraduateMajor,
+    setPostgraduateDirection,
+    prepareMaterial: prepareMaterialFromHook,
+    loadMaterialForType,
+  } = useMaterialUpload();
   const [isStartingSession, setIsStartingSession] = useState(false);
   const [isFinishingAnswer, setIsFinishingAnswer] = useState(false);
   const [isExitingSession, setIsExitingSession] = useState(false);
   const [isQuestionSpeaking, setIsQuestionSpeaking] = useState(false);
-  const [microphoneDevices, setMicrophoneDevices] = useState<MediaDeviceInfo[]>([]);
-  const [selectedMicrophoneId, setSelectedMicrophoneId] = useState("");
-  const [microphoneAnalyser, setMicrophoneAnalyser] = useState<AnalyserNode | null>(null);
-  const [microphoneStatus, setMicrophoneStatus] = useState<"idle" | "testing" | "ready" | "failed">("idle");
-  const [microphoneMessage, setMicrophoneMessage] = useState("正式进入面试前，请先选择并检测麦克风。");
   const [pendingResume, setPendingResume] = useState(false);
   const [confirmDeleteItem, setConfirmDeleteItem] = useState<InterviewHistoryItem | null>(null);
   const [confirmExitTarget, setConfirmExitTarget] = useState<string | null>(null);
@@ -102,7 +107,6 @@ export function InterviewRoom() {
   const finishAnswerControllerRef = useRef<AbortController | null>(null);
   const taskRefreshControllerRef = useRef<AbortController | null>(null);
   const exitSessionControllerRef = useRef<AbortController | null>(null);
-  const materialOperationRef = useRef<{ fingerprint: string; idempotencyKey: string } | null>(null);
   const startingSessionIdRef = useRef<string | null>(null);
   const exitSessionLockRef = useRef(false);
   const finishingAnswerLockRef = useRef(false);
@@ -111,9 +115,20 @@ export function InterviewRoom() {
   const isQuestionSpeakingRef = useRef(false);
   const questionAudioRef = useRef<HTMLAudioElement | null>(null);
   const questionSpeechTokenRef = useRef(0);
-  const microphoneTestRef = useRef<MicrophoneTestSession | null>(null);
-  const microphoneTestGenerationRef = useRef(0);
-  const microphoneVoiceDetectedRef = useRef(false);
+  const {
+    microphoneDevices,
+    selectedMicrophoneId,
+    microphoneAnalyser,
+    microphoneStatus,
+    microphoneMessage,
+    setMicrophoneStatus,
+    setMicrophoneMessage,
+    handleMicrophoneChange,
+    runMicrophoneCheck,
+    stopMicrophoneTest,
+    microphoneVoiceDetectedRef,
+  } = useMicrophoneCheck();
+
   const audioRecorder = useAudioRecorder({
     selectedMicrophoneId,
     onMessage: setSocketMessage,
@@ -137,6 +152,15 @@ export function InterviewRoom() {
   const progressText = interviewState
     ? `${Math.min(interviewState.current_step_index + 1, interviewState.total_steps)} / ${interviewState.total_steps}`
     : "未开始";
+  const expiryText = (() => {
+    const expiresAt = interviewState?.expires_at;
+    if (!expiresAt || interviewState?.status === "completed") return null;
+    const msLeft = new Date(expiresAt).getTime() - Date.now();
+    if (msLeft <= 0) return "已过期";
+    const hours = Math.floor(msLeft / 3600000);
+    const mins = Math.floor((msLeft % 3600000) / 60000);
+    return hours > 0 ? `剩余 ${hours}h ${mins}m` : `剩余 ${mins}m`;
+  })();
   const accountQuotaText = currentUser
     ? `${currentUser.credit_balance} 次${currentUser.trial_voucher_count > 0 ? ` / 体验券 ${currentUser.trial_voucher_count} 张` : ""}`
     : "未登录";
@@ -151,15 +175,20 @@ export function InterviewRoom() {
 
   useEffect(() => {
     if (getCookie(CSRF_COOKIE_NAME)) {
-      void loadAccount();
-      void loadActiveSession();
-      void loadHistory();
+      Promise.all([
+        loadAccount(),
+        loadActiveSession(),
+        loadHistory(),
+        loadMaterialForType("job"),
+        loadMaterialForType("postgraduate"),
+      ]).finally(() => setIsInitializing(false));
     } else {
       setCurrentUser(null);
       setHistoryItems([]);
       setSocketMessage("请先登录账号，再进入训练房间。");
+      setIsInitializing(false);
     }
-    void loadMicrophoneDevices();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -180,113 +209,6 @@ export function InterviewRoom() {
       stopMicrophoneTest();
     };
   }, []);
-
-  useEffect(() => {
-    if (!navigator.mediaDevices?.addEventListener) {
-      return;
-    }
-    const handleDeviceChange = () => {
-      void loadMicrophoneDevices();
-    };
-    navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
-    return () => {
-      navigator.mediaDevices.removeEventListener("devicechange", handleDeviceChange);
-    };
-  }, []);
-
-  async function loadMicrophoneDevices() {
-    if (!navigator.mediaDevices?.enumerateDevices) {
-      setMicrophoneStatus("failed");
-      setMicrophoneMessage("当前浏览器不支持麦克风设备枚举，请使用新版 Chrome 或 Edge。");
-      return;
-    }
-    const devices = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === "audioinput");
-    setMicrophoneDevices(devices);
-    setSelectedMicrophoneId((currentDeviceId) => currentDeviceId || devices[0]?.deviceId || "");
-  }
-
-  function handleMicrophoneChange(deviceId: string) {
-    stopMicrophoneTest();
-    setSelectedMicrophoneId(deviceId);
-    setMicrophoneStatus("idle");
-    setMicrophoneMessage("已切换输入设备，请重新检测麦克风。");
-  }
-
-  function microphoneConstraints(): MediaStreamConstraints {
-    const audio: MediaTrackConstraints = {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    };
-    if (selectedMicrophoneId) {
-      audio.deviceId = { exact: selectedMicrophoneId };
-    }
-    return { audio };
-  }
-
-  function stopMicrophoneTest() {
-    microphoneTestGenerationRef.current += 1;
-    setMicrophoneAnalyser(null);
-    microphoneVoiceDetectedRef.current = false;
-    const session = microphoneTestRef.current;
-    microphoneTestRef.current = null;
-    if (!session) {
-      return;
-    }
-    session.source.disconnect();
-    session.stream.getTracks().forEach((track) => track.stop());
-    void session.context.close();
-  }
-
-  async function runMicrophoneCheck() {
-    const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
-    if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) {
-      setMicrophoneStatus("failed");
-      setMicrophoneMessage("当前浏览器不支持录音，请使用新版 Chrome 或 Edge。");
-      return;
-    }
-    stopMicrophoneTest();
-    const generation = microphoneTestGenerationRef.current + 1;
-    microphoneTestGenerationRef.current = generation;
-    setMicrophoneStatus("testing");
-    setMicrophoneMessage("正在打开麦克风，请试着说一句话。");
-    microphoneVoiceDetectedRef.current = false;
-    let stream: MediaStream | null = null;
-    let context: AudioContext | null = null;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints());
-      if (generation !== microphoneTestGenerationRef.current) {
-        stream.getTracks().forEach((track) => track.stop());
-        return;
-      }
-      await loadMicrophoneDevices();
-      if (generation !== microphoneTestGenerationRef.current) {
-        stream.getTracks().forEach((track) => track.stop());
-        return;
-      }
-      context = new AudioContextCtor();
-      const source = context.createMediaStreamSource(stream);
-      const analyser = context.createAnalyser();
-      analyser.fftSize = 1024;
-      source.connect(analyser);
-      microphoneTestRef.current = { context, source, analyser, stream };
-      setMicrophoneAnalyser(analyser);
-      window.setTimeout(() => {
-        if (!microphoneVoiceDetectedRef.current && microphoneTestRef.current) {
-          setMicrophoneMessage("麦克风已打开，但声音偏小。请靠近麦克风或换一个输入设备。");
-        }
-      }, 1800);
-    } catch {
-      stream?.getTracks().forEach((track) => track.stop());
-      void context?.close();
-      if (generation !== microphoneTestGenerationRef.current) {
-        return;
-      }
-      setMicrophoneStatus("failed");
-      setMicrophoneMessage("无法打开麦克风，请在浏览器地址栏允许麦克风权限后重新检测。");
-      setMicrophoneAnalyser(null);
-    }
-  }
 
   function goToMicrophoneCheck(resume = false) {
     if (!resume && selectedModuleNeedsMaterial && !currentMaterial) {
@@ -623,82 +545,6 @@ export function InterviewRoom() {
     }
   }
 
-  async function prepareMaterial() {
-    setIsPreparingMaterial(true);
-    const formData = new FormData();
-    formData.append("interview_type", selectedModule.type);
-    if (selectedModule.type === "job") {
-      if (!jobResumeFile || !jobTitle.trim() || !jobRequirements.trim()) {
-        setSocketMessage("工作面试需要简历文件、目标岗位和岗位要求。");
-        setIsPreparingMaterial(false);
-        return;
-      }
-      formData.append("resume_file", jobResumeFile);
-      formData.append("job_title", jobTitle.trim());
-      formData.append("job_requirements", jobRequirements.trim());
-    }
-    if (selectedModule.type === "postgraduate") {
-      if (!postgraduateSchool.trim() || !postgraduateMajor.trim()) {
-        setSocketMessage("研究生复试需要先填写目标院校和报考专业。");
-        setIsPreparingMaterial(false);
-        return;
-      }
-      formData.append("target_school", postgraduateSchool.trim());
-      formData.append("major", postgraduateMajor.trim());
-      if (postgraduateDirection.trim()) {
-        formData.append("research_direction", postgraduateDirection.trim());
-      }
-    }
-
-    const materialFingerprint = JSON.stringify({
-      interviewType: selectedModule.type,
-      resumeFile: jobResumeFile && {
-        name: jobResumeFile.name,
-        size: jobResumeFile.size,
-        type: jobResumeFile.type,
-        lastModified: jobResumeFile.lastModified,
-      },
-      jobTitle: jobTitle.trim(),
-      jobRequirements: jobRequirements.trim(),
-      targetSchool: postgraduateSchool.trim(),
-      major: postgraduateMajor.trim(),
-      researchDirection: postgraduateDirection.trim(),
-    });
-    if (!materialOperationRef.current || materialOperationRef.current.fingerprint !== materialFingerprint) {
-      materialOperationRef.current = {
-        fingerprint: materialFingerprint,
-        idempotencyKey: createIdempotencyKey(),
-      };
-    }
-    const operationKey = materialOperationRef.current.idempotencyKey;
-
-    let result: Awaited<ReturnType<typeof uploadInterviewMaterial>>;
-    try {
-      result = await uploadInterviewMaterial(formData, { idempotencyKey: operationKey });
-    } catch {
-      // 断网或超时无法确认服务端是否已落库，保留本次操作键供用户重试。
-      setIsPreparingMaterial(false);
-      setSocketMessage("资料分析请求失败，请检查网络后重试。");
-      return;
-    }
-    const { response, data } = result;
-    const hasDefinitiveOutcome = response.ok || (response.status >= 400 && response.status < 500);
-    // 成功或 4xx 业务拒绝的结果明确；5xx 可能由网关在服务端落库后产生，仍保留原键。
-    if (hasDefinitiveOutcome && materialOperationRef.current?.idempotencyKey === operationKey) {
-      materialOperationRef.current = null;
-    }
-    setIsPreparingMaterial(false);
-
-    if (!response.ok) {
-      const errorMessage = getApiErrorMessage(data, "请检查文件和填写内容。");
-      setSocketMessage(`资料分析失败：${errorMessage}`);
-      return;
-    }
-
-    setMaterialsByType((previous) => ({ ...previous, [data.interview_type]: data }));
-    setSocketMessage(data.interview_type === "job" ? "简历和岗位要求已分析，可以开始工作面试。" : "复试院校和专业信息已保存，可以开始模拟。");
-  }
-
   function setQuestionSpeakingState(value: boolean) {
     isQuestionSpeakingRef.current = value;
     setIsQuestionSpeaking(value);
@@ -810,7 +656,8 @@ export function InterviewRoom() {
       if ((err as Error)?.name === "AbortError") return;
       questionAudioCtxRef.current?.close();
       questionAudioCtxRef.current = null;
-      setSocketMessage("腾讯云语音合成暂时不可用，已切换为浏览器本地播报。");
+      const hint = err instanceof Error ? err.message : "语音合成暂时不可用";
+      setSocketMessage(`${hint}，已切换为浏览器本地播报。`);
       speakQuestionWithBrowser(questionText, interviewType, token);
     }
   }
@@ -1244,6 +1091,10 @@ export function InterviewRoom() {
     </div>
   ) : null;
 
+  if (isInitializing) {
+    return <main className={roomClasses("workspace-page interview-page route-loading")}>页面加载中...</main>;
+  }
+
   if (routeStage === "check") {
     return (
       <main className={roomClasses("workspace-page interview-page")}>
@@ -1382,7 +1233,7 @@ export function InterviewRoom() {
             </div>
           )}
           <div className={roomClasses("workspace-header-actions")}>
-            <span className={roomClasses("session-pill")}>{currentUser ? "服务在线" : "未登录"} · {isSelectionStage ? "选择场景" : progressText}</span>
+            <span className={roomClasses("session-pill")}>{currentUser ? "服务在线" : "未登录"} · {isSelectionStage ? "选择场景" : progressText}{expiryText ? ` · ${expiryText}` : ""}</span>
             <span className={roomClasses("credit-pill")}>
               <AppIcon icon="lucide:coins" size={16} />
               {accountQuotaText}
@@ -1583,7 +1434,7 @@ export function InterviewRoom() {
                   shape="rounded"
                   loading={isPreparingMaterial}
                   disabled={isPreparingMaterial}
-                  onClick={() => void prepareMaterial()}
+                  onClick={() => void prepareMaterialFromHook(selectedModule.type, setSocketMessage)}
                 >
                   <AppIcon icon="lucide:sparkles" size={17} />
                   {isPreparingMaterial ? "分析中" : currentMaterial ? "重新分析" : "分析资料"}
@@ -1671,7 +1522,7 @@ export function InterviewRoom() {
                 <p>暂无训练记录。完成第一次模拟后，这里会显示中断恢复入口和历史复盘。</p>
               ) : (
                 <div className={roomClasses("history-list")}>
-                  {historyItems.slice(0, 5).map((item) => {
+                  {historyItems.map((item) => {
                     const module = moduleByType(item.interview_type);
                     return (
                       <article className={roomClasses("history-list-item")} key={item.session_id}>

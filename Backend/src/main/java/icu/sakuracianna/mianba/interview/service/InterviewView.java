@@ -15,13 +15,14 @@ public record InterviewView(
         @JsonProperty("current_question") Question currentQuestion,
         @JsonProperty("active_task") TaskView activeTask,
         Object report,
-        @JsonProperty("updated_at") Instant updatedAt) {
+        @JsonProperty("updated_at") Instant updatedAt,
+        @JsonProperty("expires_at") Instant expiresAt) {
 
     /** 在不改变会话业务字段的前提下附加刷新恢复所需的当前任务。 */
     public InterviewView withActiveTask(TaskView task) {
         return new InterviewView(
                 id, interviewType, status, currentTurnIndex, totalTurns,
-                currentQuestion, task, report, updatedAt);
+                currentQuestion, task, report, updatedAt, expiresAt);
     }
 
     /** 当前轮次问题投影，不包含模型提示词或材料原文。 */
