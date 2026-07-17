@@ -5,6 +5,7 @@ import { AccountSettingsPanel } from "./AccountSettingsPanel";
 import { AppIcon } from "../../components/AppIcon";
 import { AvatarStage } from "../../components/AvatarStage";
 import { BrandLogo } from "../../components/BrandLogo";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { TaskProgress } from "./components/TaskProgress";
 import { InterviewReport } from "./components/InterviewReport";
 import { RecordingControls } from "./components/RecordingControls";
@@ -91,6 +92,8 @@ export function InterviewRoom() {
   const [microphoneStatus, setMicrophoneStatus] = useState<"idle" | "testing" | "ready" | "failed">("idle");
   const [microphoneMessage, setMicrophoneMessage] = useState("正式进入面试前，请先选择并检测麦克风。");
   const [pendingResume, setPendingResume] = useState(false);
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState<InterviewHistoryItem | null>(null);
+  const [confirmExitTarget, setConfirmExitTarget] = useState<string | null>(null);
   const [socketMessage, setSocketMessage] = useState("正在检查是否有未完成训练。");
   const roomGenerationRef = useRef(0);
   const startSessionControllerRef = useRef<AbortController | null>(null);
@@ -1047,10 +1050,10 @@ export function InterviewRoom() {
     if (deletingHistorySessionId) {
       return;
     }
-    const confirmed = window.confirm("删除后将无法在最近训练中恢复这场记录，确认删除吗？");
-    if (!confirmed) {
-      return;
-    }
+    setConfirmDeleteItem(item);
+  }
+
+  async function confirmDeleteHistoryItem(item: InterviewHistoryItem) {
     const generation = roomGenerationRef.current;
     setDeletingHistorySessionId(item.session_id);
     try {
@@ -1107,15 +1110,19 @@ export function InterviewRoom() {
     if (exitSessionLockRef.current) {
       return;
     }
-    const isLeavingRoom = routeStage === "room";
     const visibleSession = interviewState ?? activeSession;
     const pendingSessionId = startingSessionIdRef.current;
     const targetSessionId = pendingSessionId
       ?? (visibleSession && visibleSession.status !== "completed" ? visibleSession.session_id : null);
-    if (targetSessionId && !window.confirm("退出会终止当前未完成训练，并取消仍在处理的 AI 任务。确认继续吗？")) {
+    if (targetSessionId) {
+      setConfirmExitTarget(targetSessionId);
       return;
     }
+    await doStartFresh(null);
+  }
 
+  async function doStartFresh(targetSessionId: string | null) {
+    const isLeavingRoom = routeStage === "room";
     const pendingStartRequest = startSessionRequestRef.current;
     const generation = roomGenerationRef.current + 1;
     roomGenerationRef.current = generation;
@@ -1687,6 +1694,31 @@ export function InterviewRoom() {
         </aside>
       </section>
       <SafeArea position="bottom" />
+      <ConfirmDialog
+        open={confirmDeleteItem !== null}
+        title="删除训练记录"
+        message="删除后将无法在最近训练中恢复这场记录，确认删除吗？"
+        confirmLabel="删除"
+        variant="danger"
+        onConfirm={() => {
+          if (confirmDeleteItem) void confirmDeleteHistoryItem(confirmDeleteItem);
+          setConfirmDeleteItem(null);
+        }}
+        onCancel={() => setConfirmDeleteItem(null)}
+      />
+      <ConfirmDialog
+        open={confirmExitTarget !== null}
+        title="退出当前训练"
+        message="退出会终止当前未完成训练，并取消仍在处理的 AI 任务。确认继续吗？"
+        confirmLabel="确认退出"
+        variant="danger"
+        onConfirm={() => {
+          const target = confirmExitTarget;
+          setConfirmExitTarget(null);
+          void doStartFresh(target);
+        }}
+        onCancel={() => setConfirmExitTarget(null)}
+      />
     </main>
   );
 }

@@ -1,9 +1,73 @@
-.controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.controls :global(.adm-button) { min-height: 48px; border-radius: 14px; font-weight: 800; }
-.controls :global(.adm-button-content) { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
-.primaryButton { border: 0 !important; color: #fff !important; background: var(--blue) !important; }
-.darkButton { border: 0 !important; color: #fff !important; background: #172033 !important; }
-.secondaryButton { border: 1px solid rgba(15, 23, 42, .14) !important; color: #25324a !important; background: #fff !important; }
-.controls :global(.adm-button):focus-visible { outline: 3px solid rgba(40, 100, 232, .28); outline-offset: 3px; }
-.controls :global(.adm-button-disabled) { opacity: .52; }
-@media (max-width: 480px) { .controls { grid-template-columns: 1fr; } }
+.controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.controls :global(.adm-button) {
+  min-height: 48px;
+  border-radius: 14px;
+  font-weight: 800;
+}
+
+.controls :global(.adm-button-content) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* 开始回答 — 深色主操作，录音时脉冲高亮 */
+.darkButton {
+  border: 0 !important;
+  color: #fff !important;
+  background: #172033 !important;
+  transition: background 200ms ease, box-shadow 200ms ease !important;
+}
+
+.darkButton.recording {
+  background: #ef4444 !important;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2) !important;
+  animation: recordingPulse 2s ease-in-out infinite;
+}
+
+/* 回答完毕 — 蓝色确认操作，未录音时淡化 */
+.primaryButton {
+  border: 0 !important;
+  color: #fff !important;
+  background: #2468f2 !important;
+  transition: background 200ms ease, opacity 200ms ease !important;
+}
+
+/* 次要操作 — 浅色轮廓 */
+.secondaryButton {
+  border: 1px solid rgba(15, 23, 42, 0.13) !important;
+  color: #334155 !important;
+  background: #f8fafc !important;
+  transition: background 150ms ease, border-color 150ms ease !important;
+}
+
+.secondaryButton:hover:not(:global(.adm-button-disabled)) {
+  background: #f1f5f9 !important;
+  border-color: rgba(15, 23, 42, 0.22) !important;
+}
+
+.controls :global(.adm-button):focus-visible {
+  outline: 3px solid rgba(40, 100, 232, 0.28);
+  outline-offset: 3px;
+}
+
+.controls :global(.adm-button-disabled) {
+  opacity: 0.48;
+}
+
+@keyframes recordingPulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2); }
+  50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.08); }
+}
+
+@media (max-width: 480px) {
+  .controls {
+    grid-template-columns: 1fr;
+  }
+}

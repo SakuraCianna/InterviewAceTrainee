@@ -1,7 +1,6 @@
 import type { FormEvent } from "react";
-import { Button } from "antd-mobile";
 import { AppIcon } from "../../components/AppIcon";
-import { roomClasses } from "./roomStyles";
+import styles from "./AccountSettingsPanel.module.css";
 
 type AccountSettingsPanelProps = {
   email: string;
@@ -30,67 +29,82 @@ export function AccountSettingsPanel({
   onRequestCode,
   onSubmit,
 }: AccountSettingsPanelProps) {
+  const codeButtonText = isRequestingCode
+    ? "发送中"
+    : codeCooldownSeconds > 0
+    ? `${codeCooldownSeconds}s`
+    : "获取验证码";
+
   return (
-    <section className={roomClasses("account-settings-panel")} aria-label="账户设置">
-      <div className={roomClasses("account-settings-copy")}>
-        <span className={roomClasses("eyebrow")}>Account Settings</span>
-        <h2>账户与密码</h2>
-        <p>{email}</p>
+    <section className={styles.panel} aria-label="账户设置">
+      <div className={styles.header}>
+        <div className={styles.avatar} aria-hidden="true">
+          <AppIcon icon="lucide:user-round" size={24} />
+        </div>
+        <div>
+          <h2 className={styles.title}>账户设置</h2>
+          <p className={styles.email}>{email}</p>
+        </div>
       </div>
-      <form className={roomClasses("account-password-form")} onSubmit={onSubmit}>
-        <label>
-          <span>邮箱验证码</span>
-          <div className={roomClasses("code-row")}>
-            <div className={roomClasses("input-shell")}>
-              <AppIcon icon="lucide:key-round" size={17} />
+
+      <div className={styles.divider} />
+
+      <form className={styles.form} onSubmit={onSubmit}>
+        <p className={styles.hint}>使用注册邮箱验证码修改账户密码。</p>
+
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="settings-code">邮箱验证码</label>
+          <div className={styles.codeRow}>
+            <div className={styles.inputShell}>
+              <AppIcon icon="lucide:mail" size={16} />
               <input
+                id="settings-code"
+                className={styles.input}
                 value={code}
-                onChange={(event) => onCodeChange(event.currentTarget.value)}
+                onChange={(e) => onCodeChange(e.currentTarget.value)}
                 placeholder="6 位验证码"
                 minLength={6}
                 maxLength={6}
                 required
               />
             </div>
-            <Button
+            <button
               type="button"
-              className={roomClasses("code-button")}
-              fill="outline"
-              shape="rounded"
-              loading={isRequestingCode}
+              className={styles.codeButton}
               disabled={isRequestingCode || codeCooldownSeconds > 0}
               onClick={onRequestCode}
             >
-              {isRequestingCode ? "发送中" : codeCooldownSeconds > 0 ? `${codeCooldownSeconds}s` : "获取"}
-            </Button>
+              {codeButtonText}
+            </button>
           </div>
-        </label>
-        <label>
-          <span>新密码</span>
-          <div className={roomClasses("input-shell")}>
-            <AppIcon icon="lucide:key-round" size={17} />
+        </div>
+
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="settings-password">新密码</label>
+          <div className={styles.inputShell}>
+            <AppIcon icon="lucide:lock" size={16} />
             <input
+              id="settings-password"
+              className={styles.input}
               type="password"
               value={newPassword}
-              onChange={(event) => onPasswordChange(event.currentTarget.value)}
+              onChange={(e) => onPasswordChange(e.currentTarget.value)}
               placeholder="至少 8 位"
               minLength={8}
               required
             />
           </div>
-        </label>
-        <Button
-          className={roomClasses("auth-submit account-password-submit")}
-          color="primary"
-          loading={isChangingPassword}
-          shape="rounded"
-          type="submit"
-        >
-          {isChangingPassword ? "修改中" : "修改密码"}
-        </Button>
-        <p className={roomClasses("account-settings-message")} role="status" aria-live="polite">
-          {message}
-        </p>
+        </div>
+
+        <button type="submit" className={styles.submitButton} disabled={isChangingPassword}>
+          {isChangingPassword ? "修改中…" : "修改密码"}
+        </button>
+
+        {message && (
+          <p className={styles.message} role="status" aria-live="polite">
+            {message}
+          </p>
+        )}
       </form>
     </section>
   );

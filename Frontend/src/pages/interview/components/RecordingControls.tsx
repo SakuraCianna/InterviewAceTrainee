@@ -17,17 +17,18 @@ type RecordingControlsProps = {
 };
 
 export function RecordingControls(props: RecordingControlsProps) {
+  const startClass = `${styles.darkButton}${props.isRecording ? ` ${styles.recording}` : ""}`;
   return (
     <div className={styles.controls} aria-label="回答控制">
       <Button
         type="button"
-        className={styles.darkButton}
+        className={startClass}
         shape="rounded"
         loading={props.isPreparing}
         disabled={props.isRecording || props.isPreparing || props.isFinishing || props.isQuestionSpeaking || props.isTaskPending}
         onClick={props.onStart}
       >
-        <AppIcon icon="lucide:mic" size={18} />
+        <AppIcon icon={props.isRecording ? "lucide:mic" : "lucide:mic"} size={18} />
         {props.isPreparing ? "准备中" : props.isRecording ? "回答中" : "开始回答"}
       </Button>
       <Button
