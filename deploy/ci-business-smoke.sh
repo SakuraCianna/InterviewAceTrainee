@@ -36,6 +36,27 @@ compose() {
   docker compose -f "$COMPOSE_FILE" -f "$CI_COMPOSE_FILE" "$@"
 }
 
+diagnose_worker_task() {
+  local task_id="$1"
+  compose exec -T -e CI_TASK_ID="$task_id" postgres sh -ec '
+    psql --set ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+      --set "task_id=$CI_TASK_ID"
+  ' <<'SQL' || true
+SELECT j.id, j.status, j.stage, j.attempt, j.max_attempts, j.version,
+       (SELECT count(*) FROM outbox_events o
+        WHERE o.aggregate_id = j.id AND o.published_at IS NULL) AS unpublished_outbox,
+       (SELECT count(*) FROM outbox_events o
+        WHERE o.aggregate_id = j.id AND o.published_at IS NOT NULL) AS published_outbox,
+       (SELECT count(*) FROM processed_messages p
+        WHERE p.job_id = j.id) AS processed_messages
+FROM ai_jobs j
+WHERE j.id = :'task_id'::uuid;
+SQL
+  compose exec -T rabbitmq rabbitmqctl -p /mianba list_queues \
+    name messages_ready messages_unacknowledged consumers || true
+  compose logs --no-color --tail 160 worker api || true
+}
+
 request() {
   local output_file="$1"
   shift
@@ -347,6 +368,7 @@ SQL
     esac
     if [[ "$attempt" == "120" ]]; then
       echo "Worker task ${task_id} did not complete within 240 seconds" >&2
+      diagnose_worker_task "$task_id"
       exit 1
     fi
     sleep 2
