@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import com.rabbitmq.client.Channel;
 import icu.sakuracianna.mianba.aiwork.messaging.AiJobEnvelope;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -79,6 +81,26 @@ class AiJobWorkerStateGuardTest {
 
         verify(fixture.channel).basicNack(41L, false, true);
         verify(fixture.channel, never()).basicAck(anyLong(), anyBoolean());
+    }
+
+    @Test
+    void infrastructureDiagnosticContainsOnlyStableDatabaseMetadata() {
+        SQLException cause = new SQLException("permission denied for private_answer", "42501");
+        BadSqlGrammarException failure = new BadSqlGrammarException(
+                "unsafe task", "SELECT private_answer FROM turns", cause);
+        failure.setStackTrace(new StackTraceElement[] {
+                new StackTraceElement(AiJobWorker.class.getName(), "loadInput", "AiJobWorker.java", 257)
+        });
+
+        AiJobWorker.FailureDiagnostic diagnostic = AiJobWorker.diagnoseFailure(failure);
+
+        assertThat(diagnostic.errorType()).isEqualTo("BadSqlGrammarException");
+        assertThat(diagnostic.sqlState()).isEqualTo("42501");
+        assertThat(diagnostic.workerLocation()).isEqualTo("loadInput:257");
+        assertThat(diagnostic.toString())
+                .doesNotContain("private_answer")
+                .doesNotContain("SELECT")
+                .doesNotContain("permission denied");
     }
 
     @Test

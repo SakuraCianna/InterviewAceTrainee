@@ -174,10 +174,41 @@ public class AiJobWorker {
             RuntimeException exception,
             Channel channel,
             long deliveryTag) throws IOException {
-        LOGGER.error("AI worker infrastructure failure job_id={} error_type={}",
-                envelope.jobId(), exception.getClass().getSimpleName());
+        FailureDiagnostic diagnostic = diagnoseFailure(exception);
+        LOGGER.error(
+                "AI worker infrastructure failure job_id={} error_type={} sql_state={} worker_location={}",
+                envelope.jobId(), diagnostic.errorType(), diagnostic.sqlState(),
+                diagnostic.workerLocation());
         // 数据库或进程级异常未形成可靠状态，交还队列并由 quorum delivery-limit 兜底。
         channel.basicNack(deliveryTag, false, true);
+    }
+
+    /** 只提取稳定的数据库分类和本站代码位置，不记录 SQL、参数、异常消息或用户内容。 */
+    static FailureDiagnostic diagnoseFailure(Throwable failure) {
+        String errorType = failure == null ? "Unknown" : failure.getClass().getSimpleName();
+        String sqlState = "none";
+        String workerLocation = "unknown";
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < 12; depth++) {
+            if ("none".equals(sqlState) && current instanceof SQLException sqlException) {
+                String candidate = sqlException.getSQLState();
+                if (candidate != null && candidate.matches("[0-9A-Z]{5}")) {
+                    sqlState = candidate;
+                }
+            }
+            if ("unknown".equals(workerLocation)) {
+                for (StackTraceElement frame : current.getStackTrace()) {
+                    if (AiJobWorker.class.getName().equals(frame.getClassName())) {
+                        int line = Math.max(frame.getLineNumber(), 0);
+                        workerLocation = frame.getMethodName() + ":" + line;
+                        break;
+                    }
+                }
+            }
+            Throwable next = current.getCause();
+            current = next == current ? null : next;
+        }
+        return new FailureDiagnostic(errorType, sqlState, workerLocation);
     }
 
     private boolean alreadyProcessed(UUID messageId) {
@@ -693,6 +724,9 @@ public class AiJobWorker {
     private enum FailureDisposition {
         RETRY_SCHEDULED,
         TERMINAL
+    }
+
+    record FailureDiagnostic(String errorType, String sqlState, String workerLocation) {
     }
 
     private record JobClaim(
