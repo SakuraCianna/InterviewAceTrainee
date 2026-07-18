@@ -97,11 +97,10 @@ spring:
         initialize-schema: ${MIANBA_KNOWLEDGE_INITIALIZE_SCHEMA:false}
         index-name: ${MIANBA_KNOWLEDGE_INDEX_NAME:mianba-public-knowledge-v1}
         prefix: ${MIANBA_KNOWLEDGE_KEY_PREFIX:mianba:knowledge:v1:}
-        distance-metric: COSINE
-        vector-algorithm: HNSW
-        hnsw-m: 16
-        hnsw-ef-construction: 100
-        hnsw-ef-runtime: 30
+        hnsw:
+          m: 16
+          ef-construction: 100
+          ef-runtime: 30
 
 management:
   endpoints:

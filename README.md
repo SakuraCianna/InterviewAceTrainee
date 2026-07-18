@@ -264,7 +264,7 @@ API 对个性化输入和业务内容执行以下边界：
 
 | 服务 | 内存上限 | 内存 + Swap 上限 | CPU | 关键限制 |
 | --- | ---: | ---: | ---: | --- |
-| API | 896 MiB | 1152 MiB | 1.25 | Xmx 448 MiB, 本地 ONNX, Hikari 6, Tomcat 80 |
+| API | 1024 MiB | 1280 MiB | 1.25 | Xmx 256 MiB, 本地 ONNX, Hikari 6, Tomcat 80 |
 | Worker | 640 MiB | 896 MiB | 0.75 | Xmx 352 MiB, Hikari 4, consumer/LLM 1 |
 | Material Parser | 256 MiB | 384 MiB | 0.35 | 独立进程 Xmx 96 MiB, 单并发, 无数据库与公网 |
 | PostgreSQL | 960 MiB | 1152 MiB | 1.10 | shared_buffers 256 MB, max connections 40 |

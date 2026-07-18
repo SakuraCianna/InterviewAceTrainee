@@ -229,6 +229,7 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: "6379"
       SPRING_DATA_REDIS_USERNAME: mianba_app
+      SPRING_DATA_REDIS_CLIENT_TYPE: jedis
       SPRING_RABBITMQ_HOST: rabbitmq
       SPRING_RABBITMQ_PORT: "5672"
       SPRING_RABBITMQ_USERNAME: mianba_api
@@ -248,9 +249,11 @@ services:
       MIANBA_MATERIAL_PARSER_BASE_URL: http://material-parser:8090
       MIANBA_MATERIAL_PARSER_CONNECT_TIMEOUT: 2s
       MIANBA_MATERIAL_PARSER_REQUEST_TIMEOUT: 10s
+      SPRING_SERVLET_MULTIPART_LOCATION: /tmp
       JAVA_TOOL_OPTIONS: >-
-        -Xms128m -Xmx448m -XX:MaxMetaspaceSize=160m -XX:+UseG1GC
-        -XX:+ExitOnOutOfMemoryError -Djava.io.tmpdir=/tmp
+        -Xms128m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:+UseG1GC
+        -XX:+ExitOnOutOfMemoryError -XX:ActiveProcessorCount=2
+        -Djava.io.tmpdir=/opt/mianba-native
     secrets:
       - source: postgres_api_password
         target: spring.datasource.password
@@ -296,8 +299,12 @@ services:
     expose:
       - "8000"
     <<: *java-security
-    mem_limit: 896m
-    memswap_limit: 1152m
+    tmpfs:
+      - /tmp:size=96m,mode=1777
+      # ONNX Runtime 需要从应用私有临时目录加载原生库；通用 /tmp 仍不承载可执行文件。
+      - /opt/mianba-native:size=64m,mode=0700,uid=10001,gid=10001,exec
+    mem_limit: 1024m
+    memswap_limit: 1280m
     cpus: "1.25"
     stop_grace_period: 45s
     healthcheck:

@@ -23,10 +23,13 @@ COPY src/main src/main
 RUN mvn --batch-mode --no-transfer-progress -DskipTests package
 
 # 最终层只包含 JRE、健康检查工具与可执行 JAR，不包含源码或测试文件。
-FROM eclipse-temurin:21.0.11_10-jre-alpine-3.23@sha256:3f08b13888f595cc49edabea7250ba69499ba25602b267da591720769400e08c
-RUN apk add --no-cache curl \
-    && addgroup -S -g 10001 mianba \
-    && adduser -S -D -H -u 10001 -G mianba mianba
+FROM eclipse-temurin:21.0.11_10-jre-noble@sha256:373787d1d45a87f084fda43e7de0e9acf5eedee049446efac738f13587ec4c64
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends curl libstdc++6 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 mianba \
+    && useradd --system --uid 10001 --gid 10001 --no-create-home \
+      --home-dir /nonexistent --shell /usr/sbin/nologin mianba
 WORKDIR /app
 COPY --from=build --chown=10001:10001 /workspace/target/mianba-backend-*.jar /app/app.jar
 COPY --from=build --chown=10001:10001 /opt/mianba-model /opt/mianba-model
