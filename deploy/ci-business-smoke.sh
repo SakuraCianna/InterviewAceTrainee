@@ -80,6 +80,15 @@ compose exec -T -e CI_SMOKE_EMAIL="$EMAIL" -e CI_SMOKE_CODE="$CODE" redis sh -ec
     "mianba:auth:email-code:${CI_SMOKE_EMAIL}" 300 "$CI_SMOKE_CODE" >/dev/null
 '
 
+# 高压解析可能成功，再加恢复与后续五轮面试，最多消耗三张券；仅调整隔离 CI 测试夹具。
+compose exec -T postgres sh -ec '
+  psql --set ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB"
+' <<'SQL'
+UPDATE system_configs
+SET value_json = '3'::jsonb, updated_at = now()
+WHERE config_key = 'new_user_trial_vouchers';
+SQL
+
 printf '{"email":"%s","password":"%s","code":"%s"}\n' \
   "$EMAIL" "$PASSWORD" "$CODE" > "${TEMP_DIR}/register-request.json"
 request "${TEMP_DIR}/register-response.json" \
@@ -168,9 +177,9 @@ BOMB_STATUS="$(curl --silent --show-error --insecure --max-time 30 \
   --header "X-CSRF-Token: ${CSRF_TOKEN}" \
   --header "Idempotency-Key: ci-parser-pressure-$(new_uuid)" \
   --form "session_id=${PRESSURE_SESSION_ID}" \
-  --form 'interview_type=job' \
-  --form 'job_title=Backend Engineer' \
-  --form 'job_requirements=Build reliable distributed services' \
+  --form 'interview_type=postgraduate' \
+  --form 'target_school=CI Test University' \
+  --form 'major=Computer Science' \
   --form "resume_file=@${TEMP_DIR}/resource-pressure.pdf;type=application/pdf" \
   "${BASE_URL}/api/interviews/personalized")"
 case "$BOMB_STATUS" in
@@ -213,9 +222,9 @@ request "${TEMP_DIR}/normal-session.json" \
   --header "X-CSRF-Token: ${CSRF_TOKEN}" \
   --header "Idempotency-Key: ci-parser-recovery-$(new_uuid)" \
   --form "session_id=${RECOVERY_SESSION_ID}" \
-  --form 'interview_type=job' \
-  --form 'job_title=Backend Engineer' \
-  --form 'job_requirements=Build reliable distributed services' \
+  --form 'interview_type=postgraduate' \
+  --form 'target_school=CI Test University' \
+  --form 'major=Computer Science' \
   --form "resume_file=@${TEMP_DIR}/normal-resume.txt;type=text/plain" \
   "${BASE_URL}/api/interviews/personalized"
 test "$(json_value "${TEMP_DIR}/normal-session.json" session_id)" = "$RECOVERY_SESSION_ID"
