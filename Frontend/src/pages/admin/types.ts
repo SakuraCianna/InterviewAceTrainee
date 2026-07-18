@@ -79,12 +79,15 @@ export type ContentSafetyLogEntry = {
   id: string;
   user_email?: string | null;
   session_id?: string | null;
+  request_id?: string | null;
+  job_id?: string | null;
   source: string;
   action: string;
   risk_level: string;
   categories: string[];
-  matched_terms: string[];
-  content_excerpt?: string | null;
+  rule_ids: string[];
+  content_digest?: string | null;
+  disposition: string;
   message_code?: string | null;
   created_at: string;
 };
@@ -187,31 +190,31 @@ export type InterviewCoreCapabilityCards = {
   ready: boolean;
   source_version?: string | null;
   source_policy?: string | null;
-  total_seed_count: number;
-  counts_by_interview_type: Record<string, number>;
+  total_document_count: number;
+  job_document_count: number;
+  postgraduate_document_count: number;
   expected_minimums: Record<string, number>;
-  missing_preset_files: string[];
-  duplicate_seed_ids: string[];
+  validation_enforced: boolean;
   error?: string | null;
 };
 
 export type InterviewCoreCapabilityVectors = {
   ready: boolean;
-  table_name: string;
-  table_exists: boolean;
-  expected_seed_count: number;
-  total_vector_count: number;
-  non_empty_vector_count: number;
-  distinct_seed_count?: number | null;
+  enabled: boolean;
+  status: string;
+  store: string;
+  document_count: number;
+  chunk_count: number;
+  indexed_chunk_count: number;
   coverage_rate: number;
-  seed_id_column?: string | null;
-  vector_column?: string | null;
-  embedding_model_column?: string | null;
-  embedding_models: { model: string; count: number }[];
-  status_column?: string | null;
-  status_counts: { status: string; count: number }[];
-  missing_observation_columns: string[];
-  detail?: string | null;
+  embedding_model?: string | null;
+  embedding_provider_available: boolean;
+  vector_dimensions: number;
+  failure_count: number;
+  last_error_code?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type InterviewCoreRecallProbe = {
@@ -229,13 +232,20 @@ export type InterviewCoreRecallProbe = {
 
 export type InterviewCoreRecallQuality = {
   ready: boolean;
-  probe_count: number;
-  passed_probe_count: number;
-  probes: InterviewCoreRecallProbe[];
+  enabled: boolean;
+  status: string;
+  coverage_rate: number;
+  job_probe_ready: boolean;
+  postgraduate_probe_ready: boolean;
 };
 
 export type InterviewCoreHealth = {
   ready: boolean;
+  provider_ready: boolean;
+  rag_ready: boolean;
+  public_knowledge_rag_ready: boolean;
+  persistent_user_vector_store_enabled: false;
+  embedding_provider_available: boolean;
   capability_cards: InterviewCoreCapabilityCards;
   capability_vectors: InterviewCoreCapabilityVectors;
   recall_quality: InterviewCoreRecallQuality;

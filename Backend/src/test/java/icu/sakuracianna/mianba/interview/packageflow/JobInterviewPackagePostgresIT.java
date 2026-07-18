@@ -189,9 +189,9 @@ class JobInterviewPackagePostgresIT {
                     INSERT INTO interview_packages(
                         id, user_id, start_idempotency_key, request_hash, status,
                         current_stage_code, charged_credit, plan_version, rubric_version,
-                        material_snapshot, expires_at, created_at, updated_at)
+                        expires_at, created_at, updated_at)
                     VALUES (?, ?, ?, ?, 'COMPLETED', 'TECHNICAL_FIRST', 3,
-                            'job-cn-v1', 'job-rubric-v1', '{}'::jsonb,
+                            'job-cn-v1', 'job-rubric-v1',
                             timestamptz '2026-01-30 00:00:00+00',
                             timestamptz '2026-01-01 00:00:00+00',
                             timestamptz '2026-01-01 00:00:00+00')
@@ -614,9 +614,9 @@ class JobInterviewPackagePostgresIT {
                 INSERT INTO interview_packages(
                     id, user_id, voucher_id, start_idempotency_key, request_hash,
                     status, current_stage_code, charged_credit, admin_unlimited_usage,
-                    plan_version, rubric_version, material_snapshot)
+                    plan_version, rubric_version)
                 VALUES (?, ?, ?, ?, ?, ?, 'TECHNICAL_FIRST', ?, ?,
-                        'job-cn-v1', 'job-rubric-v1', '{}'::jsonb)
+                        'job-cn-v1', 'job-rubric-v1')
                 """,
                 packageId,
                 userId,

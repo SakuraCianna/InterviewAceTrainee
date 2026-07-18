@@ -46,7 +46,7 @@ class AiJobWorkerReportTest {
                 .containsEntry("prompt_version", "job-turn-v2")
                 .containsEntry("rubric_version", "job-package-rubric-v1")
                 .containsEntry("output_schema_version", "turn-evaluation-v2")
-                .containsEntry("material_context_applied", true);
+                .containsEntry("public_knowledge_applied", true);
         assertThat(report.body().get("summary").toString()).contains("本场完成 2 轮", "80 分");
 
         @SuppressWarnings("unchecked")

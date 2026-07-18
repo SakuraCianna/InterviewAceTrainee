@@ -133,7 +133,7 @@ class DataRetentionSchedulerTest {
                 .contains("version = version + 1")
                 .contains("context_snapshot <> '{}'::jsonb OR content_erased_at IS NULL")
                 .doesNotContain("plan_snapshot");
-        String packageUpdate = jdbc.updateContaining("material_snapshot = '{}'::jsonb").sql();
+        String packageUpdate = jdbc.updateContaining("SET content_erased_at = now()").sql();
         assertThat(packageUpdate)
                 .contains("UPDATE interview_packages")
                 .contains("content_erased_at = now()")
@@ -141,7 +141,7 @@ class DataRetentionSchedulerTest {
                 .contains("content_erased_at IS NULL")
                 .doesNotContain("plan_snapshot");
         assertThat(jdbc.indexOfEvent("context_snapshot = '{}'::jsonb"))
-                .isLessThan(jdbc.indexOfEvent("material_snapshot = '{}'::jsonb"));
+                .isLessThan(jdbc.indexOfEvent("SET content_erased_at = now()"));
     }
 
     @Test
@@ -162,11 +162,11 @@ class DataRetentionSchedulerTest {
 
         assertThat(erased).isEqualTo(1);
         assertThat(jdbc.updatesMatching("context_snapshot = '{}'::jsonb")).hasSize(2);
-        assertThat(jdbc.updatesMatching("material_snapshot = '{}'::jsonb")).hasSize(2);
+        assertThat(jdbc.updatesMatching("SET content_erased_at = now()")).hasSize(2);
     }
 
     @Test
-    void purgeOnlyDeletesOldUnreferencedMaterialTombstones() {
+    void retentionNeverAccessesRemovedPrivateMaterialStorage() {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         DataRetentionScheduler scheduler = new DataRetentionScheduler(
                 jdbc,
@@ -185,30 +185,10 @@ class DataRetentionSchedulerTest {
                 .contains("session_row.status IN ('cancelled', 'deleting', 'deleted')")
                 .contains("stage = 'SESSION_CLOSED'")
                 .contains("turn_row.status IN ('waiting_answer', 'processing')")
-                .contains("material.status = 'deleted'")
-                .contains("material.updated_at <= now() - interval '7 days'")
                 .contains("SELECT 1 FROM sessions session_row")
-                .contains("session_row.material_id = material.id")
-                .contains("SELECT 1 FROM ai_jobs job")
-                .contains("job.material_id = material.id")
-                .contains("LIMIT 500");
-    }
-
-    @Test
-    void materialAnonymizationReplacesBothContentHashesWithRecordScopedTombstones() {
-        MaterialRetentionJdbcTemplate jdbc = new MaterialRetentionJdbcTemplate(UUID.randomUUID());
-        DataRetentionScheduler scheduler = new DataRetentionScheduler(
-                jdbc,
-                immediateTransactions(),
-                mock(SessionDeletionCoordinator.class));
-
-        scheduler.enforceRetention();
-
-        assertThat(jdbc.updates).anySatisfy(sql -> assertThat(sql)
-                .contains("source_sha256 = encode(digest(")
-                .contains("'mianba:material-source-erased:v1:' || id::text, 'sha256'")
-                .contains("request_hash = encode(digest(")
-                .contains("'mianba:material-request-erased:v1:' || id::text, 'sha256'"));
+                .contains("FROM ai_jobs job")
+                .doesNotContain("FROM materials", "UPDATE materials", "material_id", "material_snapshot",
+                        "resume_text", "job_requirements", "profile_summary");
     }
 
     @Test
@@ -257,35 +237,6 @@ class DataRetentionSchedulerTest {
         }
     }
 
-    private static final class MaterialRetentionJdbcTemplate extends JdbcTemplate {
-        private final UUID materialId;
-        private final List<String> updates = new ArrayList<>();
-
-        private MaterialRetentionJdbcTemplate(UUID materialId) {
-            this.materialId = materialId;
-        }
-
-        @Override
-        public <T> List<T> query(String sql, org.springframework.jdbc.core.RowMapper<T> mapper, Object... args) {
-            if (!sql.contains("FROM materials") || !sql.contains("retention_until <= now()")) {
-                return List.of();
-            }
-            return List.of(RetentionQueryJdbcTemplate.map(mapper, materialId));
-        }
-
-        @Override
-        public int update(String sql, Object... args) {
-            updates.add(sql);
-            return 1;
-        }
-
-        @Override
-        public int update(String sql) {
-            updates.add(sql);
-            return 1;
-        }
-    }
-
     private static final class PackageRetentionJdbcTemplate extends JdbcTemplate {
         private final List<UUID> expiringPackages;
         private final List<UUID> packagesWithExpiredContent;
@@ -328,7 +279,7 @@ class DataRetentionSchedulerTest {
             if (sql.contains("UPDATE interview_packages") && sql.contains("status = 'EXPIRED'")) {
                 return expiryResults.getOrDefault((UUID) args[0], 0);
             }
-            if (sql.contains("UPDATE interview_packages") && sql.contains("material_snapshot")) {
+            if (sql.contains("UPDATE interview_packages") && sql.contains("SET content_erased_at = now()")) {
                 return erasureResults.getOrDefault((UUID) args[0], 0);
             }
             if (sql.contains("UPDATE interview_package_stages")) {

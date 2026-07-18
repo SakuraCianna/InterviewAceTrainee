@@ -27,7 +27,7 @@ public interface InterviewAiGenerator {
 
     /**
      * 传递给模型适配器的最小面试上下文。
-     * 材料字段已经过筛选，不包含原始简历全文；适配器仍必须将其视为不可信输入。
+     * 公共知识字段仅来自版本化语料；适配器仍必须将其视为不可信输入。
      */
     record InterviewAiInput(
             String interviewType,
@@ -36,11 +36,12 @@ public interface InterviewAiGenerator {
             String answer,
             int turnIndex,
             int totalTurns,
-            Map<String, String> materialContext,
+            Map<String, String> publicKnowledgeContext,
             List<String> previousQuestions,
             String jobStageCode) {
         public InterviewAiInput {
-            materialContext = Map.copyOf(materialContext == null ? Map.of() : materialContext);
+            publicKnowledgeContext = Map.copyOf(
+                    publicKnowledgeContext == null ? Map.of() : publicKnowledgeContext);
             previousQuestions = List.copyOf(previousQuestions == null ? List.of() : previousQuestions);
         }
 
@@ -52,10 +53,10 @@ public interface InterviewAiGenerator {
                 String answer,
                 int turnIndex,
                 int totalTurns,
-                Map<String, String> materialContext,
+                Map<String, String> publicKnowledgeContext,
                 List<String> previousQuestions) {
             this(interviewType, roundName, question, answer, turnIndex, totalTurns,
-                    materialContext, previousQuestions, null);
+                    publicKnowledgeContext, previousQuestions, null);
         }
 
         /** 保留无历史问题调用方式，供测试替身和独立适配器兼容使用。 */
@@ -66,9 +67,9 @@ public interface InterviewAiGenerator {
                 String answer,
                 int turnIndex,
                 int totalTurns,
-                Map<String, String> materialContext) {
+                Map<String, String> publicKnowledgeContext) {
             this(interviewType, roundName, question, answer, turnIndex, totalTurns,
-                    materialContext, List.of(), null);
+                    publicKnowledgeContext, List.of(), null);
         }
 
         /** 判断当前回答完成后是否应生成最终报告。 */
@@ -80,7 +81,7 @@ public interface InterviewAiGenerator {
         public InterviewAiInput withPreviousQuestions(List<String> questions) {
             return new InterviewAiInput(
                     interviewType, roundName, question, answer, turnIndex, totalTurns,
-                    materialContext, questions, jobStageCode);
+                    publicKnowledgeContext, questions, jobStageCode);
         }
     }
 

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import icu.sakuracianna.mianba.identity.hcaptcha.HcaptchaProperties;
 import icu.sakuracianna.mianba.interview.material.MaterialParserProperties;
+import icu.sakuracianna.mianba.interview.safety.ContentSafetyProperties;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
@@ -20,7 +21,7 @@ class RuntimeConfigurationValidatorTest {
 
         assertThatThrownBy(() -> RuntimeConfigurationValidator.validate(
                 runtime, security, infrastructure(), identity(), speech(), new AiRuntimeProperties("", false),
-                materialParser(), hcaptcha()))
+                materialParser(), hcaptcha(), contentSafety()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("jwt-secret")
                 .hasMessageContaining("cookie-secure");
@@ -36,7 +37,7 @@ class RuntimeConfigurationValidatorTest {
 
         assertThatThrownBy(() -> RuntimeConfigurationValidator.validate(
                 runtime, security, infrastructure(), unsafeIdentity, speech(), new AiRuntimeProperties("", false),
-                materialParser(), hcaptcha()))
+                materialParser(), hcaptcha(), contentSafety()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("local-fallback-enabled")
                 .hasMessageContaining("expose-dev-codes");
@@ -57,7 +58,7 @@ class RuntimeConfigurationValidatorTest {
                 new SpeechProperties("", "", "", "16k_zh_en", "16k_en", List.of(603006), 1, 300, 2),
                 new AiRuntimeProperties("", false),
                 new MaterialParserProperties(null, "", null, null, 0, 0),
-                disabledHcaptcha()))
+                disabledHcaptcha(), contentSafety()))
                 .doesNotThrowAnyException();
     }
 
@@ -68,9 +69,23 @@ class RuntimeConfigurationValidatorTest {
                 "x".repeat(48), true, "Strict", List.of("https://app.example.com"));
         assertThatThrownBy(() -> RuntimeConfigurationValidator.validate(
                 runtime, security, infrastructure(), identity(), speech(), new AiRuntimeProperties("", false),
-                materialParser(), hcaptcha()))
+                materialParser(), hcaptcha(), contentSafety()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("spring.ai.deepseek.api-key");
+    }
+
+    @Test
+    void productionWorkerRejectsMissingAuditHmacKey() {
+        RuntimeProperties runtime = new RuntimeProperties("worker", true, false);
+        SecurityProperties security = new SecurityProperties(
+                "", true, "Strict", List.of("https://app.example.com"));
+
+        assertThatThrownBy(() -> RuntimeConfigurationValidator.validate(
+                runtime, security, infrastructure(), identity(), speech(),
+                new AiRuntimeProperties("deepseek-test-key", false), materialParser(), hcaptcha(),
+                new ContentSafetyProperties("")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("mianba.content-safety.audit-hmac-secret");
     }
 
     @Test
@@ -84,7 +99,7 @@ class RuntimeConfigurationValidatorTest {
                 identity(),
                 speech(),
                 new AiRuntimeProperties("", true),
-                materialParser(), hcaptcha()))
+                materialParser(), hcaptcha(), contentSafety()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("mianba.ai-runtime.stub-enabled must be false");
     }
@@ -100,7 +115,7 @@ class RuntimeConfigurationValidatorTest {
 
         assertThatThrownBy(() -> RuntimeConfigurationValidator.validate(
                 runtime, security, infrastructure(), identity(), speech(), new AiRuntimeProperties("", false),
-                missingToken, hcaptcha()))
+                missingToken, hcaptcha(), contentSafety()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("mianba.material-parser.token");
     }
@@ -116,7 +131,7 @@ class RuntimeConfigurationValidatorTest {
 
         assertThatThrownBy(() -> RuntimeConfigurationValidator.validate(
                 runtime, security, infrastructure(), identity(), speech(), new AiRuntimeProperties("", false),
-                loopback, hcaptcha()))
+                loopback, hcaptcha(), contentSafety()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("mianba.material-parser.base-url");
     }
@@ -136,7 +151,7 @@ class RuntimeConfigurationValidatorTest {
                 new SpeechProperties("", "", "", "16k_zh_en", "16k_en", List.of(603006), 1, 300, 2),
                 new AiRuntimeProperties("", true),
                 loopback,
-                disabledHcaptcha()))
+                disabledHcaptcha(), contentSafety()))
                 .doesNotThrowAnyException();
     }
 
@@ -148,7 +163,7 @@ class RuntimeConfigurationValidatorTest {
 
         assertThatCode(() -> RuntimeConfigurationValidator.validate(
                 runtime, security, infrastructure(), identity(), speech(), new AiRuntimeProperties("", false),
-                materialParser(), hcaptcha()))
+                materialParser(), hcaptcha(), contentSafety()))
                 .doesNotThrowAnyException();
     }
 
@@ -160,7 +175,7 @@ class RuntimeConfigurationValidatorTest {
 
         assertThatThrownBy(() -> RuntimeConfigurationValidator.validate(
                 runtime, security, infrastructure(), identity(), speech(), new AiRuntimeProperties("", false),
-                materialParser(), disabledHcaptcha()))
+                materialParser(), disabledHcaptcha(), contentSafety()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("mianba.hcaptcha.enabled")
                 .hasMessageContaining("mianba.hcaptcha.site-key")
@@ -178,7 +193,7 @@ class RuntimeConfigurationValidatorTest {
 
         assertThatThrownBy(() -> RuntimeConfigurationValidator.validate(
                 runtime, security, infrastructure(), identity(), speech(), new AiRuntimeProperties("", false),
-                materialParser(), customEndpoint))
+                materialParser(), customEndpoint, contentSafety()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("mianba.hcaptcha.verify-url");
     }
@@ -215,5 +230,9 @@ class RuntimeConfigurationValidatorTest {
         return new HcaptchaProperties(
                 false, "", "", HcaptchaProperties.OFFICIAL_VERIFY_URL,
                 Duration.ofSeconds(1), Duration.ofSeconds(5), 16_384);
+    }
+
+    private static ContentSafetyProperties contentSafety() {
+        return new ContentSafetyProperties("h".repeat(48));
     }
 }

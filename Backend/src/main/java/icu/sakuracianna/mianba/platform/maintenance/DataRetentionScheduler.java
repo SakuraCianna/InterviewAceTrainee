@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * 分批执行会话超时、内容擦除和无引用材料清理策略。
+ * 分批执行会话超时、内容擦除和运行日志清理策略。
  *
  * 套餐维护固定按 Package→Stage 加锁，其余阶段只持有单类业务行锁，避免低配服务器上的长事务。
  */
@@ -47,18 +47,14 @@ public class DataRetentionScheduler {
         reconciledArtifacts += reconcileClosedSessionArtifacts();
         int erasedSessions = eraseExpiredSessionContent();
         int erasedPackages = eraseExpiredPackageContent();
-        int erasedMaterials = eraseExpiredMaterials();
-        int purgedMaterials = purgeDeletedMaterials();
         int deletedOperationalLogs = deleteOldOperationalLogs();
         if (expiredPackages > 0 || reconciledArtifacts > 0 || expiredSessions > 0 || erasedSessions > 0
-                || erasedPackages > 0 || erasedMaterials > 0 || purgedMaterials > 0
-                || deletedOperationalLogs > 0) {
+                || erasedPackages > 0 || deletedOperationalLogs > 0) {
             LOGGER.info(
                     "Retention cleanup completed expired_packages={} reconciled_artifacts={} expired_sessions={} "
-                            + "erased_sessions={} erased_packages={} erased_materials={} purged_materials={} "
-                            + "operational_logs={}",
+                            + "erased_sessions={} erased_packages={} operational_logs={}",
                     expiredPackages, reconciledArtifacts, expiredSessions, erasedSessions, erasedPackages,
-                    erasedMaterials, purgedMaterials, deletedOperationalLogs);
+                    deletedOperationalLogs);
         }
     }
 
@@ -91,7 +87,7 @@ public class DataRetentionScheduler {
         }), "Package expiry transaction returned no result");
     }
 
-    /** 擦除终态满 90 天套餐的内容快照，保留计划、时长、轮次和账务元数据。 */
+    /** 擦除终态满 90 天套餐的阶段上下文，保留计划、时长、轮次和账务元数据。 */
     private int eraseExpiredPackageContent() {
         return Objects.requireNonNull(transactions.execute(status -> {
             List<UUID> ids = jdbc.query("""
@@ -116,7 +112,7 @@ public class DataRetentionScheduler {
                         """, id);
                 erased += jdbc.update("""
                         UPDATE interview_packages
-                        SET material_snapshot = '{}'::jsonb, content_erased_at = now(),
+                        SET content_erased_at = now(),
                             version = version + 1, updated_at = now()
                         WHERE id = ?
                           AND status IN ('COMPLETED', 'EXPIRED', 'CANCELLED')
@@ -246,59 +242,6 @@ public class DataRetentionScheduler {
             }
         }
         return succeeded;
-    }
-
-    private int eraseExpiredMaterials() {
-        return Objects.requireNonNull(transactions.execute(status -> {
-            List<UUID> ids = jdbc.query("""
-                    SELECT id FROM materials
-                    WHERE status <> 'deleted' AND retention_until <= now()
-                    ORDER BY retention_until, id
-                    LIMIT ?
-                    FOR UPDATE SKIP LOCKED
-                    """, (rs, row) -> rs.getObject("id", UUID.class), BATCH_SIZE);
-            for (UUID id : ids) {
-                // 不复用原内容哈希；不同固定域加记录标识可生成稳定且互不关联的 64 位墓碑。
-                jdbc.update("""
-                        UPDATE materials
-                        SET status = 'deleted', resume_filename = NULL, resume_content_type = NULL,
-                            resume_size_bytes = NULL, resume_text = NULL, job_title = NULL,
-                            job_requirements = NULL, target_school = NULL, major = NULL,
-                            research_direction = NULL, profile_summary = '', keywords = '[]'::jsonb,
-                            embedding = NULL,
-                            source_sha256 = encode(digest(
-                                'mianba:material-source-erased:v1:' || id::text, 'sha256'), 'hex'),
-                            request_hash = encode(digest(
-                                'mianba:material-request-erased:v1:' || id::text, 'sha256'), 'hex'),
-                            version = version + 1, updated_at = now()
-                        WHERE id = ? AND status <> 'deleted'
-                        """, id);
-            }
-            return ids.size();
-        }), "Material retention transaction returned no result");
-    }
-
-    private int purgeDeletedMaterials() {
-        return Objects.requireNonNull(transactions.execute(status -> jdbc.update("""
-                WITH candidates AS (
-                    SELECT material.id
-                    FROM materials material
-                    WHERE material.status = 'deleted'
-                      AND material.updated_at <= now() - interval '7 days'
-                      AND NOT EXISTS (
-                          SELECT 1 FROM sessions session_row
-                          WHERE session_row.material_id = material.id)
-                      AND NOT EXISTS (
-                          SELECT 1 FROM ai_jobs job
-                          WHERE job.material_id = material.id)
-                    ORDER BY material.updated_at, material.id
-                    LIMIT 500
-                    FOR UPDATE OF material SKIP LOCKED
-                )
-                DELETE FROM materials material
-                USING candidates
-                WHERE material.id = candidates.id
-                """)), "Material purge transaction returned no result");
     }
 
     private int deleteOldOperationalLogs() {

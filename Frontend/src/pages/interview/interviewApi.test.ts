@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdempotencyKey } from "../../lib/api";
-import { submitInterviewAnswer, uploadInterviewMaterial } from "./interviewApi";
+import { startPersonalizedInterviewSession, submitInterviewAnswer } from "./interviewApi";
 
 function acceptedAnswerResponse() {
   return new Response(JSON.stringify({
@@ -54,23 +54,21 @@ describe("submitInterviewAnswer", () => {
   });
 });
 
-describe("uploadInterviewMaterial", () => {
-  it("使用调用方持有的素材操作键", async () => {
+describe("startPersonalizedInterviewSession", () => {
+  it("在同一个创建请求中提交个性化资料和调用方持有的操作键", async () => {
     const operationKey = createIdempotencyKey();
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      id: "material-1",
-      interview_type: "job",
-      extracted_text_chars: 128,
-      profile_summary: "候选人摘要",
-      keywords: [],
-    }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(acceptedAnswerResponse()));
+    const formData = new FormData();
+    formData.append("session_id", "session-1");
+    formData.append("interview_type", "job");
+    formData.append("job_title", "销售经理");
 
-    await uploadInterviewMaterial(new FormData(), { idempotencyKey: operationKey });
+    await startPersonalizedInterviewSession(formData, { idempotencyKey: operationKey });
 
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("/api/interviews/personalized");
     const request = vi.mocked(fetch).mock.calls[0]?.[1];
     expect(new Headers(request?.headers).get("Idempotency-Key")).toBe(operationKey);
+    expect(new Headers(request?.headers).has("Content-Type")).toBe(false);
+    expect(request?.body).toBe(formData);
   });
 });

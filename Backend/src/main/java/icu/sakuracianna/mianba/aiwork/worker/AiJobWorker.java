@@ -5,6 +5,8 @@ import tools.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import icu.sakuracianna.mianba.aiwork.messaging.AiJobEnvelope;
 import icu.sakuracianna.mianba.aiwork.messaging.AiMessagingTopology;
+import icu.sakuracianna.mianba.interview.safety.AiOutputSafetyPolicy;
+import icu.sakuracianna.mianba.interview.safety.ContentSafetyAuditService;
 import java.io.IOException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -21,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -43,20 +46,33 @@ public class AiJobWorker {
     private final TransactionTemplate transactions;
     private final ObjectMapper mapper;
     private final InterviewAiGenerator generator;
+    private final ContentSafetyAuditService safetyAudits;
     private final Clock clock;
     private final String workerId = "worker-" + UUID.randomUUID();
 
+    @Autowired
     public AiJobWorker(
             JdbcTemplate jdbc,
             TransactionTemplate transactions,
             ObjectMapper mapper,
             InterviewAiGenerator generator,
+            ContentSafetyAuditService safetyAudits,
             Clock clock) {
         this.jdbc = jdbc;
         this.transactions = transactions;
         this.mapper = mapper;
         this.generator = generator;
+        this.safetyAudits = safetyAudits;
         this.clock = clock;
+    }
+
+    AiJobWorker(
+            JdbcTemplate jdbc,
+            TransactionTemplate transactions,
+            ObjectMapper mapper,
+            InterviewAiGenerator generator,
+            Clock clock) {
+        this(jdbc, transactions, mapper, generator, null, clock);
     }
 
     /**
@@ -110,7 +126,15 @@ public class AiJobWorker {
                 throw new IllegalStateException("Provider-call state guard returned no result");
             }
             callStartedAt = clock.instant();
-            InterviewEvaluation evaluation = generator.evaluate(input);
+            InterviewEvaluation generatedEvaluation = generator.evaluate(input);
+            AiOutputSafetyPolicy.assess(generatedEvaluation).ifPresent(finding -> {
+                if (safetyAudits != null) {
+                    safetyAudits.recordOutput(
+                            claimedJob.sessionId(), claimedJob.id(), "ai_interview_output",
+                            AiOutputSafetyPolicy.auditText(generatedEvaluation), finding);
+                }
+            });
+            InterviewEvaluation evaluation = AiOutputSafetyPolicy.sanitize(generatedEvaluation);
             callObservation = AiCallObservation.success(
                     provider, elapsedMillis(callStartedAt, clock.instant()));
             JobClaim completedClaim = claim;
@@ -150,7 +174,8 @@ public class AiJobWorker {
             RuntimeException exception,
             Channel channel,
             long deliveryTag) throws IOException {
-        LOGGER.error("AI worker infrastructure failure job_id={}", envelope.jobId(), exception);
+        LOGGER.error("AI worker infrastructure failure job_id={} error_type={}",
+                envelope.jobId(), exception.getClass().getSimpleName());
         // 数据库或进程级异常未形成可靠状态，交还队列并由 quorum delivery-limit 兜底。
         channel.basicNack(deliveryTag, false, true);
     }
@@ -213,13 +238,7 @@ public class AiJobWorker {
         }
         InterviewAiGenerator.InterviewAiInput input = jdbc.query("""
                 SELECT s.interview_type, s.current_turn_index, s.total_turns,
-                       t.round_name, t.question_text, t.answer_text,
-                       j.input_ref #>> '{material_context,profile_summary}' AS profile_summary,
-                       j.input_ref #>> '{material_context,job_title}' AS job_title,
-                       j.input_ref #>> '{material_context,job_requirements}' AS job_requirements,
-                       j.input_ref #>> '{material_context,target_school}' AS target_school,
-                       j.input_ref #>> '{material_context,major}' AS major,
-                       j.input_ref #>> '{material_context,research_direction}' AS research_direction
+                       t.round_name, t.question_text, t.answer_text
                 FROM ai_jobs j
                 JOIN sessions s ON s.id = j.session_id
                 JOIN turns t ON t.session_id = s.id AND t.turn_index = s.current_turn_index
@@ -234,7 +253,7 @@ public class AiJobWorker {
                 rs.getString("answer_text"),
                 rs.getInt("current_turn_index"),
                 rs.getInt("total_turns"),
-                materialContext(rs)), claim.id(), workerId, claim.version(),
+                Map.of()), claim.id(), workerId, claim.version(),
                 Timestamp.from(now), Timestamp.from(now), Timestamp.from(now)).stream().findFirst()
                 .orElseThrow(() -> new AiWorkerException(
                         "TASK_STALE", "任务对应的面试轮次已变化或已过期", false));
@@ -603,7 +622,7 @@ public class AiJobWorker {
         report.put("evidence", aggregation.evidence());
         report.put("risk_flags", List.of());
         report.put("recommended_drills", aggregation.recommendedDrills());
-        report.put("material_context_applied", !input.materialContext().isEmpty());
+        report.put("public_knowledge_applied", !input.publicKnowledgeContext().isEmpty());
         report.put("turns", turns);
         return new ReportResult(aggregation.totalScore(), report);
     }
@@ -643,34 +662,6 @@ public class AiJobWorker {
             throw new SQLException("Completed turn has no evaluation score");
         }
         return score.intValue();
-    }
-
-    private static Map<String, String> materialContext(ResultSet resultSet) throws SQLException {
-        Map<String, String> context = new LinkedHashMap<>();
-        putMaterialContext(context, "profile_summary", resultSet.getString("profile_summary"), 1200);
-        putMaterialContext(context, "job_title", resultSet.getString("job_title"), 160);
-        putMaterialContext(context, "job_requirements", resultSet.getString("job_requirements"), 2500);
-        putMaterialContext(context, "target_school", resultSet.getString("target_school"), 160);
-        putMaterialContext(context, "major", resultSet.getString("major"), 160);
-        putMaterialContext(context, "research_direction", resultSet.getString("research_direction"), 240);
-        return Map.copyOf(context);
-    }
-
-    private static void putMaterialContext(
-            Map<String, String> target,
-            String key,
-            String value,
-            int maxLength) {
-        if (value == null || value.isBlank()) {
-            return;
-        }
-        String normalized = value.replaceAll("[\\p{Cntrl}]", " ")
-                .replaceAll("\\s+", " ").trim();
-        if (!normalized.isEmpty()) {
-            target.put(key, normalized.length() <= maxLength
-                    ? normalized
-                    : normalized.substring(0, maxLength));
-        }
     }
 
     private String writeJson(Object value) {

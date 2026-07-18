@@ -1,6 +1,8 @@
 package icu.sakuracianna.mianba.platform.web;
 
 import icu.sakuracianna.mianba.interview.material.MaterialParserClient;
+import icu.sakuracianna.mianba.knowledge.KnowledgeDomain;
+import icu.sakuracianna.mianba.knowledge.KnowledgeRagService;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -8,6 +10,8 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -23,18 +27,24 @@ public class HealthController {
     private final RabbitTemplate rabbit;
     private final Clock clock;
     private final MaterialParserClient materialParser;
+    private final ObjectProvider<VectorStore> vectorStores;
+    private final KnowledgeRagService knowledge;
 
     public HealthController(
             JdbcTemplate jdbc,
             StringRedisTemplate redis,
             RabbitTemplate rabbit,
             Clock clock,
-            MaterialParserClient materialParser) {
+            MaterialParserClient materialParser,
+            ObjectProvider<VectorStore> vectorStores,
+            KnowledgeRagService knowledge) {
         this.jdbc = jdbc;
         this.redis = redis;
         this.rabbit = rabbit;
         this.clock = clock;
         this.materialParser = materialParser;
+        this.vectorStores = vectorStores;
+        this.knowledge = knowledge;
     }
 
     /**
@@ -97,71 +107,116 @@ public class HealthController {
     }
 
     /**
-     * 返回管理员可见的面试核心能力状态。
-     * 向量表存在不等于 RAG 已实现，因此当前明确报告 {@code rag_not_implemented}。
+     * 返回管理员可见的面试核心能力状态；公共知识索引降级不会影响普通面试就绪状态。
      */
     @GetMapping("/api/health/interview-core")
     @PreAuthorize("hasRole('ADMIN')")
     public Map<String, Object> interviewCore() {
-        long materialCount = count("SELECT count(*) FROM materials WHERE status = 'ready'");
-        long vectorCount = count("SELECT count(*) FROM materials WHERE embedding IS NOT NULL AND status = 'ready'");
+        Map<String, Object> indexState = jdbc.queryForMap("""
+                SELECT status, corpus_version, model_id, vector_dimensions,
+                       document_count, job_document_count, postgraduate_document_count,
+                       chunk_count, indexed_chunk_count, failure_count,
+                       last_error_code, started_at, completed_at, updated_at
+                FROM knowledge_index_state
+                WHERE singleton_id = 1
+                """);
         long enabledProviders = count("SELECT count(*) FROM providers WHERE enabled = true");
-        double coverage = materialCount == 0 ? 1.0 : (double) vectorCount / materialCount;
+        String indexStatus = String.valueOf(indexState.get("status"));
+        long documentCount = number(indexState, "document_count");
+        long jobDocumentCount = number(indexState, "job_document_count");
+        long postgraduateDocumentCount = number(indexState, "postgraduate_document_count");
+        long chunkCount = number(indexState, "chunk_count");
+        long indexedChunkCount = number(indexState, "indexed_chunk_count");
+        double coverage = chunkCount == 0 ? 0.0 : (double) indexedChunkCount / chunkCount;
+        boolean ragEnabled = !"DISABLED".equals(indexStatus);
+        boolean corpusReady = jobDocumentCount >= 200
+                && postgraduateDocumentCount >= 30
+                && documentCount == jobDocumentCount + postgraduateDocumentCount;
+        boolean embeddingAvailable = vectorStores.getIfAvailable() != null;
+        boolean vectorReady = "READY".equals(indexStatus)
+                && indexedChunkCount == chunkCount && chunkCount > 0 && embeddingAvailable;
+        boolean jobProbeReady = false;
+        boolean postgraduateProbeReady = false;
+        if (vectorReady) {
+            try {
+                jobProbeReady = !knowledge.retrieve(
+                        "后端开发工程师 核心能力 实践问题", KnowledgeDomain.JOB).isEmpty();
+                postgraduateProbeReady = !knowledge.retrieve(
+                        "计算机科学与技术 复试 研究问题", KnowledgeDomain.POSTGRADUATE).isEmpty();
+            } catch (RuntimeException ignored) {
+                // 探针仅影响公共 RAG 状态，绝不把异常内容暴露给管理端。
+            }
+        }
+        boolean ragReady = corpusReady && vectorReady && jobProbeReady && postgraduateProbeReady;
 
         Map<String, Object> cards = new LinkedHashMap<>();
-        cards.put("ready", true);
-        cards.put("source_version", "boot4-ai2-v1");
-        cards.put("source_policy", "database-products");
-        cards.put("total_seed_count", 4);
-        cards.put("counts_by_interview_type", Map.of("job", 1, "postgraduate", 1, "civil_service", 1, "ielts", 1));
-        cards.put("expected_minimums", Map.of("job", 1, "postgraduate", 1, "civil_service", 1, "ielts", 1));
-        cards.put("missing_preset_files", List.of());
-        cards.put("duplicate_seed_ids", List.of());
+        cards.put("ready", corpusReady);
+        cards.put("source_version", indexState.get("corpus_version"));
+        cards.put("source_policy", "versioned-public-markdown");
+        cards.put("total_document_count", documentCount);
+        cards.put("job_document_count", jobDocumentCount);
+        cards.put("postgraduate_document_count", postgraduateDocumentCount);
+        cards.put("expected_minimums", Map.of("job", 200, "postgraduate", 30));
+        cards.put("validation_enforced", true);
 
         Map<String, Object> vectors = new LinkedHashMap<>();
-        vectors.put("ready", false);
-        vectors.put("enabled", false);
-        vectors.put("status", "rag_not_implemented");
-        vectors.put("table_name", "materials");
-        vectors.put("table_exists", true);
-        vectors.put("expected_seed_count", materialCount);
-        vectors.put("total_vector_count", vectorCount);
-        vectors.put("non_empty_vector_count", vectorCount);
-        vectors.put("distinct_seed_count", vectorCount);
+        vectors.put("ready", vectorReady);
+        vectors.put("enabled", ragEnabled);
+        vectors.put("status", indexStatus);
+        vectors.put("store", "redis-search");
+        vectors.put("document_count", documentCount);
+        vectors.put("chunk_count", chunkCount);
+        vectors.put("indexed_chunk_count", indexedChunkCount);
         vectors.put("coverage_rate", coverage);
-        vectors.put("embedding_models", List.of());
-        vectors.put("status_counts", List.of(Map.of("status", "ready", "count", materialCount)));
-        vectors.put("missing_observation_columns", List.of());
+        vectors.put("embedding_model", indexState.get("model_id"));
+        vectors.put("embedding_provider_available", embeddingAvailable);
+        vectors.put("vector_dimensions", indexState.get("vector_dimensions"));
+        vectors.put("failure_count", indexState.get("failure_count"));
+        vectors.put("last_error_code", indexState.get("last_error_code"));
+        vectors.put("started_at", indexState.get("started_at"));
+        vectors.put("completed_at", indexState.get("completed_at"));
+        vectors.put("updated_at", indexState.get("updated_at"));
 
         Map<String, Object> recall = Map.of(
-                "ready", false,
-                "enabled", false,
-                "status", "rag_not_implemented",
-                "probe_count", 0,
-                "passed_probe_count", 0,
-                "probes", List.of());
+                "ready", jobProbeReady && postgraduateProbeReady,
+                "enabled", ragEnabled,
+                "status", indexStatus,
+                "coverage_rate", coverage,
+                "job_probe_ready", jobProbeReady,
+                "postgraduate_probe_ready", postgraduateProbeReady);
         boolean providerReady = enabledProviders > 0;
-        boolean ready = false;
+        boolean ready = providerReady && ragReady;
         List<String> failureReasons = new java.util.ArrayList<>();
         if (!providerReady) {
             failureReasons.add("no_enabled_ai_provider");
         }
-        failureReasons.add("rag_pipeline_not_implemented");
-        return Map.of(
-                "ready", ready,
-                "provider_ready", providerReady,
-                "rag_ready", false,
-                "capability_cards", cards,
-                "capability_vectors", vectors,
-                "recall_quality", recall,
-                "failure_reasons", failureReasons,
-                "failure_summary", providerReady
-                        ? "基础面试 AI 可用，向量检索尚未启用"
-                        : "没有启用的 AI 供应商，且向量检索尚未启用");
+        if (!ragReady) {
+            failureReasons.add("public_knowledge_index_" + indexStatus.toLowerCase(java.util.Locale.ROOT));
+        }
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("ready", ready);
+        response.put("provider_ready", providerReady);
+        response.put("rag_ready", ragReady);
+        response.put("public_knowledge_rag_ready", ragReady);
+        response.put("persistent_user_vector_store_enabled", false);
+        response.put("embedding_provider_available", embeddingAvailable);
+        response.put("capability_cards", cards);
+        response.put("capability_vectors", vectors);
+        response.put("recall_quality", recall);
+        response.put("failure_reasons", failureReasons);
+        response.put("failure_summary", ready
+                ? "AI 供应商与公共知识向量索引均已就绪"
+                : "基础面试仍可用；公共知识增强或 AI 供应商尚未完全就绪");
+        return response;
     }
 
     private long count(String sql) {
         Long value = jdbc.queryForObject(sql, Long.class);
         return value == null ? 0 : value;
+    }
+
+    private static long number(Map<String, Object> values, String key) {
+        Object value = values.get(key);
+        return value instanceof Number number ? number.longValue() : 0;
     }
 }

@@ -25,6 +25,7 @@ import {
   logoutAccount,
   requestAccountEmailCode,
   startInterviewSession,
+  startPersonalizedInterviewSession,
   streamQuestionSpeech,
   submitInterviewAnswer,
 } from "./interviewApi";
@@ -34,7 +35,7 @@ import { roomClasses } from "./roomStyles";
 import { useInterviewTask } from "./hooks/useInterviewTask";
 import { useAudioRecorder } from "./hooks/useAudioRecorder";
 import { useMicrophoneCheck } from "./hooks/useMicrophoneCheck";
-import { useMaterialUpload } from "./hooks/useMaterialUpload";
+import { usePersonalizationInput } from "./hooks/usePersonalizationInput";
 import type {
   CurrentUserResponse,
   InterviewHistoryItem,
@@ -76,23 +77,22 @@ export function InterviewRoom() {
   const [activeSession, setActiveSession] = useState<InterviewStateResponse | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
   const {
-    materialsByType,
     jobResumeFile,
     jobTitle,
     jobRequirements,
     postgraduateSchool,
     postgraduateMajor,
     postgraduateDirection,
-    isPreparingMaterial,
     setJobResumeFile,
     setJobTitle,
     setJobRequirements,
     setPostgraduateSchool,
     setPostgraduateMajor,
     setPostgraduateDirection,
-    prepareMaterial: prepareMaterialFromHook,
-    loadMaterialForType,
-  } = useMaterialUpload();
+    isReady: isPersonalizationReady,
+    createStartFormData,
+    clear: clearPersonalization,
+  } = usePersonalizationInput();
   const [isStartingSession, setIsStartingSession] = useState(false);
   const [isFinishingAnswer, setIsFinishingAnswer] = useState(false);
   const [isExitingSession, setIsExitingSession] = useState(false);
@@ -144,8 +144,8 @@ export function InterviewRoom() {
   const state = states[stateIndex];
   const selectedModule = modules[selectedModuleIndex];
   const selectedModuleDetail = moduleDetails[selectedModule.type];
-  const currentMaterial = materialsByType[selectedModule.type] ?? null;
-  const selectedModuleNeedsMaterial = selectedModule.type === "job" || selectedModule.type === "postgraduate";
+  const selectedModuleNeedsPersonalization = selectedModule.type === "job" || selectedModule.type === "postgraduate";
+  const personalizationReady = isPersonalizationReady(selectedModule.type);
   const isSelectionStage = routeStage === "select";
   const shouldShowWorkspaceHeader = routeStage !== "room";
   const activeQuestion = interviewState?.current_question ?? activeSession?.current_question ?? null;
@@ -179,8 +179,6 @@ export function InterviewRoom() {
         loadAccount(),
         loadActiveSession(),
         loadHistory(),
-        loadMaterialForType("job"),
-        loadMaterialForType("postgraduate"),
       ]).finally(() => setIsInitializing(false));
     } else {
       setCurrentUser(null);
@@ -211,7 +209,7 @@ export function InterviewRoom() {
   }, []);
 
   function goToMicrophoneCheck(resume = false) {
-    if (!resume && selectedModuleNeedsMaterial && !currentMaterial) {
+    if (!resume && selectedModuleNeedsPersonalization && !personalizationReady) {
       const message =
         selectedModule.type === "job"
           ? "请先上传简历并填写目标岗位和岗位要求, 再进入设备检测"
@@ -481,8 +479,7 @@ export function InterviewRoom() {
       return;
     }
     const targetSessionId = createSessionId();
-    const material = currentMaterial;
-    if (selectedModuleNeedsMaterial && !material) {
+    if (selectedModuleNeedsPersonalization && !personalizationReady) {
       const message = selectedModule.type === "job" ? "请先上传简历并填写目标岗位/JD。" : "请先填写目标院校和报考专业，再开始复试模拟。";
       setSocketMessage(message);
       return;
@@ -496,14 +493,15 @@ export function InterviewRoom() {
     setSessionId(targetSessionId);
     setIsStartingSession(true);
     try {
-      const request = startInterviewSession(
-        {
-          session_id: targetSessionId,
-          interview_type: selectedModule.type,
-          material_id: material?.id,
-        },
-        { idempotencyKey: operationKey, signal: controller.signal },
-      );
+      const request = selectedModuleNeedsPersonalization
+        ? startPersonalizedInterviewSession(
+          createStartFormData(targetSessionId, selectedModule.type),
+          { idempotencyKey: operationKey, signal: controller.signal },
+        )
+        : startInterviewSession(
+          { session_id: targetSessionId, interview_type: selectedModule.type },
+          { idempotencyKey: operationKey, signal: controller.signal },
+        );
       startSessionRequestRef.current = request;
       const { response, data } = await request;
       if (controller.signal.aborted || generation !== roomGenerationRef.current) {
@@ -516,6 +514,7 @@ export function InterviewRoom() {
       }
 
       setSessionId(data.session_id);
+      clearPersonalization(selectedModule.type);
       setInterviewState(data);
       setActiveSession(null);
       setStateIndex(1);
@@ -1361,14 +1360,14 @@ export function InterviewRoom() {
             </div>
           )}
 
-          {isSelectionStage && !interviewState && selectedModuleNeedsMaterial && (
+          {isSelectionStage && !interviewState && selectedModuleNeedsPersonalization && (
             <section className={roomClasses("material-card")}>
               <div className={roomClasses("material-card-heading")}>
                 <span>
                   <AppIcon icon={selectedModule.type === "job" ? "lucide:file-scan" : "lucide:notebook-tabs"} size={18} />
-                  {selectedModule.type === "job" ? "面试资料预分析" : "复试背景设置"}
+                  {selectedModule.type === "job" ? "本次面试个性化资料" : "本次复试背景"}
                 </span>
-                {currentMaterial ? <em>已就绪</em> : <em>开始前必填</em>}
+                {personalizationReady ? <em>填写完成</em> : <em>开始前必填</em>}
               </div>
               {selectedModule.type === "job" ? (
                 <div className={roomClasses("material-form")}>
@@ -1426,27 +1425,9 @@ export function InterviewRoom() {
                   </label>
                 </div>
               )}
-              <div className={roomClasses("material-actions")}>
-                <Button
-                  type="button"
-                  className={roomClasses("mobile-action-button action-button-primary")}
-                  color="primary"
-                  shape="rounded"
-                  loading={isPreparingMaterial}
-                  disabled={isPreparingMaterial}
-                  onClick={() => void prepareMaterialFromHook(selectedModule.type, setSocketMessage)}
-                >
-                  <AppIcon icon="lucide:sparkles" size={17} />
-                  {isPreparingMaterial ? "分析中" : currentMaterial ? "重新分析" : "分析资料"}
-                </Button>
-                {currentMaterial && (
-                  <span>
-                    {currentMaterial.extracted_text_chars > 0 ? `${currentMaterial.extracted_text_chars} 字文本` : "背景已保存"}
-                    {currentMaterial.keywords.length > 0 ? ` · ${currentMaterial.keywords.slice(0, 3).join(" / ")}` : ""}
-                  </span>
-                )}
-              </div>
-              {currentMaterial && <p className={roomClasses("material-preview")}>{currentMaterial.profile_summary}</p>}
+              <p className={roomClasses("material-preview")}>
+                隐私说明：资料仅在创建本次训练的请求内解析和检索，不写入数据库、Redis、日志或任务队列；请求完成后服务端立即释放。
+              </p>
             </section>
           )}
 
@@ -1459,7 +1440,7 @@ export function InterviewRoom() {
                   color="primary"
                   shape="rounded"
                   loading={isStartingSession}
-                  disabled={isStartingSession || isExitingSession || Boolean(currentUser && isSelectionStage && selectedModuleNeedsMaterial && !currentMaterial)}
+                  disabled={isStartingSession || isExitingSession || Boolean(currentUser && isSelectionStage && selectedModuleNeedsPersonalization && !personalizationReady)}
                   onClick={() => {
                     if (!currentUser) {
                       navigate("/login");

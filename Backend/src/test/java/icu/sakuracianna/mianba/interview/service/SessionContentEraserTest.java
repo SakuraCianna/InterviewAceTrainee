@@ -41,7 +41,10 @@ class SessionContentEraserTest {
                 .contains("risk_flags = '[]'::jsonb")
                 .contains("DELETE FROM reports WHERE session_id = ?")
                 .contains("report_scope = 'PACKAGE'")
-                .contains("content_excerpt = NULL");
+                .contains("rule_ids = '[]'::jsonb")
+                .contains("content_digest = NULL")
+                .contains("request_id = NULL")
+                .doesNotContain("content_excerpt", "matched_terms");
         int dimensionDelete = indexContaining(updates, "DELETE FROM turn_dimension_scores");
         int turnUpdate = indexContaining(updates, "UPDATE turns");
         assertThat(dimensionDelete).isLessThan(turnUpdate);

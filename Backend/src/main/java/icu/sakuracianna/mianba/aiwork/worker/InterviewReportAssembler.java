@@ -129,7 +129,7 @@ final class InterviewReportAssembler {
         report.put("stage_code", input.stageCode());
         report.put("summary", copy.sessionSummary(
                 turns.size(), totalScore, weakestComment(dimensions)));
-        report.put("material_context_applied", input.materialContextApplied());
+        report.put("public_knowledge_applied", input.publicKnowledgeContextApplied());
         if (turns.stream().anyMatch(turn -> "ALGORITHM_REASONING".equals(turn.questionType()))) {
             report.put("algorithm_assessment_mode", "SPOKEN_REASONING_ONLY");
             report.put("assessment_notice", copy.algorithmNotice());
@@ -441,7 +441,7 @@ final class InterviewReportAssembler {
             String promptVersion,
             String rubricVersion,
             String outputSchemaVersion,
-            boolean materialContextApplied,
+            boolean publicKnowledgeContextApplied,
             List<EvaluatedTurn> turns) {
         SessionReportInput {
             Objects.requireNonNull(sessionId, "sessionId");

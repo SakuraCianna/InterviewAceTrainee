@@ -158,6 +158,8 @@ PARSER_CONTAINER_ID_BEFORE="$(compose ps -q material-parser)"
 readonly PARSER_CONTAINER_ID_BEFORE
 PARSER_RESTARTS_BEFORE="$(docker inspect --format '{{.RestartCount}}' "$PARSER_CONTAINER_ID_BEFORE")"
 readonly PARSER_RESTARTS_BEFORE
+PRESSURE_SESSION_ID="$(new_uuid)"
+readonly PRESSURE_SESSION_ID
 BOMB_STATUS="$(curl --silent --show-error --insecure --max-time 30 \
   --resolve "${HOST_NAME}:443:127.0.0.1" \
   --cookie "$COOKIE_JAR" --cookie-jar "$COOKIE_JAR" \
@@ -165,14 +167,19 @@ BOMB_STATUS="$(curl --silent --show-error --insecure --max-time 30 \
   --request POST \
   --header "X-CSRF-Token: ${CSRF_TOKEN}" \
   --header "Idempotency-Key: ci-parser-pressure-$(new_uuid)" \
+  --form "session_id=${PRESSURE_SESSION_ID}" \
   --form 'interview_type=job' \
   --form 'job_title=Backend Engineer' \
   --form 'job_requirements=Build reliable distributed services' \
   --form "resume_file=@${TEMP_DIR}/resource-pressure.pdf;type=application/pdf" \
-  "${BASE_URL}/api/interview-materials")"
+  "${BASE_URL}/api/interviews/personalized")"
 case "$BOMB_STATUS" in
   201)
-    json_value "${TEMP_DIR}/resource-pressure-response.json" id >/dev/null
+    json_value "${TEMP_DIR}/resource-pressure-response.json" session_id >/dev/null
+    request "${TEMP_DIR}/resource-pressure-delete.json" \
+      --request DELETE \
+      --header "X-CSRF-Token: ${CSRF_TOKEN}" \
+      "${BASE_URL}/api/interviews/${PRESSURE_SESSION_ID}"
     ;;
   408|503|504) ;;
   *)
@@ -199,34 +206,30 @@ compose exec -T api curl --fail --silent --show-error --max-time 5 \
 
 printf 'Java 21, Spring Boot, PostgreSQL, Redis, RabbitMQ and defensive programming.\n' \
   > "${TEMP_DIR}/normal-resume.txt"
-request "${TEMP_DIR}/normal-material.json" \
+RECOVERY_SESSION_ID="$(new_uuid)"
+readonly RECOVERY_SESSION_ID
+request "${TEMP_DIR}/normal-session.json" \
   --request POST \
   --header "X-CSRF-Token: ${CSRF_TOKEN}" \
   --header "Idempotency-Key: ci-parser-recovery-$(new_uuid)" \
+  --form "session_id=${RECOVERY_SESSION_ID}" \
   --form 'interview_type=job' \
   --form 'job_title=Backend Engineer' \
   --form 'job_requirements=Build reliable distributed services' \
   --form "resume_file=@${TEMP_DIR}/normal-resume.txt;type=text/plain" \
-  "${BASE_URL}/api/interview-materials"
-json_value "${TEMP_DIR}/normal-material.json" id >/dev/null
-
-MATERIAL_KEY="ci-material-$(new_uuid)"
-readonly MATERIAL_KEY
-request "${TEMP_DIR}/material.json" \
-  --request POST \
+  "${BASE_URL}/api/interviews/personalized"
+test "$(json_value "${TEMP_DIR}/normal-session.json" session_id)" = "$RECOVERY_SESSION_ID"
+request "${TEMP_DIR}/normal-session-delete.json" \
+  --request DELETE \
   --header "X-CSRF-Token: ${CSRF_TOKEN}" \
-  --header "Idempotency-Key: ${MATERIAL_KEY}" \
-  --form 'interview_type=civil_service' \
-  "${BASE_URL}/api/interview-materials"
-MATERIAL_ID="$(json_value "${TEMP_DIR}/material.json" id)"
-readonly MATERIAL_ID
+  "${BASE_URL}/api/interviews/${RECOVERY_SESSION_ID}"
 
 SESSION_ID="$(new_uuid)"
 readonly SESSION_ID
 START_KEY="ci-session-$(new_uuid)"
 readonly START_KEY
-printf '{"session_id":"%s","interview_type":"civil_service","material_id":"%s"}\n' \
-  "$SESSION_ID" "$MATERIAL_ID" > "${TEMP_DIR}/start-request.json"
+printf '{"session_id":"%s","interview_type":"civil_service"}\n' \
+  "$SESSION_ID" > "${TEMP_DIR}/start-request.json"
 request "${TEMP_DIR}/session.json" \
   --request POST \
   --header 'Content-Type: application/json' \
@@ -389,7 +392,7 @@ SELECT CASE WHEN
     AND NOT EXISTS (
         SELECT 1 FROM content_safety
         WHERE session_id = :'session_id'::uuid
-          AND (matched_terms <> '[]'::jsonb OR content_excerpt IS NOT NULL)
+          AND (rule_ids <> '[]'::jsonb OR content_digest IS NOT NULL OR request_id IS NOT NULL)
     )
 THEN 'ok' ELSE 'failed' END;
 SQL

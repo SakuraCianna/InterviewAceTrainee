@@ -117,8 +117,8 @@ services:
       - /run/redis:size=2m,mode=0750
     security_opt:
       - no-new-privileges:true
-    mem_limit: 256m
-    memswap_limit: 320m
+    mem_limit: 320m
+    memswap_limit: 384m
     cpus: "0.25"
     pids_limit: 64
     stop_grace_period: 30s
@@ -233,6 +233,10 @@ services:
       SPRING_RABBITMQ_VIRTUAL_HOST: /mianba
       SPRING_FLYWAY_ENABLED: "false"
       SPRING_AI_MODEL_CHAT: none
+      MIANBA_AI_MODEL_EMBEDDING: transformers
+      MIANBA_KNOWLEDGE_ENABLED: "true"
+      MIANBA_KNOWLEDGE_SYNC_ON_STARTUP: "true"
+      MIANBA_KNOWLEDGE_INITIALIZE_SCHEMA: "true"
       SERVER_TOMCAT_THREADS_MAX: ${API_TOMCAT_MAX_THREADS:?API_TOMCAT_MAX_THREADS is required}
       SERVER_TOMCAT_ACCEPT_COUNT: ${API_TOMCAT_ACCEPT_COUNT:?API_TOMCAT_ACCEPT_COUNT is required}
       MIANBA_SECURITY_COOKIE_SECURE: "true"
@@ -253,6 +257,8 @@ services:
         target: spring.rabbitmq.password
       - source: jwt_secret
         target: mianba.security.jwt-secret
+      - source: content_safety_hmac_secret
+        target: mianba.content-safety.audit-hmac-secret
       - source: resend_api_key
         target: mianba.identity.resend-api-key
       - source: mail_from
@@ -287,8 +293,8 @@ services:
     expose:
       - "8000"
     <<: *java-security
-    mem_limit: 768m
-    memswap_limit: 1024m
+    mem_limit: 896m
+    memswap_limit: 1152m
     cpus: "1.25"
     stop_grace_period: 45s
     healthcheck:
@@ -305,7 +311,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
-      start_period: 60s
+      start_period: 180s
 
   worker:
     image: ${MIANBA_APP_IMAGE:?MIANBA_APP_IMAGE is required}
@@ -339,6 +345,8 @@ services:
         target: spring.datasource.password
       - source: rabbitmq_worker_password
         target: spring.rabbitmq.password
+      - source: content_safety_hmac_secret
+        target: mianba.content-safety.audit-hmac-secret
       - source: deepseek_api_key
         target: spring.ai.deepseek.api-key
     depends_on:
@@ -458,6 +466,8 @@ secrets:
     file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/rabbitmq-definitions.json
   jwt_secret:
     file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/jwt_secret
+  content_safety_hmac_secret:
+    file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/content_safety_hmac_secret
   deepseek_api_key:
     file: ${MIANBA_SECRETS_DIR:?MIANBA_SECRETS_DIR is required}/deepseek_api_key
   resend_api_key:

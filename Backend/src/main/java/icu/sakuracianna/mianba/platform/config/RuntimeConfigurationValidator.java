@@ -2,6 +2,7 @@ package icu.sakuracianna.mianba.platform.config;
 
 import icu.sakuracianna.mianba.identity.hcaptcha.HcaptchaProperties;
 import icu.sakuracianna.mianba.interview.material.MaterialParserProperties;
+import icu.sakuracianna.mianba.interview.safety.ContentSafetyProperties;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,7 +23,8 @@ public final class RuntimeConfigurationValidator {
             SpeechProperties speech,
             AiRuntimeProperties ai,
             MaterialParserProperties materialParser,
-            HcaptchaProperties hcaptcha) {
+            HcaptchaProperties hcaptcha,
+            ContentSafetyProperties contentSafety) {
         if (!runtime.production()) {
             return;
         }
@@ -35,6 +37,10 @@ public final class RuntimeConfigurationValidator {
         }
         if (ai.stubEnabled()) {
             missing.add("mianba.ai-runtime.stub-enabled must be false");
+        }
+        if ((runtime.role().equals("api") || runtime.role().equals("worker"))
+                && !contentSafety.hasStrongAuditKey()) {
+            missing.add("mianba.content-safety.audit-hmac-secret must contain at least 48 characters");
         }
         if (runtime.role().equals("api")) {
             validateApiSecurity(security, missing);

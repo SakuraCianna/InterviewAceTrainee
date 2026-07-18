@@ -59,7 +59,7 @@ class JdbcInterviewServicePackageJobTest {
     }
 
     @Test
-    void nonPackageAnswerKeepsBoundedLegacyMaterialContext() throws Exception {
+    void nonPackageAnswerNeverQueuesPrivateMaterialContext() throws Exception {
         Fixture fixture = new Fixture(List.of());
 
         fixture.answer("legacy-answer");
@@ -68,10 +68,10 @@ class JdbcInterviewServicePackageJobTest {
         JsonNode input = JSON.readTree(jobInsert.jsonArgument());
         assertThat(jobInsert.sql()).contains("package_id");
         assertThat(jobInsert.args().get(3)).isNull();
-        assertThat(input.get("material_context").get("profile_summary").stringValue())
-                .isEqualTo("immutable resume snapshot");
-        assertThat(input.get("material_context").get("job_requirements").stringValue())
-                .isEqualTo("sensitive job description");
+        assertThat(input.properties()).extracting(java.util.Map.Entry::getKey)
+                .containsExactlyInAnyOrder("session_id", "turn_index");
+        assertThat(jobInsert.jsonArgument())
+                .doesNotContain("material_context", "immutable resume snapshot", "sensitive job description");
     }
 
     @Test

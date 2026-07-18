@@ -167,6 +167,7 @@ jobs:
           for name in \
             postgres_owner_password postgres_api_password postgres_worker_password \
             redis_app_password rabbitmq_api_password rabbitmq_worker_password jwt_secret \
+            content_safety_hmac_secret \
             material-parser-token deepseek_api_key resend_api_key mail_from \
             tencent_app_id tencent_secret_id tencent_secret_key \
             hcaptcha-site-key hcaptcha-secret rabbitmq-definitions.json; do

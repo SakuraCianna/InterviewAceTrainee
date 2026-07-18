@@ -711,7 +711,8 @@ MIANBA_SECRETS_DIR="$secrets_dir" bash "$release_dir/deploy/prepare-server-secre
 for required in \
   postgres_owner_password postgres_api_password postgres_worker_password \
   redis_app_password rabbitmq_api_password rabbitmq_worker_password \
-  rabbitmq-definitions.json jwt_secret material-parser-token deepseek_api_key resend_api_key mail_from \
+  rabbitmq-definitions.json jwt_secret content_safety_hmac_secret material-parser-token \
+  deepseek_api_key resend_api_key mail_from \
   tencent_app_id tencent_secret_id tencent_secret_key hcaptcha-site-key hcaptcha-secret; do
   [[ -f "$secrets_dir/$required" && ! -L "$secrets_dir/$required" && -s "$secrets_dir/$required" ]] \
     || fail "missing regular server secret file: $required"

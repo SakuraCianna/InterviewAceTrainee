@@ -63,19 +63,6 @@ export type InterviewHistoryItem = {
   created_at: string;
 };
 
-export type InterviewMaterialResponse = {
-  id: string;
-  interview_type: InterviewType;
-  job_title?: string | null;
-  target_school?: string | null;
-  major?: string | null;
-  research_direction?: string | null;
-  resume_text_preview?: string | null;
-  extracted_text_chars: number;
-  profile_summary: string;
-  keywords: string[];
-};
-
 export type SpeechSynthesisApiResponse = {
   audio_base64?: string;
   mime_type?: string;

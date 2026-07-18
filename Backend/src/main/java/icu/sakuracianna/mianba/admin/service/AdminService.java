@@ -302,27 +302,27 @@ public class AdminService {
     @Transactional(readOnly = true)
     public List<Map<String, Object>> contentSafetyLogs() {
         return jdbc.query("""
-                SELECT c.id, u.email::text AS user_email, c.session_id, c.source, c.action,
+                SELECT c.id, u.email::text AS user_email, c.session_id, c.request_id, c.job_id,
+                       c.source, c.action,
                        c.risk_level, c.categories::text AS categories_json,
-                       CASE WHEN s.status IN ('deleting', 'deleted')
-                           THEN '[]'::text ELSE c.matched_terms::text END AS matched_terms_json,
-                       CASE WHEN s.status IN ('deleting', 'deleted')
-                           THEN NULL ELSE c.content_excerpt END AS content_excerpt,
-                       c.message_code, c.created_at
+                       c.rule_ids::text AS rule_ids_json, c.content_digest,
+                       c.disposition, c.message_code, c.created_at
                 FROM content_safety c LEFT JOIN users u ON u.id = c.user_id
-                LEFT JOIN sessions s ON s.id = c.session_id
                 ORDER BY c.created_at DESC LIMIT 200
                 """, (rs, row) -> {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", rs.getObject("id", UUID.class));
             item.put("user_email", rs.getString("user_email"));
             item.put("session_id", rs.getObject("session_id", UUID.class));
+            item.put("request_id", rs.getString("request_id"));
+            item.put("job_id", rs.getObject("job_id", UUID.class));
             item.put("source", rs.getString("source"));
             item.put("action", rs.getString("action"));
             item.put("risk_level", rs.getString("risk_level"));
             item.put("categories", jsonStrings(rs.getString("categories_json")));
-            item.put("matched_terms", jsonStrings(rs.getString("matched_terms_json")));
-            item.put("content_excerpt", rs.getString("content_excerpt"));
+            item.put("rule_ids", jsonStrings(rs.getString("rule_ids_json")));
+            item.put("content_digest", rs.getString("content_digest"));
+            item.put("disposition", rs.getString("disposition"));
             item.put("message_code", rs.getString("message_code"));
             item.put("created_at", rs.getTimestamp("created_at").toInstant());
             return item;

@@ -265,6 +265,24 @@ for name in \
     || fail "Compose field is not fail-closed: $name"
 done
 
+api_section="$(awk '
+  /^  api:$/ { capture=1; next }
+  capture && /^  [a-z][a-z0-9_-]*:$/ { exit }
+  capture { print }
+' "$workspace/docker-compose.yml")"
+worker_section="$(awk '
+  /^  worker:$/ { capture=1; next }
+  capture && /^  [a-z][a-z0-9_-]*:$/ { exit }
+  capture { print }
+' "$workspace/docker-compose.yml")"
+grep -Fq -- 'source: content_safety_hmac_secret' <<< "$api_section" \
+  || fail "API does not receive the content safety HMAC secret"
+grep -Fq -- 'source: content_safety_hmac_secret' <<< "$worker_section" \
+  || fail "Worker does not receive the content safety HMAC secret"
+if grep -Fq -- 'source: jwt_secret' <<< "$worker_section"; then
+  fail "Worker must not receive the JWT signing secret"
+fi
+
 redis_entrypoint="$workspace/deploy/redis-entrypoint.sh"
 redis_runtime_owner_line="$(grep -nFx -- 'chown redis:redis /run/redis' "$redis_entrypoint" \
   | cut -d: -f1 || true)"
