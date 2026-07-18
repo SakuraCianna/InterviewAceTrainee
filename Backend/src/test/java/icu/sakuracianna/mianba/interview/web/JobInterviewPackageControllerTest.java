@@ -39,7 +39,6 @@ class JobInterviewPackageControllerTest {
     private final UUID userId = UUID.randomUUID();
     private final UUID packageId = UUID.randomUUID();
     private final UUID sessionId = UUID.randomUUID();
-    private final UUID materialId = UUID.randomUUID();
     private final AuthenticatedUser principal = new AuthenticatedUser(
             userId, "owner@example.com", "user", UUID.randomUUID(), 0);
 
@@ -75,7 +74,7 @@ class JobInterviewPackageControllerTest {
         UUID firstSessionId = UUID.randomUUID();
         JobInterviewPackageView view = view(
                 JobInterviewStage.TECHNICAL_FIRST, firstSessionId, "IN_PROGRESS");
-        when(service.create(userId, packageId, firstSessionId, materialId, "package-key"))
+        when(service.create(userId, packageId, firstSessionId, null, "package-key"))
                 .thenReturn(view);
 
         mvc.perform(post("/api/interview-packages")
@@ -85,14 +84,12 @@ class JobInterviewPackageControllerTest {
                                 {
                                   "package_id": "%s",
                                   "first_session_id": "%s",
-                                  "material_id": "%s",
                                   "user_id": "%s",
                                   "charged_credit": 0,
                                   "admin_unlimited_usage": true,
-                                  "plan": {"max_turns": 1},
-                                  "material_snapshot": {"resume_text": "attacker"}
+                                  "plan": {"max_turns": 1}
                                 }
-                                """.formatted(packageId, firstSessionId, materialId, UUID.randomUUID())))
+                                """.formatted(packageId, firstSessionId, UUID.randomUUID())))
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", "/api/interview-packages/" + packageId))
                 .andExpect(jsonPath("$.package_id").value(packageId.toString()))
@@ -109,7 +106,7 @@ class JobInterviewPackageControllerTest {
                 .andExpect(jsonPath("$.packageId").doesNotExist())
                 .andExpect(jsonPath("$.stages[0].stageCode").doesNotExist());
 
-        verify(service).create(userId, packageId, firstSessionId, materialId, "package-key");
+        verify(service).create(userId, packageId, firstSessionId, null, "package-key");
     }
 
     @Test
@@ -181,8 +178,8 @@ class JobInterviewPackageControllerTest {
     @Test
     void invalidCreateRequestsUseExistingFourHundredAndValidationContracts() throws Exception {
         String validBody = """
-                {"package_id":"%s","first_session_id":"%s","material_id":"%s"}
-                """.formatted(packageId, sessionId, materialId);
+                {"package_id":"%s","first_session_id":"%s"}
+                """.formatted(packageId, sessionId);
 
         mvc.perform(post("/api/interview-packages")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -193,16 +190,16 @@ class JobInterviewPackageControllerTest {
                         .header("Idempotency-Key", "package-key")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"package_id":"not-a-uuid","first_session_id":"%s","material_id":"%s"}
-                                """.formatted(sessionId, materialId)))
+                                {"package_id":"not-a-uuid","first_session_id":"%s"}
+                                """.formatted(sessionId)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail").value("malformed_json"));
         mvc.perform(post("/api/interview-packages")
                         .header("Idempotency-Key", "package-key")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"package_id":"%s","first_session_id":"%s"}
-                                """.formatted(packageId, sessionId)))
+                                {"package_id":"%s"}
+                                """.formatted(packageId)))
                 .andExpect(status().is(422))
                 .andExpect(jsonPath("$.detail").value("validation_failed"));
         mvc.perform(post("/api/interview-packages")

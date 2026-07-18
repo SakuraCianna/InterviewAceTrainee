@@ -22,4 +22,19 @@ class RequestIdFilterTest {
 
         assertThat(response.getHeader(RequestIdFilter.REQUEST_ID_HEADER)).isEqualTo("req_client-123");
     }
+
+    @Test
+    void replacesOversizedIncomingRequestIdBeforeControllerAccess() throws Exception {
+        RequestIdFilter filter = new RequestIdFilter();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader(RequestIdFilter.REQUEST_ID_HEADER, "x".repeat(200));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        FilterChain chain = (incoming, outgoing) -> {
+            String requestId = incoming.getAttribute(RequestIdFilter.REQUEST_ID_ATTRIBUTE).toString();
+            assertThat(requestId).startsWith("req_").hasSize(36);
+            assertThat(requestId).isEqualTo(response.getHeader(RequestIdFilter.REQUEST_ID_HEADER));
+        };
+
+        filter.doFilter(request, response, chain);
+    }
 }

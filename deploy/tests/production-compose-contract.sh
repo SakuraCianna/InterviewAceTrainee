@@ -265,6 +265,63 @@ for name in \
     || fail "Compose field is not fail-closed: $name"
 done
 
+api_section="$(awk '
+  /^  api:$/ { capture=1; next }
+  capture && /^  [a-z][a-z0-9_-]*:$/ { exit }
+  capture { print }
+' "$workspace/docker-compose.yml")"
+grep -Fq -- 'apt-get install --yes --no-install-recommends curl libstdc++6' "$workspace/Backend/Dockerfile" \
+  || fail "Java runtime image does not include the ONNX C++ runtime dependency"
+grep -Fq -- '<artifactId>pytorch-engine</artifactId>' "$workspace/Backend/pom.xml" \
+  || fail "Backend does not exclude the heavyweight DJL PyTorch engine"
+grep -Fq -- 'class JavaPoolingTransformersEmbeddingModel' \
+  "$workspace/Backend/src/main/java/icu/sakuracianna/mianba/knowledge/JavaPoolingTransformersEmbeddingModel.java" \
+  || fail "Backend does not provide the engine-free ONNX pooling implementation"
+grep -Fq -- 'options.setCPUArenaAllocator(false)' \
+  "$workspace/Backend/src/main/java/icu/sakuracianna/mianba/knowledge/JavaPoolingTransformersEmbeddingModel.java" \
+  || fail "Backend does not bound retained ONNX native memory"
+migrate_section="$(awk '
+  /^  migrate:$/ { capture=1; next }
+  capture && /^  [a-z][a-z0-9_-]*:$/ { exit }
+  capture { print }
+' "$workspace/docker-compose.yml")"
+worker_section="$(awk '
+  /^  worker:$/ { capture=1; next }
+  capture && /^  [a-z][a-z0-9_-]*:$/ { exit }
+  capture { print }
+' "$workspace/docker-compose.yml")"
+grep -Fq -- 'MIANBA_AI_MODEL_EMBEDDING: transformers' <<< "$api_section" \
+  || fail "API does not enable the local transformers embedding model"
+grep -Fq -- 'SPRING_AI_VECTORSTORE_TYPE: redis' <<< "$api_section" \
+  || fail "API does not enable the Redis vector store"
+grep -Fq -- 'SPRING_DATA_REDIS_CLIENT_TYPE: jedis' <<< "$api_section" \
+  || fail "API does not provide the Jedis connection factory required by the Redis vector store"
+grep -Fq -- '-Djava.io.tmpdir=/opt/mianba-native' <<< "$api_section" \
+  || fail "API does not isolate ONNX native libraries from the general temporary directory"
+grep -Fq -- '-XX:ActiveProcessorCount=2' <<< "$api_section" \
+  || fail "API does not bound processor-dependent ONNX and JVM memory use"
+grep -Fq -- '-Xmx256m -XX:MaxMetaspaceSize=128m' <<< "$api_section" \
+  || fail "API does not leave enough native-memory headroom for local ONNX indexing"
+grep -Fq -- 'mem_limit: 1024m' <<< "$api_section" \
+  || fail "API does not reserve the validated native-memory headroom for local ONNX indexing"
+grep -Fq -- 'SPRING_SERVLET_MULTIPART_LOCATION: /tmp' <<< "$api_section" \
+  || fail "API does not keep untrusted multipart temporary files in the general temporary directory"
+grep -Fq -- '/opt/mianba-native:size=64m,mode=0700,uid=10001,gid=10001,exec' <<< "$api_section" \
+  || fail "API does not provide an executable, application-private ONNX native directory"
+for disabled_section in "$migrate_section" "$worker_section"; do
+  grep -Fq -- 'SPRING_AI_MODEL_EMBEDDING: none' <<< "$disabled_section" \
+    || fail "Non-API runtime does not disable embedding auto-configuration"
+  grep -Fq -- 'SPRING_AI_VECTORSTORE_TYPE: none' <<< "$disabled_section" \
+    || fail "Non-API runtime does not disable vector store auto-configuration"
+done
+grep -Fq -- 'source: content_safety_hmac_secret' <<< "$api_section" \
+  || fail "API does not receive the content safety HMAC secret"
+grep -Fq -- 'source: content_safety_hmac_secret' <<< "$worker_section" \
+  || fail "Worker does not receive the content safety HMAC secret"
+if grep -Fq -- 'source: jwt_secret' <<< "$worker_section"; then
+  fail "Worker must not receive the JWT signing secret"
+fi
+
 redis_entrypoint="$workspace/deploy/redis-entrypoint.sh"
 redis_runtime_owner_line="$(grep -nFx -- 'chown redis:redis /run/redis' "$redis_entrypoint" \
   | cut -d: -f1 || true)"

@@ -69,8 +69,21 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
             UUID firstSessionId,
             UUID materialId,
             String idempotencyKey) {
-        requireCreateArguments(userId, packageId, firstSessionId, materialId, idempotencyKey);
-        String requestHash = requestHash(packageId, firstSessionId, materialId);
+        throw new ApiException(HttpStatus.GONE,
+                "persistent_material_flow_removed", "材料持久化流程已下线，请重新提交临时材料");
+    }
+
+    @Override
+    @Transactional
+    public JobInterviewPackageView createPersonalized(
+            UUID userId,
+            UUID packageId,
+            UUID firstSessionId,
+            String idempotencyKey,
+            String openingQuestion) {
+        requireCreateArguments(userId, packageId, firstSessionId, idempotencyKey);
+        String safeOpeningQuestion = normalizeOpeningQuestion(openingQuestion);
+        String requestHash = requestHash(packageId, firstSessionId, safeOpeningQuestion);
 
         Optional<JobInterviewPackageView> replay = replay(
                 userId, packageId, idempotencyKey, requestHash);
@@ -95,25 +108,8 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
             return replay.get();
         }
 
-        MaterialRow material = jdbc.query("""
-                SELECT profile_summary, job_title, job_requirements,
-                       keywords::text AS keywords_json
-                FROM materials
-                WHERE id = ? AND user_id = ?
-                  AND status = 'ready' AND interview_type = 'job'
-                """, (rs, row) -> new MaterialRow(
-                rs.getString("profile_summary"),
-                rs.getString("job_title"),
-                rs.getString("job_requirements"),
-                rs.getString("keywords_json")), materialId, userId)
-                .stream().findFirst()
-                .orElseThrow(() -> new ApiException(
-                        HttpStatus.NOT_FOUND,
-                        "interview_material_not_found",
-                        "工作面试材料不存在或尚未准备好"));
-
         JobInterviewPlan plan = JobInterviewPlan.chineseEnterpriseV1();
-        PreparedJson preparedJson = prepareJson(material, plan);
+        List<String> planSnapshots = preparePlanJson(plan);
         boolean adminUnlimited = "admin".equals(user.role());
         UUID voucherId = null;
         if (!adminUnlimited) {
@@ -148,16 +144,14 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
         insertPackage(
                 userId,
                 packageId,
-                materialId,
                 voucherId,
                 idempotencyKey,
                 requestHash,
                 chargedCredit,
                 adminUnlimited,
-                preparedJson.materialSnapshot(),
                 packageExpiresAt,
                 nowTimestamp);
-        insertStages(packageId, plan, preparedJson.planSnapshots(), nowTimestamp);
+        insertStages(packageId, plan, planSnapshots, nowTimestamp);
         applyBilling(
                 userId,
                 packageId,
@@ -169,13 +163,12 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
                 userId,
                 packageId,
                 firstSessionId,
-                materialId,
                 plan.stage(JobInterviewStage.TECHNICAL_FIRST).maxTurns(),
                 adminUnlimited,
                 nowTimestamp,
                 Timestamp.from(firstSessionExpiresAt));
         bindFirstStage(packageId, firstSessionId, nowTimestamp);
-        insertFirstTurn(firstSessionId, nowTimestamp);
+        insertFirstTurn(firstSessionId, safeOpeningQuestion, nowTimestamp);
         return get(userId, packageId);
     }
 
@@ -269,7 +262,6 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
                 userId,
                 sessionId,
                 idempotencyKey,
-                lockedPackage.materialId(),
                 lockedStage.maxTurns(),
                 nowTimestamp,
                 Timestamp.from(sessionExpiresAt));
@@ -280,14 +272,13 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
 
     private LockedPackage lockPackage(UUID userId, UUID packageId) {
         return jdbc.query("""
-                SELECT status, current_stage_code, material_id, expires_at
+                SELECT status, current_stage_code, expires_at
                 FROM interview_packages
                 WHERE id = ? AND user_id = ?
                 FOR UPDATE
                 """, (rs, row) -> new LockedPackage(
                 rs.getString("status"),
                 JobInterviewStage.valueOf(rs.getString("current_stage_code")),
-                rs.getObject("material_id", UUID.class),
                 rs.getTimestamp("expires_at").toInstant()), packageId, userId)
                 .stream().findFirst()
                 .orElseThrow(() -> new ApiException(
@@ -364,24 +355,22 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
             UUID userId,
             UUID sessionId,
             String idempotencyKey,
-            UUID materialId,
             int totalTurns,
             Timestamp now,
             Timestamp expiresAt) {
         try {
             jdbc.update("""
                     INSERT INTO sessions(
-                        id, user_id, start_idempotency_key, material_id, interview_type,
+                        id, user_id, start_idempotency_key, interview_type,
                         status, current_turn_index, total_turns, charged_credit,
                         voucher_id, admin_unlimited_usage, started_at,
                         expires_at, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, 'job', 'active', 0, ?, 0,
+                    VALUES (?, ?, ?, 'job', 'active', 0, ?, 0,
                             NULL, false, ?, ?, ?, ?)
                     """,
                     sessionId,
                     userId,
                     idempotencyKey,
-                    materialId,
                     totalTurns,
                     now,
                     expiresAt,
@@ -467,18 +456,8 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
         return Optional.of(get(userId, value.id()));
     }
 
-    private PreparedJson prepareJson(MaterialRow material, JobInterviewPlan plan) {
+    private List<String> preparePlanJson(JobInterviewPlan plan) {
         try {
-            Map<String, Object> snapshot = new LinkedHashMap<>();
-            putNormalized(snapshot, "profile_summary", material.profileSummary(), 1200);
-            putNormalized(snapshot, "job_title", material.jobTitle(), 160);
-            putNormalized(snapshot, "job_requirements_summary", material.jobRequirements(), 2500);
-            List<String> keywords = safeKeywords(material.keywordsJson());
-            if (!keywords.isEmpty()) {
-                snapshot.put("keywords", keywords);
-            }
-            String materialSnapshot = mapper.writeValueAsString(snapshot);
-
             List<String> stageSnapshots = new ArrayList<>(plan.stages().size());
             for (JobInterviewPlan.StagePlan stage : plan.stages()) {
                 Map<String, Object> stageSnapshot = new LinkedHashMap<>();
@@ -491,45 +470,9 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
                 stageSnapshot.put("end_rule", END_RULE);
                 stageSnapshots.add(mapper.writeValueAsString(stageSnapshot));
             }
-            return new PreparedJson(materialSnapshot, List.copyOf(stageSnapshots));
+            return List.copyOf(stageSnapshots);
         } catch (JacksonException exception) {
-            throw new IllegalStateException("Unable to build safe job interview package snapshots", exception);
-        }
-    }
-
-    private List<String> safeKeywords(String keywordsJson) throws JacksonException {
-        if (keywordsJson == null || keywordsJson.isBlank()) {
-            return List.of();
-        }
-        JsonNode root = mapper.readTree(keywordsJson);
-        if (root == null || !root.isArray()) {
-            throw new IllegalStateException("Material keywords must be a JSON array");
-        }
-        List<String> keywords = new ArrayList<>(12);
-        Set<String> seen = new HashSet<>();
-        for (JsonNode value : root) {
-            if (!value.isString()) {
-                continue;
-            }
-            String normalized = normalize(value.stringValue(), 24);
-            if (!normalized.isEmpty() && seen.add(normalized)) {
-                keywords.add(normalized);
-                if (keywords.size() == 12) {
-                    break;
-                }
-            }
-        }
-        return List.copyOf(keywords);
-    }
-
-    private static void putNormalized(
-            Map<String, Object> target,
-            String key,
-            String rawValue,
-            int maximumCodePoints) {
-        String normalized = normalize(rawValue, maximumCodePoints);
-        if (!normalized.isEmpty()) {
-            target.put(key, normalized);
+            throw new IllegalStateException("Unable to build job interview plan snapshots", exception);
         }
     }
 
@@ -565,34 +508,30 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
     private void insertPackage(
             UUID userId,
             UUID packageId,
-            UUID materialId,
             UUID voucherId,
             String idempotencyKey,
             String requestHash,
             int chargedCredit,
             boolean adminUnlimited,
-            String materialSnapshot,
             Instant packageExpiresAt,
             Timestamp now) {
         try {
             jdbc.update("""
                     INSERT INTO interview_packages(
-                        id, user_id, material_id, voucher_id, start_idempotency_key,
+                        id, user_id, voucher_id, start_idempotency_key,
                         request_hash, status, current_stage_code, charged_credit,
                         admin_unlimited_usage, plan_version, rubric_version,
-                        material_snapshot, expires_at, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', 'TECHNICAL_FIRST', ?, ?,
-                            'job-cn-v1', 'job-rubric-v1', ?::jsonb, ?, ?, ?)
+                        expires_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 'ACTIVE', 'TECHNICAL_FIRST', ?, ?,
+                            'job-cn-v1', 'job-rubric-v1', ?, ?, ?)
                     """,
                     packageId,
                     userId,
-                    materialId,
                     voucherId,
                     idempotencyKey,
                     requestHash,
                     chargedCredit,
                     adminUnlimited,
-                    materialSnapshot,
                     Timestamp.from(packageExpiresAt),
                     now,
                     now);
@@ -693,7 +632,6 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
             UUID userId,
             UUID packageId,
             UUID firstSessionId,
-            UUID materialId,
             int totalTurns,
             boolean adminUnlimited,
             Timestamp now,
@@ -701,17 +639,16 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
         try {
             jdbc.update("""
                     INSERT INTO sessions(
-                        id, user_id, start_idempotency_key, material_id, interview_type,
+                        id, user_id, start_idempotency_key, interview_type,
                         status, current_turn_index, total_turns, charged_credit,
                         voucher_id, admin_unlimited_usage, started_at,
                         expires_at, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, 'job', 'active', 0, ?, 0,
+                    VALUES (?, ?, ?, 'job', 'active', 0, ?, 0,
                             NULL, ?, ?, ?, ?, ?)
                     """,
                     firstSessionId,
                     userId,
                     "job-package-start:" + packageId,
-                    materialId,
                     totalTurns,
                     adminUnlimited,
                     now,
@@ -743,7 +680,7 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
         }
     }
 
-    private void insertFirstTurn(UUID firstSessionId, Timestamp now) {
+    private void insertFirstTurn(UUID firstSessionId, String openingQuestion, Timestamp now) {
         try {
             jdbc.update("""
                     INSERT INTO turns(
@@ -751,7 +688,7 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
                         section_code, question_type, topic_code, parent_turn_id, created_at)
                     VALUES (?, 0, ?, ?, 'waiting_answer',
                             'INTRODUCTION', 'INTRODUCTION', 'self_introduction', NULL, ?)
-                    """, firstSessionId, FIRST_ROUND, FIRST_QUESTION, now);
+                    """, firstSessionId, FIRST_ROUND, openingQuestion, now);
         } catch (DataIntegrityViolationException exception) {
             throw aggregateConflict();
         }
@@ -803,12 +740,10 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
             UUID userId,
             UUID packageId,
             UUID firstSessionId,
-            UUID materialId,
             String idempotencyKey) {
         Objects.requireNonNull(userId, "userId");
         Objects.requireNonNull(packageId, "packageId");
         Objects.requireNonNull(firstSessionId, "firstSessionId");
-        Objects.requireNonNull(materialId, "materialId");
         if (idempotencyKey == null || idempotencyKey.isBlank() || idempotencyKey.length() > 128) {
             throw new ApiException(
                     HttpStatus.UNPROCESSABLE_CONTENT,
@@ -835,8 +770,17 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
         }
     }
 
-    private static String requestHash(UUID packageId, UUID firstSessionId, UUID materialId) {
-        return sha256(canonical(packageId, firstSessionId, materialId));
+    private static String requestHash(UUID packageId, UUID firstSessionId, String openingQuestion) {
+        return sha256(canonical(packageId, firstSessionId, openingQuestion));
+    }
+
+    private static String normalizeOpeningQuestion(String question) {
+        String normalized = normalize(question, 800);
+        if (normalized.length() < 8) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_CONTENT,
+                    "personalized_question_invalid", "个性化首题格式不正确");
+        }
+        return normalized;
     }
 
     private static String canonical(Object... values) {
@@ -875,20 +819,9 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
     private record UserBilling(int balance, String role) {
     }
 
-    private record MaterialRow(
-            String profileSummary,
-            String jobTitle,
-            String jobRequirements,
-            String keywordsJson) {
-    }
-
-    private record PreparedJson(String materialSnapshot, List<String> planSnapshots) {
-    }
-
     private record LockedPackage(
             String status,
             JobInterviewStage currentStage,
-            UUID materialId,
             Instant expiresAt) {
     }
 

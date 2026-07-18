@@ -106,7 +106,7 @@ class AdminServiceTest {
     }
 
     @Test
-    void privacyQueriesHideContentForDeletingAndDeletedSessions() {
+    void privacyQueriesNeverSelectRawSafetyContent() {
         EmptyQueryJdbcTemplate jdbc = new EmptyQueryJdbcTemplate();
         AdminService service = service(jdbc, mock(SessionRegistry.class));
 
@@ -118,10 +118,9 @@ class AdminServiceTest {
         assertThat(jdbc.queries).anySatisfy(sql -> assertThat(sql)
                 .contains("s.status NOT IN ('deleting', 'deleted')"));
         assertThat(jdbc.queries).anySatisfy(sql -> assertThat(sql)
-                .contains("LEFT JOIN sessions s ON s.id = c.session_id")
-                .contains("CASE WHEN s.status IN ('deleting', 'deleted')")
-                .contains("THEN '[]'::text ELSE c.matched_terms::text END AS matched_terms_json")
-                .contains("THEN NULL ELSE c.content_excerpt END AS content_excerpt"));
+                .contains("c.rule_ids::text AS rule_ids_json")
+                .contains("c.content_digest", "c.disposition")
+                .doesNotContain("matched_terms", "content_excerpt"));
     }
 
     private static AdminService service(JdbcTemplate jdbc, SessionRegistry sessions) {

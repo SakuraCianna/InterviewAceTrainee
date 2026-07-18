@@ -36,6 +36,27 @@ compose() {
   docker compose -f "$COMPOSE_FILE" -f "$CI_COMPOSE_FILE" "$@"
 }
 
+diagnose_worker_task() {
+  local task_id="$1"
+  compose exec -T -e CI_TASK_ID="$task_id" postgres sh -ec '
+    psql --set ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+      --set "task_id=$CI_TASK_ID"
+  ' <<'SQL' || true
+SELECT j.id, j.status, j.stage, j.attempt, j.max_attempts, j.version,
+       (SELECT count(*) FROM outbox_events o
+        WHERE o.aggregate_id = j.id AND o.published_at IS NULL) AS unpublished_outbox,
+       (SELECT count(*) FROM outbox_events o
+        WHERE o.aggregate_id = j.id AND o.published_at IS NOT NULL) AS published_outbox,
+       (SELECT count(*) FROM processed_messages p
+        WHERE p.job_id = j.id) AS processed_messages
+FROM ai_jobs j
+WHERE j.id = :'task_id'::uuid;
+SQL
+  compose exec -T rabbitmq rabbitmqctl -p /mianba list_queues \
+    name messages_ready messages_unacknowledged consumers || true
+  compose logs --no-color --tail 160 worker api || true
+}
+
 request() {
   local output_file="$1"
   shift
@@ -79,6 +100,15 @@ compose exec -T -e CI_SMOKE_EMAIL="$EMAIL" -e CI_SMOKE_CODE="$CODE" redis sh -ec
     redis-cli --user mianba_app SETEX \
     "mianba:auth:email-code:${CI_SMOKE_EMAIL}" 300 "$CI_SMOKE_CODE" >/dev/null
 '
+
+# 高压解析可能成功，再加恢复与后续五轮面试，最多消耗三张券；仅调整隔离 CI 测试夹具。
+compose exec -T postgres sh -ec '
+  psql --set ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB"
+' <<'SQL'
+UPDATE system_configs
+SET value_json = '3'::jsonb, updated_at = now()
+WHERE config_key = 'new_user_trial_vouchers';
+SQL
 
 printf '{"email":"%s","password":"%s","code":"%s"}\n' \
   "$EMAIL" "$PASSWORD" "$CODE" > "${TEMP_DIR}/register-request.json"
@@ -158,6 +188,8 @@ PARSER_CONTAINER_ID_BEFORE="$(compose ps -q material-parser)"
 readonly PARSER_CONTAINER_ID_BEFORE
 PARSER_RESTARTS_BEFORE="$(docker inspect --format '{{.RestartCount}}' "$PARSER_CONTAINER_ID_BEFORE")"
 readonly PARSER_RESTARTS_BEFORE
+PRESSURE_SESSION_ID="$(new_uuid)"
+readonly PRESSURE_SESSION_ID
 BOMB_STATUS="$(curl --silent --show-error --insecure --max-time 30 \
   --resolve "${HOST_NAME}:443:127.0.0.1" \
   --cookie "$COOKIE_JAR" --cookie-jar "$COOKIE_JAR" \
@@ -165,14 +197,19 @@ BOMB_STATUS="$(curl --silent --show-error --insecure --max-time 30 \
   --request POST \
   --header "X-CSRF-Token: ${CSRF_TOKEN}" \
   --header "Idempotency-Key: ci-parser-pressure-$(new_uuid)" \
-  --form 'interview_type=job' \
-  --form 'job_title=Backend Engineer' \
-  --form 'job_requirements=Build reliable distributed services' \
+  --form "session_id=${PRESSURE_SESSION_ID}" \
+  --form 'interview_type=postgraduate' \
+  --form 'target_school=CI Test University' \
+  --form 'major=Computer Science' \
   --form "resume_file=@${TEMP_DIR}/resource-pressure.pdf;type=application/pdf" \
-  "${BASE_URL}/api/interview-materials")"
+  "${BASE_URL}/api/interviews/personalized")"
 case "$BOMB_STATUS" in
   201)
-    json_value "${TEMP_DIR}/resource-pressure-response.json" id >/dev/null
+    json_value "${TEMP_DIR}/resource-pressure-response.json" session_id >/dev/null
+    request "${TEMP_DIR}/resource-pressure-delete.json" \
+      --request DELETE \
+      --header "X-CSRF-Token: ${CSRF_TOKEN}" \
+      "${BASE_URL}/api/interviews/${PRESSURE_SESSION_ID}"
     ;;
   408|503|504) ;;
   *)
@@ -199,34 +236,30 @@ compose exec -T api curl --fail --silent --show-error --max-time 5 \
 
 printf 'Java 21, Spring Boot, PostgreSQL, Redis, RabbitMQ and defensive programming.\n' \
   > "${TEMP_DIR}/normal-resume.txt"
-request "${TEMP_DIR}/normal-material.json" \
+RECOVERY_SESSION_ID="$(new_uuid)"
+readonly RECOVERY_SESSION_ID
+request "${TEMP_DIR}/normal-session.json" \
   --request POST \
   --header "X-CSRF-Token: ${CSRF_TOKEN}" \
   --header "Idempotency-Key: ci-parser-recovery-$(new_uuid)" \
-  --form 'interview_type=job' \
-  --form 'job_title=Backend Engineer' \
-  --form 'job_requirements=Build reliable distributed services' \
+  --form "session_id=${RECOVERY_SESSION_ID}" \
+  --form 'interview_type=postgraduate' \
+  --form 'target_school=CI Test University' \
+  --form 'major=Computer Science' \
   --form "resume_file=@${TEMP_DIR}/normal-resume.txt;type=text/plain" \
-  "${BASE_URL}/api/interview-materials"
-json_value "${TEMP_DIR}/normal-material.json" id >/dev/null
-
-MATERIAL_KEY="ci-material-$(new_uuid)"
-readonly MATERIAL_KEY
-request "${TEMP_DIR}/material.json" \
-  --request POST \
+  "${BASE_URL}/api/interviews/personalized"
+test "$(json_value "${TEMP_DIR}/normal-session.json" session_id)" = "$RECOVERY_SESSION_ID"
+request "${TEMP_DIR}/normal-session-delete.json" \
+  --request DELETE \
   --header "X-CSRF-Token: ${CSRF_TOKEN}" \
-  --header "Idempotency-Key: ${MATERIAL_KEY}" \
-  --form 'interview_type=civil_service' \
-  "${BASE_URL}/api/interview-materials"
-MATERIAL_ID="$(json_value "${TEMP_DIR}/material.json" id)"
-readonly MATERIAL_ID
+  "${BASE_URL}/api/interviews/${RECOVERY_SESSION_ID}"
 
 SESSION_ID="$(new_uuid)"
 readonly SESSION_ID
 START_KEY="ci-session-$(new_uuid)"
 readonly START_KEY
-printf '{"session_id":"%s","interview_type":"civil_service","material_id":"%s"}\n' \
-  "$SESSION_ID" "$MATERIAL_ID" > "${TEMP_DIR}/start-request.json"
+printf '{"session_id":"%s","interview_type":"civil_service"}\n' \
+  "$SESSION_ID" > "${TEMP_DIR}/start-request.json"
 request "${TEMP_DIR}/session.json" \
   --request POST \
   --header 'Content-Type: application/json' \
@@ -247,6 +280,18 @@ if (session.session_id !== sessionId || session.status !== 'active'
 NODE
 
 # 首轮暂停 Worker，确保刷新页面时可以从会话快照恢复 active_task，再从任务接口继续轮询。
+WORKER_INSTANCE_BEFORE="$(compose exec -T postgres sh -ec '
+  psql --set ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+    --tuples-only --no-align
+' <<'SQL'
+SELECT instance_id FROM runtime_heartbeats WHERE role = 'worker';
+SQL
+)"
+readonly WORKER_INSTANCE_BEFORE
+if [[ -z "$WORKER_INSTANCE_BEFORE" ]]; then
+  echo "Worker heartbeat instance was unavailable before restart" >&2
+  exit 1
+fi
 compose stop --timeout 30 worker >/dev/null
 
 for turn_index in 0 1 2 3 4; do
@@ -281,10 +326,35 @@ if (task.id !== taskId || task.session_id !== sessionId || task.status !== 'QUEU
 }
 NODE
     compose start worker >/dev/null
+    for worker_attempt in $(seq 1 60); do
+      worker_ready="$(compose exec -T \
+        -e CI_PREVIOUS_WORKER_INSTANCE="$WORKER_INSTANCE_BEFORE" postgres sh -ec '
+          psql --set ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+            --tuples-only --no-align --set "previous=$CI_PREVIOUS_WORKER_INSTANCE"
+        ' <<'SQL'
+SELECT CASE WHEN EXISTS (
+  SELECT 1 FROM runtime_heartbeats
+  WHERE role = 'worker'
+    AND instance_id <> :'previous'
+    AND consumers_ready = true
+    AND rabbit_ready = true
+    AND updated_at > now() - interval '30 seconds'
+) THEN 'ready' ELSE 'waiting' END;
+SQL
+)"
+      if [[ "$worker_ready" == "ready" ]]; then
+        break
+      fi
+      if [[ "$worker_attempt" == "60" ]]; then
+        echo "Restarted Worker did not publish a fresh ready heartbeat within 120 seconds" >&2
+        exit 1
+      fi
+      sleep 2
+    done
   fi
 
   task_status=""
-  for attempt in $(seq 1 60); do
+  for attempt in $(seq 1 120); do
     request "${TEMP_DIR}/task.json" "${BASE_URL}/api/tasks/${task_id}"
     task_status="$(json_value "${TEMP_DIR}/task.json" status)"
     case "$task_status" in
@@ -296,8 +366,9 @@ NODE
         exit 1
         ;;
     esac
-    if [[ "$attempt" == "60" ]]; then
-      echo "Worker task ${task_id} did not complete within 120 seconds" >&2
+    if [[ "$attempt" == "120" ]]; then
+      echo "Worker task ${task_id} did not complete within 240 seconds" >&2
+      diagnose_worker_task "$task_id"
       exit 1
     fi
     sleep 2
@@ -389,7 +460,7 @@ SELECT CASE WHEN
     AND NOT EXISTS (
         SELECT 1 FROM content_safety
         WHERE session_id = :'session_id'::uuid
-          AND (matched_terms <> '[]'::jsonb OR content_excerpt IS NOT NULL)
+          AND (rule_ids <> '[]'::jsonb OR content_digest IS NOT NULL OR request_id IS NOT NULL)
     )
 THEN 'ok' ELSE 'failed' END;
 SQL

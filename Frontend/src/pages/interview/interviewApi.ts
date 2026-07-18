@@ -4,7 +4,6 @@ import type {
   CurrentUserResponse,
   InterviewAnswerResponse,
   InterviewHistoryItem,
-  InterviewMaterialResponse,
   InterviewStateResponse,
   InterviewType,
   SpeechSynthesisApiResponse,
@@ -28,14 +27,6 @@ async function retryNetworkOnce<T>(request: () => Promise<T>, signal?: AbortSign
     // 同一次业务操作可能已到达服务端，网络重试必须复用原幂等键。
     return request();
   }
-}
-
-export function getLatestInterviewMaterial(interviewType: string, signal?: AbortSignal) {
-  return requestJson<InterviewMaterialResponse | null>(
-    `/api/interview-materials?type=${encodeURIComponent(interviewType)}`,
-    { ...credentials, signal },
-    null,
-  );
 }
 
 export function getCurrentAccount(signal?: AbortSignal) {
@@ -80,7 +71,6 @@ export function getActiveInterviewSession(signal?: AbortSignal) {
 export function startInterviewSession(payload: {
   session_id: string;
   interview_type: InterviewType;
-  material_id?: string;
 }, options: OperationRequestOptions) {
   return retryNetworkOnce(
     () => requestJson<InterviewStateResponse>("/api/interviews", {
@@ -95,15 +85,18 @@ export function startInterviewSession(payload: {
   );
 }
 
-export function uploadInterviewMaterial(formData: FormData, options: OperationRequestOptions) {
-  return requestJson<InterviewMaterialResponse & ApiPayload>("/api/interview-materials", {
-    method: "POST",
-    credentials: "include",
-    headers: csrfHeaders(),
-    idempotencyKey: options.idempotencyKey,
-    signal: options.signal,
-    body: formData,
-  });
+export function startPersonalizedInterviewSession(formData: FormData, options: OperationRequestOptions) {
+  return retryNetworkOnce(
+    () => requestJson<InterviewStateResponse>("/api/interviews/personalized", {
+      method: "POST",
+      credentials: "include",
+      headers: csrfHeaders(),
+      idempotencyKey: options.idempotencyKey,
+      signal: options.signal,
+      body: formData,
+    }),
+    options.signal,
+  );
 }
 
 export function synthesizeQuestionSpeech(sessionId: string) {
@@ -207,17 +200,17 @@ export function getActiveInterviewPackage(signal?: AbortSignal) {
   );
 }
 
-export function createInterviewPackage(
-  payload: { package_id: string; first_session_id: string; material_id: string },
+export function createPersonalizedInterviewPackage(
+  formData: FormData,
   options: OperationRequestOptions,
 ) {
-  return requestJson<import("./types").InterviewPackage>("/api/interview-packages", {
+  return requestJson<import("./types").InterviewPackage>("/api/interview-packages/personalized", {
     method: "POST",
     credentials: "include",
-    headers: csrfHeaders(jsonHeaders),
+    headers: csrfHeaders(),
     idempotencyKey: options.idempotencyKey,
     signal: options.signal,
-    body: JSON.stringify(payload),
+    body: formData,
   });
 }
 

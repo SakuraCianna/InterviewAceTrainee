@@ -16,6 +16,9 @@
 - 完整复盘报告：总分、维度评分、亮点、改进建议、推荐练习
 - 断线后可恢复未完成训练；AI 任务支持手动重试
 - 工作面试三阶段套餐：技术一面 → 技术二面 → HR 终面
+- 本地隐私 RAG：简历/JD/院校/专业输入仅在会话创建请求内处理，公共知识向量存入 Redis 8
+- 239 份版本化公共知识文档：200 份岗位文档覆盖 40 类代表岗位（含技术、销售、市场、运营、客服、人力、财务、供应链、产品与设计），另含 39 份院校层次与考研专业代表性文档
+- AI 输入/输出/TTS 三道内容风控，审计只保存规则 ID、处置结果和不可逆摘要
 - 管理后台：用户管理、积分调整、退款工单、AI 调用日志、任务监控
 
 ## 当前架构
@@ -28,7 +31,8 @@ Browser
     -> Frontend (React/Vite 静态站点)
     -> API (Spring Boot, 端口 8000)
       -> Material Parser (受限内网进程)
-      -> PostgreSQL / Redis / RabbitMQ
+      -> 本地 ONNX Embedding -> Redis 8 Search/JSON
+      -> PostgreSQL / RabbitMQ
       -> hCaptcha Siteverify
     -> Worker (非 Web Spring 应用)
       -> RabbitMQ / PostgreSQL / Spring AI / DeepSeek
@@ -37,6 +41,7 @@ Browser
 - API 负责鉴权、事务、业务规则、WebSocket、AI Job 和 Outbox
 - Worker 负责 DeepSeek 追问/逐轮评估、整场报告、受控重试、租约恢复和调用日志
 - RabbitMQ 消息只传 Job ID 与追踪元数据，不传简历、答案、音频或报告全文
+- API 启动时校验版本化 Markdown 语料并增量同步 Redis；索引失败会标记降级，不阻断无 RAG 的普通面试
 - DLQ 只承接畸形消息和超过投递上限的基础设施毒消息；业务失败以 PostgreSQL 任务状态为准
 - 实时 ASR 由浏览器、API WebSocket 与腾讯云 ASR 直连链路处理，不进入普通任务队列；未启动、持续静默和绝对墙钟均有硬超时并立即释放全局容量
 
@@ -57,10 +62,10 @@ AI Worker 不是另一个独立仓库，而是 `Backend` 同一 Spring Boot JAR 
 | --- | --- |
 | Java | Java 21 LTS |
 | 应用框架 | Spring Boot 4.1.0 |
-| AI | Spring AI BOM 2.0.0, DeepSeek 官方 Starter |
+| AI | Spring AI BOM 2.0.0, DeepSeek 官方 Starter, 本地 Transformers ONNX Embedding |
 | 前端 | React 19, Vite 7, TypeScript |
-| 数据库 | `pgvector/pgvector:0.8.5-pg18-bookworm` |
-| 缓存 | `redis:8.8.0-alpine` |
+| 数据库 | PostgreSQL 18 + pgvector 0.8.5, Flyway 11.19.0 |
+| 向量与缓存 | Redis 8.8.0 Search/JSON + HNSW/COSINE |
 | 队列 | `rabbitmq:4.3.2-management` |
 | 构建与边缘 | Node 24.18.0, Temurin 21.0.11, Nginx 1.29.7, Docker Compose |
 
@@ -127,12 +132,12 @@ npm run dev
 | `GET` | `/api/auth/me` | 当前用户信息（积分、体验券）|
 | `POST` | `/api/auth/password/change` | 凭验证码修改密码 |
 
-### 面试素材
+### 个性化会话创建
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `POST` | `/api/interview-materials` | 上传并解析面试素材（简历、院校信息）|
-| `GET` | `/api/interview-materials?type={type}` | 获取当前用户最新的指定类型素材；不存在时返回 204 |
+| `POST` | `/api/interviews/personalized` | 在一个 multipart 请求内解析个性化输入、检索公共知识并创建会话；原始输入不持久化 |
+| `POST` | `/api/interview-packages/personalized` | 在一个 multipart 请求内创建岗位三阶段套餐；原始简历/JD 不持久化 |
 
 ### 单场面试会话
 
@@ -149,7 +154,7 @@ npm run dev
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `POST` | `/api/interview-packages` | 创建套餐并启动技术一面（消耗 3 积分或体验券）|
+| `POST` | `/api/interview-packages/personalized` | 携带简历与岗位信息创建套餐并启动技术一面（消耗 3 积分或体验券）|
 | `GET` | `/api/interview-packages/active` | 查询当前活跃套餐；无则 204 |
 | `GET` | `/api/interview-packages/{packageId}` | 查询指定套餐及各阶段状态 |
 | `POST` | `/api/interview-packages/{packageId}/stages/{stageCode}/start` | 显式启动下一阶段 |
@@ -181,6 +186,7 @@ npm run dev
 | `redis_app_password` | Redis ACL 应用账号 |
 | `rabbitmq_api_password`, `rabbitmq_worker_password` | RabbitMQ 发布/声明账号与只消费 Worker 账号 |
 | `jwt_secret` | JWT 签名密钥 |
+| `content_safety_hmac_secret` | API 与 Worker 共用的风控审计 HMAC 密钥，不用于身份认证 |
 | `material-parser-token` | API 调用内网材料解析进程的随机认证令牌 |
 | `hcaptcha-site-key` | 前端通过公开配置接口读取的 hCaptcha 站点标识 |
 | `hcaptcha-secret` | API 调用 hCaptcha Siteverify 的服务端密钥 |
@@ -218,14 +224,14 @@ QUEUED -> RUNNING -> SUCCEEDED
 - Worker 使用单消费者、prefetch 1、手动 ACK；数据库提交成功后才 ACK
 - 工作面试、研究生复试、考公和 IELTS 使用独立阶段与评分维度；IELTS 的首题、追问、阶段名、反馈和最终报告全部强制英文
 
-## 材料配额与数据留存
+## 隐私 RAG 与数据留存
 
-API 对每个用户执行以下材料配额和内容擦除规则：
+API 对个性化输入和业务内容执行以下边界：
 
-- 24 小时内最多新建 10 份材料，30 天内最多新建 30 份材料
-- 同时最多保留 20 份 `ready` 材料
-- 材料创建 30 天后擦除简历、岗位、院校等内容并标记删除；标记删除满 7 天且无会话或任务引用时物理删除记录
-- 文件解析不在 API JVM 内执行：独立 Parser 仅接入内部网络，使用随机 Bearer token、单并发、Xmx 96 MiB 和 256 MiB 容器上限；单次解析超过 8 秒会强制终止 Parser，由容器自动拉起
+- 简历、JD、目标院校、专业和研究方向只存在于 `/personalized` 请求的受控内存对象中，不写 PostgreSQL、Redis、RabbitMQ、日志或 AI Job
+- 独立 Parser 仅接入内部网络，使用随机 Bearer token、单并发、Xmx 96 MiB 和 256 MiB 容器上限；API 取得裁剪文本后立即清零上传字节和字符数组
+- Redis 只保存仓库内公开 Markdown 文档的向量、公开元数据与语料 manifest；PostgreSQL 只保存索引状态、版本、数量和错误码
+- ONNX 模型固定到提交 `e8f8c211226b894fcb81acc59f3b34ba3efd5f42`，Docker 构建校验模型与 tokenizer 的 SHA-256
 - 面试会话有效期 24 小时；`completed`、`cancelled` 或 `deleted` 会话结束满 90 天后擦除问答、报告和 AI 任务输入输出
 - 工作面试套餐有效期 30 天；过期后内容按相同留存策略擦除
 
@@ -235,7 +241,7 @@ API 对每个用户执行以下材料配额和内容擦除规则：
 
 | Hook | 位置 | 职责 |
 | --- | --- | --- |
-| `useMaterialUpload` | `pages/interview/hooks/useMaterialUpload.ts` | 素材上传状态、幂等重传、挂载时恢复历史素材 |
+| `usePersonalizationInput` | `pages/interview/hooks/usePersonalizationInput.ts` | 页面内暂存个性化输入、组装单次创建请求并在成功后释放 |
 | `useMicrophoneCheck` | `pages/interview/hooks/useMicrophoneCheck.ts` | 麦克风枚举、检测、音量分析、设备切换 |
 | `useAudioRecorder` | `pages/interview/hooks/useAudioRecorder.ts` | 实时 ASR 录音、静默超时、自动提交 |
 | `useInterviewTask` | `pages/interview/hooks/useInterviewTask.ts` | AI 任务轮询、重试、失败回调 |
@@ -258,11 +264,11 @@ API 对每个用户执行以下材料配额和内容擦除规则：
 
 | 服务 | 内存上限 | 内存 + Swap 上限 | CPU | 关键限制 |
 | --- | ---: | ---: | ---: | --- |
-| API | 768 MiB | 1024 MiB | 1.25 | Xmx 448 MiB, Hikari 6, Tomcat 80 |
+| API | 1024 MiB | 1280 MiB | 1.25 | Xmx 256 MiB, 本地 ONNX, Hikari 6, Tomcat 80 |
 | Worker | 640 MiB | 896 MiB | 0.75 | Xmx 352 MiB, Hikari 4, consumer/LLM 1 |
 | Material Parser | 256 MiB | 384 MiB | 0.35 | 独立进程 Xmx 96 MiB, 单并发, 无数据库与公网 |
 | PostgreSQL | 960 MiB | 1152 MiB | 1.10 | shared_buffers 256 MB, max connections 40 |
-| Redis | 256 MiB | 320 MiB | 0.25 | maxmemory 160 MB, noeviction, AOF |
+| Redis | 320 MiB | 384 MiB | 0.25 | Search/JSON, maxmemory 192 MB, noeviction, AOF |
 | RabbitMQ | 384 MiB | 512 MiB | 0.40 | watermark 0.55, management 端口不发布 |
 | Nginx + Frontend | 128 MiB | 192 MiB | 0.20 | 静态强缓存, API 分级限流 |
 
@@ -293,6 +299,8 @@ API 对每个用户执行以下材料配额和内容擦除规则：
 7. 候选 release 先通过深度 readiness 和 HTTPS 边缘探测，然后才原子切换 `current`；失败会恢复 `previous`
 8. 生产只执行 `docker load`；`docker compose up --no-build --pull never` 不现场构建
 
+常规发布由受控工作流执行 Flyway；只有按生产重建 runbook 审批的一次性迁移才使用 `docker compose run --pull never`，不得把迁移服务改为常驻进程。
+
 启用自动传输前必须由仓库管理员配置以下待配置项:
 
 | GitHub 配置 | 用途 |
@@ -322,10 +330,20 @@ API 对每个用户执行以下材料配额和内容擦除规则：
 - 不提交 `.env`、密钥、Token、Cookie、私钥、证书内容或生产连接串
 - RabbitMQ 管理端、PostgreSQL 与 Redis 在生产 Compose 中不发布宿主机端口
 - 简历、JD、回答、音频元数据和模型输出都视为不可信输入
+- 高风险模型输出在写库与 TTS 前阻断；越过录用/录取决策边界的文本替换为中性训练反馈
+- `content_safety` 不保存输入输出原文、命中词或摘录，只保存 HMAC-SHA-256 摘要与规则元数据
 - 生产错误只返回稳定错误码、可理解消息与 request ID，不泄露 SQL、栈、Provider 响应或内部 URL
 - 高风险匿名认证入口在分级限流后执行 hCaptcha 服务端验证
 
 注释约定见 [代码注释规范](docs/development/commenting-standard.md)。
+
+## 公共知识来源与边界
+
+- 岗位分类与能力表述参考人社系统职业分类、深圳市 2025 人力资源市场工资价位，以及美国 BLS 2024–2034 Occupational Outlook Handbook；文档覆盖技术岗和销售、市场、运营、客服、人力、财务、供应链、产品、设计等非技术岗位
+- 考研文档参考教育部 2026 年全国硕士研究生招生工作管理规定及复试录取工作部署；院校与专业内容仅用于代表性训练，具体复试办法、科目和时间必须以目标院校当年官网为准
+- Redis 8 的 Search/JSON 与 ACL 配置依据 Redis 官方 8.8 文档；本地嵌入模型为 Apache-2.0 的 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+
+来源：[Redis 8 配置](https://redis.io/docs/latest/operate/oss_and_stack/management/config/)、[Spring AI Redis Vector Store](https://docs.spring.io/spring-ai/reference/api/vectordbs/redis.html)、[Spring AI ONNX Embeddings](https://docs.spring.io/spring-ai/reference/api/embeddings/onnx.html)、[教育部 2026 研招规定](https://www.moe.gov.cn/srcsite/A15/moe_778/s3261/202509/t20250918_1413836.html)、[BLS Occupational Outlook Handbook](https://www.bls.gov/ooh/)。
 
 ## 许可证
 

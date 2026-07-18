@@ -18,7 +18,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public final class RequestIdFilter extends OncePerRequestFilter {
     public static final String REQUEST_ID_HEADER = "X-Request-ID";
-    public static final String REQUEST_ID_ATTRIBUTE = RequestIdFilter.class.getName() + ".requestId";
+    public static final String REQUEST_ID_ATTRIBUTE =
+            "icu.sakuracianna.mianba.platform.web.RequestIdFilter.requestId";
     private static final Pattern SAFE_REQUEST_ID = Pattern.compile("[A-Za-z0-9._:-]{1,96}");
 
     @Override

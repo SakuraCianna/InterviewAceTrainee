@@ -34,6 +34,7 @@ create_random_secret redis_app_password
 create_random_secret rabbitmq_api_password
 create_random_secret rabbitmq_worker_password
 create_random_secret jwt_secret
+create_random_secret content_safety_hmac_secret
 create_random_secret material-parser-token
 
 # DeepSeek、邮件、腾讯云与 hCaptcha 凭据必须由项目所有者提供；这里不会生成无效占位值。

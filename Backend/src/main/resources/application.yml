@@ -70,6 +70,7 @@ spring:
   ai:
     model:
       chat: ${MIANBA_AI_MODEL_CHAT:none}
+      embedding: ${MIANBA_AI_MODEL_EMBEDDING:none}
     deepseek:
       api-key: ${SPRING_AI_DEEPSEEK_API_KEY:}
       chat:
@@ -78,6 +79,28 @@ spring:
         max-tokens: 1800
     retry:
       max-attempts: 1
+    embedding:
+      transformer:
+        tokenizer:
+          uri: ${MIANBA_EMBEDDING_TOKENIZER_URI:file:/opt/mianba-model/tokenizer.json}
+          options:
+            padding: true
+            truncation: true
+            maxLength: 256
+        onnx:
+          model-uri: ${MIANBA_EMBEDDING_MODEL_URI:file:/opt/mianba-model/model.onnx}
+          model-output-name: ${MIANBA_EMBEDDING_MODEL_OUTPUT:last_hidden_state}
+        cache:
+          enabled: false
+    vectorstore:
+      redis:
+        initialize-schema: ${MIANBA_KNOWLEDGE_INITIALIZE_SCHEMA:false}
+        index-name: ${MIANBA_KNOWLEDGE_INDEX_NAME:mianba-public-knowledge-v1}
+        prefix: ${MIANBA_KNOWLEDGE_KEY_PREFIX:mianba:knowledge:v1:}
+        hnsw:
+          m: 16
+          ef-construction: 100
+          ef-runtime: 30
 
 management:
   endpoints:
@@ -99,6 +122,8 @@ management:
       enabled: true
 
 mianba:
+  content-safety:
+    audit-hmac-secret: ${MIANBA_CONTENT_SAFETY_AUDIT_HMAC_SECRET:}
   runtime:
     role: ${MIANBA_RUNTIME_ROLE:api}
     production: ${MIANBA_RUNTIME_PRODUCTION:false}
@@ -149,6 +174,15 @@ mianba:
     max-pdf-pages: 50
     max-archive-entries: 2000
     max-expanded-bytes: 20971520
+  knowledge:
+    enabled: ${MIANBA_KNOWLEDGE_ENABLED:false}
+    synchronize-on-startup: ${MIANBA_KNOWLEDGE_SYNC_ON_STARTUP:true}
+    corpus-location: ${MIANBA_KNOWLEDGE_CORPUS_LOCATION:classpath*:knowledge-base/**/*.md}
+    corpus-version: ${MIANBA_KNOWLEDGE_CORPUS_VERSION:2026.07.1}
+    model-id: ${MIANBA_KNOWLEDGE_MODEL_ID:sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+    vector-dimensions: ${MIANBA_KNOWLEDGE_VECTOR_DIMENSIONS:384}
+    top-k: ${MIANBA_KNOWLEDGE_TOP_K:5}
+    similarity-threshold: ${MIANBA_KNOWLEDGE_SIMILARITY_THRESHOLD:0.35}
   material-parser:
     base-url: ${MIANBA_MATERIAL_PARSER_BASE_URL:http://127.0.0.1:8090}
     token: ${MIANBA_MATERIAL_PARSER_TOKEN:${material-parser-token:}}

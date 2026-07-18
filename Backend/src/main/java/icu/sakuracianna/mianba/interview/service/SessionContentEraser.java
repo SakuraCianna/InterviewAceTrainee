@@ -98,7 +98,7 @@ public final class SessionContentEraser {
                 """, sessionId);
         jdbc.update("""
                 UPDATE content_safety
-                SET matched_terms = '[]'::jsonb, content_excerpt = NULL
+                SET rule_ids = '[]'::jsonb, content_digest = NULL, request_id = NULL
                 WHERE session_id = ?
                 """, sessionId);
         jdbc.update("""

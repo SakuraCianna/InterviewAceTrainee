@@ -1,5 +1,6 @@
 package icu.sakuracianna.mianba.aiwork.worker;
 
+import icu.sakuracianna.mianba.interview.safety.AiOutputSafetyPolicy;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -214,9 +215,9 @@ public class SpringAiInterviewGenerator implements InterviewAiGenerator {
                     %s
                     END_TRUSTED_BUSINESS_STATE
 
-                    <<<BEGIN_UNTRUSTED_MATERIAL>>>
+                    <<<BEGIN_UNTRUSTED_PUBLIC_KNOWLEDGE>>>
                     %s
-                    <<<END_UNTRUSTED_MATERIAL>>>
+                    <<<END_UNTRUSTED_PUBLIC_KNOWLEDGE>>>
 
                     <<<BEGIN_UNTRUSTED_PREVIOUS_QUESTIONS>>>
                     %s
@@ -230,7 +231,7 @@ public class SpringAiInterviewGenerator implements InterviewAiGenerator {
                     %s
                     <<<END_UNTRUSTED_CANDIDATE_ANSWER>>>
                     """.formatted(
-                    trustedState, formatMaterialContext(input, true),
+                    trustedState, formatPublicKnowledgeContext(input, true),
                     formatPreviousQuestions(input, true), escapePromptData(input.question()),
                     escapePromptData(input.answer()));
         }
@@ -239,9 +240,9 @@ public class SpringAiInterviewGenerator implements InterviewAiGenerator {
                 %s
                 可信业务状态结束
 
-                <<<不可信材料开始>>>
+                <<<不可信公共知识开始>>>
                 %s
-                <<<不可信材料结束>>>
+                <<<不可信公共知识结束>>>
 
                 <<<不可信历史问题开始>>>
                 %s
@@ -255,17 +256,17 @@ public class SpringAiInterviewGenerator implements InterviewAiGenerator {
                 %s
                 <<<不可信候选人回答结束>>>
                 """.formatted(
-                trustedState, formatMaterialContext(input, false),
+                trustedState, formatPublicKnowledgeContext(input, false),
                 formatPreviousQuestions(input, false), escapePromptData(input.question()),
                 escapePromptData(input.answer()));
     }
 
-    private static String formatMaterialContext(InterviewAiInput input, boolean english) {
-        if (input.materialContext().isEmpty()) {
+    private static String formatPublicKnowledgeContext(InterviewAiInput input, boolean english) {
+        if (input.publicKnowledgeContext().isEmpty()) {
             return english ? "None provided." : "未提供";
         }
         StringBuilder value = new StringBuilder();
-        input.materialContext().entrySet().stream()
+        input.publicKnowledgeContext().entrySet().stream()
                 .sorted(java.util.Map.Entry.comparingByKey())
                 .forEach(entry -> value.append(escapePromptData(entry.getKey()))
                         .append(": ")
@@ -654,9 +655,10 @@ public class SpringAiInterviewGenerator implements InterviewAiGenerator {
             if (content == null || content.isBlank() || content.length() > 1500) {
                 return null;
             }
-            return content.strip();
+            return AiOutputSafetyPolicy.safeSummaryOrNull(content.strip());
         } catch (RuntimeException exception) {
-            LOGGER.warn("AI report summary synthesis failed, using template fallback", exception);
+            LOGGER.warn("AI report summary synthesis failed, using template fallback; errorType={}",
+                    exception.getClass().getSimpleName());
             return null;
         }
     }

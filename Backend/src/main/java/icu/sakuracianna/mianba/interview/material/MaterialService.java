@@ -3,17 +3,16 @@ package icu.sakuracianna.mianba.interview.material;
 import java.util.UUID;
 import org.springframework.web.multipart.MultipartFile;
 
-/** 负责材料校验、文本提取与幂等持久化，不保存用户上传的原始文件。 */
+/** 负责在单次创建请求内校验和解析材料，不提供任何持久化或恢复能力。 */
 public interface MaterialService {
     /**
-     * 校验、解析并幂等保存面试材料。
-     * 原始上传文件不得写入持久化存储，解析结果只能保留业务所需字段。
+     * 校验并解析临时面试材料。调用方必须使用 try-with-resources 及时清理。
      *
-     * @return 可供创建面试引用的材料视图
+     * @return 仅当前请求可用的可清理材料上下文
      */
-    MaterialView upload(
+    EphemeralMaterial analyze(
             UUID userId,
-            String idempotencyKey,
+            String requestId,
             String interviewType,
             MultipartFile resumeFile,
             String jobTitle,
@@ -21,9 +20,4 @@ public interface MaterialService {
             String targetSchool,
             String major,
             String researchDirection);
-
-    /**
-     * 返回指定用户和面试类型最新的 ready 状态材料；不存在时返回 null。
-     */
-    MaterialView getLatestByType(UUID userId, String interviewType);
 }

@@ -2,6 +2,7 @@ package icu.sakuracianna.mianba.platform.config;
 
 import icu.sakuracianna.mianba.identity.hcaptcha.HcaptchaProperties;
 import icu.sakuracianna.mianba.interview.material.MaterialParserProperties;
+import icu.sakuracianna.mianba.interview.safety.ContentSafetyProperties;
 import java.time.Clock;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
@@ -20,6 +21,7 @@ public class PlatformConfiguration {
     ApplicationRunner runtimeConfigurationValidation(
             RuntimeProperties runtime,
             SecurityProperties security,
+            ContentSafetyProperties contentSafety,
             InfrastructureProperties infrastructure,
             IdentityProperties identity,
             SpeechProperties speech,
@@ -27,6 +29,6 @@ public class PlatformConfiguration {
             MaterialParserProperties materialParser,
             HcaptchaProperties hcaptcha) {
         return arguments -> RuntimeConfigurationValidator.validate(
-                runtime, security, infrastructure, identity, speech, ai, materialParser, hcaptcha);
+                runtime, security, infrastructure, identity, speech, ai, materialParser, hcaptcha, contentSafety);
     }
 }

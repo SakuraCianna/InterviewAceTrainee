@@ -5,6 +5,7 @@ import icu.sakuracianna.mianba.identity.security.AuthenticatedUser;
 import icu.sakuracianna.mianba.identity.service.AbuseProtection;
 import icu.sakuracianna.mianba.interview.service.InterviewService;
 import icu.sakuracianna.mianba.interview.service.SpeechContext;
+import icu.sakuracianna.mianba.interview.safety.AiOutputSafetyPolicy;
 import icu.sakuracianna.mianba.platform.web.ApiException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
@@ -52,6 +53,7 @@ public class SpeechController {
             throw new ApiException(HttpStatus.UNPROCESSABLE_CONTENT,
                     "tts_question_too_long", "当前问题过长，请使用浏览器朗读");
         }
+        AiOutputSafetyPolicy.requireSafeForTts(context.questionText());
         Duration window = Duration.ofMinutes(10);
         abuseProtection.check("tts-user", user.userId().toString(), 12, window);
         abuseProtection.check(
@@ -78,6 +80,7 @@ public class SpeechController {
             throw new ApiException(HttpStatus.UNPROCESSABLE_CONTENT,
                     "tts_question_too_long", "当前问题过长，请使用浏览器朗读");
         }
+        AiOutputSafetyPolicy.requireSafeForTts(context.questionText());
         Duration window = Duration.ofMinutes(10);
         abuseProtection.check("tts-user", user.userId().toString(), 12, window);
         abuseProtection.check(

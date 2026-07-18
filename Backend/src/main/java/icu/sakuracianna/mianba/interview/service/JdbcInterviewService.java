@@ -7,6 +7,7 @@ import icu.sakuracianna.mianba.aiwork.service.TaskService;
 import icu.sakuracianna.mianba.aiwork.service.TaskView;
 import icu.sakuracianna.mianba.interview.domain.InterviewType;
 import icu.sakuracianna.mianba.interview.safety.AnswerSafetyPolicy;
+import icu.sakuracianna.mianba.interview.safety.ContentSafetyAuditService;
 import icu.sakuracianna.mianba.platform.web.ApiException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -27,6 +28,7 @@ import java.util.UUID;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,20 +52,24 @@ public class JdbcInterviewService implements InterviewService {
     private final ObjectMapper mapper;
     private final TaskService tasks;
     private final AnswerSafetyPolicy safetyPolicy;
+    private final ContentSafetyAuditService safetyAudits;
     private final Clock clock;
     private final SessionDeletionCoordinator deletions;
 
+    @Autowired
     public JdbcInterviewService(
             JdbcTemplate jdbc,
             ObjectMapper mapper,
             TaskService tasks,
             AnswerSafetyPolicy safetyPolicy,
+            ContentSafetyAuditService safetyAudits,
             Clock clock,
             SessionDeletionCoordinator deletions) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.tasks = tasks;
         this.safetyPolicy = safetyPolicy;
+        this.safetyAudits = safetyAudits;
         this.clock = clock;
         this.deletions = deletions;
     }
@@ -76,6 +82,45 @@ public class JdbcInterviewService implements InterviewService {
             String interviewType,
             UUID materialId,
             String idempotencyKey) {
+        if (materialId != null) {
+            throw new ApiException(HttpStatus.GONE,
+                    "persistent_material_flow_removed", "材料持久化流程已下线，请重新提交临时材料");
+        }
+        return startInternal(userId, sessionId, interviewType, idempotencyKey, null);
+    }
+
+    JdbcInterviewService(
+            JdbcTemplate jdbc,
+            ObjectMapper mapper,
+            TaskService tasks,
+            AnswerSafetyPolicy safetyPolicy,
+            Clock clock,
+            SessionDeletionCoordinator deletions) {
+        this(jdbc, mapper, tasks, safetyPolicy,
+                new ContentSafetyAuditService(
+                        jdbc, mapper,
+                        new icu.sakuracianna.mianba.interview.safety.ContentSafetyProperties("")),
+                clock, deletions);
+    }
+
+    @Override
+    @Transactional
+    public InterviewView startPersonalized(
+            UUID userId,
+            UUID sessionId,
+            String interviewType,
+            String idempotencyKey,
+            String openingQuestion) {
+        String normalizedQuestion = normalizeOpeningQuestion(openingQuestion);
+        return startInternal(userId, sessionId, interviewType, idempotencyKey, normalizedQuestion);
+    }
+
+    private InterviewView startInternal(
+            UUID userId,
+            UUID sessionId,
+            String interviewType,
+            String idempotencyKey,
+            String openingQuestion) {
         InterviewType type = parseType(interviewType);
         if (type == InterviewType.JOB) {
             throw new ApiException(HttpStatus.CONFLICT,
@@ -84,24 +129,11 @@ public class JdbcInterviewService implements InterviewService {
         InterviewPlan plan = PLANS.get(type);
         cancelExpiredOpenSessions(userId);
 
-        Optional<InterviewView> replay = replayStart(
-                userId, sessionId, type, materialId, idempotencyKey);
+        Optional<InterviewView> replay = replayStart(userId, sessionId, type, idempotencyKey);
         if (replay.isPresent()) {
             return replay.get();
         }
         Instant sessionExpiresAt = clock.instant().plus(24, ChronoUnit.HOURS);
-
-        if (materialId != null) {
-            Long materialCount = jdbc.queryForObject("""
-                    SELECT count(*) FROM materials
-                    WHERE id = ? AND user_id = ? AND status = 'ready' AND interview_type = ?
-                      AND retention_until >= ?
-                    """, Long.class, materialId, userId, dbType(type),
-                    java.sql.Timestamp.from(sessionExpiresAt));
-            if (materialCount == null || materialCount != 1L) {
-                throw new ApiException(HttpStatus.NOT_FOUND, "interview_material_not_found", "面试资料不存在或尚未准备好");
-            }
-        }
 
         UserBilling user = jdbc.query("""
                 SELECT credit_balance, role FROM users
@@ -112,7 +144,7 @@ public class JdbcInterviewService implements InterviewService {
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "user_not_found", "用户不存在"));
 
         // 等待用户锁期间，先到请求可能已经提交；锁后重查可防止重复扣次或核销体验券。
-        replay = replayStart(userId, sessionId, type, materialId, idempotencyKey);
+        replay = replayStart(userId, sessionId, type, idempotencyKey);
         if (replay.isPresent()) {
             return replay.get();
         }
@@ -156,11 +188,11 @@ public class JdbcInterviewService implements InterviewService {
         try {
             jdbc.update("""
                     INSERT INTO sessions(
-                        id, user_id, start_idempotency_key, material_id, interview_type,
+                        id, user_id, start_idempotency_key, interview_type,
                         status, current_turn_index, total_turns, charged_credit,
                         voucher_id, admin_unlimited_usage, expires_at)
-                    VALUES (?, ?, ?, ?, ?, 'active', 0, ?, ?, ?, ?, ?)
-                    """, sessionId, userId, idempotencyKey, materialId, dbType(type),
+                    VALUES (?, ?, ?, ?, 'active', 0, ?, ?, ?, ?, ?)
+                    """, sessionId, userId, idempotencyKey, dbType(type),
                     plan.totalTurns(), chargedCredit, voucherId, adminUnlimited,
                     java.sql.Timestamp.from(sessionExpiresAt));
         } catch (DataIntegrityViolationException exception) {
@@ -186,7 +218,8 @@ public class JdbcInterviewService implements InterviewService {
         jdbc.update("""
                 INSERT INTO turns(session_id, turn_index, round_name, question_text)
                 VALUES (?, 0, ?, ?)
-                """, sessionId, plan.firstRound(), plan.firstQuestion());
+                """, sessionId, plan.firstRound(),
+                openingQuestion == null ? plan.firstQuestion() : openingQuestion);
         if (chargedCredit > 0) {
             int balanceAfter = user.balance() - chargedCredit;
             jdbc.update("""
@@ -306,17 +339,13 @@ public class JdbcInterviewService implements InterviewService {
 
         SessionForAnswer session = jdbc.query("""
                 SELECT s.status, s.current_turn_index, s.total_turns,
-                       (s.expires_at > now()) AS unexpired,
-                       m.profile_summary, m.job_title, m.job_requirements,
-                       m.target_school, m.major, m.research_direction
+                       (s.expires_at > now()) AS unexpired
                 FROM sessions s
-                LEFT JOIN materials m ON m.id = s.material_id AND m.status = 'ready'
                 WHERE s.id = ? AND s.user_id = ?
                 FOR UPDATE OF s
                 """, (rs, row) -> new SessionForAnswer(
                 rs.getString("status"), rs.getInt("current_turn_index"), rs.getInt("total_turns"),
-                rs.getBoolean("unexpired"),
-                materialContext(rs)),
+                rs.getBoolean("unexpired")),
                 sessionId, userId).stream().findFirst()
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND,
                         "interview_session_not_found", "面试训练不存在"));
@@ -341,8 +370,15 @@ public class JdbcInterviewService implements InterviewService {
         }
         UUID packageId = resolvePackageBinding(sessionId);
 
-        safetyPolicy.assess(normalizedAnswer)
-                .ifPresent(finding -> recordSafetyFinding(userId, sessionId, finding));
+        String safeRequestId = safeCorrelationId(requestId);
+        safetyPolicy.assess(normalizedAnswer).ifPresent(finding -> {
+            safetyAudits.recordInput(
+                    userId, sessionId, safeRequestId, "interview_answer", normalizedAnswer, finding);
+            if (finding.blocked()) {
+                throw new ApiException(HttpStatus.UNPROCESSABLE_CONTENT,
+                        "unsafe_interview_answer", "回答包含不安全指令，已停止处理");
+            }
+        });
 
         int turnChanged = jdbc.update("""
                 UPDATE turns
@@ -366,14 +402,10 @@ public class JdbcInterviewService implements InterviewService {
 
         UUID jobId = UUID.randomUUID();
         Instant now = clock.instant();
-        String safeRequestId = safeCorrelationId(requestId);
         try {
             Map<String, Object> jobInput = new LinkedHashMap<>();
             jobInput.put("session_id", sessionId.toString());
             jobInput.put("turn_index", session.currentTurnIndex());
-            if (packageId == null) {
-                jobInput.put("material_context", session.materialContext());
-            }
             String inputRef = mapper.writeValueAsString(jobInput);
             jdbc.update("""
                     INSERT INTO ai_jobs(
@@ -404,25 +436,6 @@ public class JdbcInterviewService implements InterviewService {
             throw new IllegalStateException("Interview session is bound to multiple interview packages");
         }
         return packageIds.isEmpty() ? null : packageIds.getFirst();
-    }
-
-    private void recordSafetyFinding(
-            UUID userId,
-            UUID sessionId,
-            AnswerSafetyPolicy.Finding finding) {
-        try {
-            jdbc.update("""
-                    INSERT INTO content_safety(
-                        user_id, session_id, source, action, risk_level,
-                        categories, matched_terms, content_excerpt, message_code
-                    ) VALUES (?, ?, 'interview_answer', 'observed', ?, ?::jsonb, ?::jsonb, NULL, ?)
-                    """, userId, sessionId, finding.riskLevel(),
-                    mapper.writeValueAsString(finding.categories()),
-                    mapper.writeValueAsString(finding.matchedRuleIds()),
-                    finding.messageCode());
-        } catch (JacksonException exception) {
-            throw new IllegalStateException("Unable to serialize content safety metadata", exception);
-        }
     }
 
     private InterviewView mapView(ResultSet resultSet, int rowNumber) throws SQLException {
@@ -498,24 +511,21 @@ public class JdbcInterviewService implements InterviewService {
             UUID userId,
             UUID requestedSessionId,
             InterviewType requestedType,
-            UUID requestedMaterialId,
             String idempotencyKey) {
         Optional<ExistingStart> existing = jdbc.query("""
-                SELECT id, interview_type, material_id
+                SELECT id, interview_type
                 FROM sessions
                 WHERE user_id = ? AND start_idempotency_key = ?
                 """, (rs, row) -> new ExistingStart(
                 rs.getObject("id", UUID.class),
-                rs.getString("interview_type"),
-                rs.getObject("material_id", UUID.class)), userId, idempotencyKey)
+                rs.getString("interview_type")), userId, idempotencyKey)
                 .stream().findFirst();
         if (existing.isEmpty()) {
             return Optional.empty();
         }
         ExistingStart value = existing.get();
         if (!value.id().equals(requestedSessionId)
-                || !value.interviewType().equals(dbType(requestedType))
-                || !Objects.equals(value.materialId(), requestedMaterialId)) {
+                || !value.interviewType().equals(dbType(requestedType))) {
             throw new ApiException(HttpStatus.CONFLICT, "idempotency_key_conflict",
                     "同一幂等键不能用于不同的面试请求");
         }
@@ -601,34 +611,21 @@ public class JdbcInterviewService implements InterviewService {
                 HttpStatus.GONE, "interview_session_expired", "面试训练已过期，请重新开始");
     }
 
-    private static Map<String, String> materialContext(ResultSet resultSet) throws SQLException {
-        Map<String, String> context = new LinkedHashMap<>();
-        putContext(context, "profile_summary", resultSet.getString("profile_summary"), 1200);
-        putContext(context, "job_title", resultSet.getString("job_title"), 160);
-        putContext(context, "job_requirements", resultSet.getString("job_requirements"), 2500);
-        putContext(context, "target_school", resultSet.getString("target_school"), 160);
-        putContext(context, "major", resultSet.getString("major"), 160);
-        putContext(context, "research_direction", resultSet.getString("research_direction"), 240);
-        return Map.copyOf(context);
-    }
-
-    private static void putContext(Map<String, String> target, String key, String rawValue, int maxLength) {
-        if (rawValue == null || rawValue.isBlank()) {
-            return;
-        }
-        String normalized = rawValue.replaceAll("[\\p{Cntrl}]", " ")
+    private static String normalizeOpeningQuestion(String question) {
+        String normalized = question == null ? "" : question
+                .replaceAll("[\\p{Cc}\\p{Cf}]", " ")
                 .replaceAll("\\s+", " ").trim();
-        if (!normalized.isEmpty()) {
-            target.put(key, normalized.length() <= maxLength
-                    ? normalized
-                    : normalized.substring(0, maxLength));
+        if (normalized.length() < 8 || normalized.length() > 800) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_CONTENT,
+                    "personalized_question_invalid", "个性化首题格式不正确");
         }
+        return normalized;
     }
 
     private record InterviewPlan(int totalTurns, int creditCost, String firstRound, String firstQuestion) {
     }
 
-    private record ExistingStart(UUID id, String interviewType, UUID materialId) {
+    private record ExistingStart(UUID id, String interviewType) {
     }
 
     private record UserBilling(int balance, String role) {
@@ -644,8 +641,7 @@ public class JdbcInterviewService implements InterviewService {
             String status,
             int currentTurnIndex,
             int totalTurns,
-            boolean unexpired,
-            Map<String, String> materialContext) {
+            boolean unexpired) {
     }
 
     private record SpeechState(

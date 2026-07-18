@@ -2000,17 +2000,20 @@ export function AdminShell() {
                     <div className={adminClasses("admin2-core-grid")}>
                       <article>
                         <span>能力卡片</span>
-                        <strong>{formatCoreCount(interviewCoreHealth.capability_cards.total_seed_count)}</strong>
+                        <strong>{formatCoreCount(interviewCoreHealth.capability_cards.total_document_count)}</strong>
+                        <p>岗位 {formatCoreCount(interviewCoreHealth.capability_cards.job_document_count)} / 考研 {formatCoreCount(interviewCoreHealth.capability_cards.postgraduate_document_count)}</p>
                         <StatusChip tone={interviewCoreHealth.capability_cards.ready ? "good" : "danger"}>{interviewCoreHealth.capability_cards.ready ? "正常" : "退化"}</StatusChip>
                       </article>
                       <article>
                         <span>向量覆盖</span>
                         <strong>{formatCorePercent(interviewCoreHealth.capability_vectors.coverage_rate)}</strong>
-                        <p>{formatCoreCount(interviewCoreHealth.capability_vectors.non_empty_vector_count)} 条非空向量</p>
+                        <p>{formatCoreCount(interviewCoreHealth.capability_vectors.indexed_chunk_count)} / {formatCoreCount(interviewCoreHealth.capability_vectors.chunk_count)} 个切片</p>
+                        <StatusChip tone={interviewCoreHealth.capability_vectors.embedding_provider_available ? "good" : "danger"}>{interviewCoreHealth.capability_vectors.embedding_provider_available ? "本地模型可用" : "本地模型不可用"}</StatusChip>
                       </article>
                       <article>
-                        <span>召回探针</span>
-                        <strong>{interviewCoreHealth.recall_quality.passed_probe_count}/{interviewCoreHealth.recall_quality.probe_count}</strong>
+                        <span>Redis RAG</span>
+                        <strong>{businessLabel(interviewCoreHealth.recall_quality.status)}</strong>
+                        <p>岗位探针 {interviewCoreHealth.recall_quality.job_probe_ready ? "通过" : "失败"} / 考研探针 {interviewCoreHealth.recall_quality.postgraduate_probe_ready ? "通过" : "失败"}</p>
                         <p>{interviewCoreHealth.failure_reasons.length > 0 ? interviewCoreHealth.failure_reasons.slice(0, 2).join(" / ") : interviewCoreHealth.failure_summary}</p>
                       </article>
                     </div>
@@ -2244,7 +2247,10 @@ export function AdminShell() {
                             <div className={adminClasses("admin2-log-main")}>
                               <strong>{entry.user_email ?? "未知用户"} · {entry.source}</strong>
                               <span>{entry.session_id ?? "无会话"} · {entry.categories.map((item) => businessLabel(item)).join(" / ")}</span>
-                              {entry.content_excerpt && <em className={adminClasses("admin2-log-excerpt")}>{entry.content_excerpt}</em>}
+                              <em className={adminClasses("admin2-log-excerpt")}>
+                                规则 {entry.rule_ids.join(" / ") || "已擦除"}
+                                {entry.content_digest ? ` · 摘要 ${entry.content_digest.slice(0, 12)}…` : ""}
+                              </em>
                             </div>
                             <StatusChip tone={entry.risk_level === "high" ? "danger" : "warning"}>
                               {businessLabel(entry.action)} / {businessLabel(entry.risk_level)}

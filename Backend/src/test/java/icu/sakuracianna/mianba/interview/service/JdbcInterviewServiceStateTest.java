@@ -28,30 +28,29 @@ class JdbcInterviewServiceStateTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"job", " JOB ", "JoB"})
-    void startRejectsDirectJobBeforeAnyJdbcInteraction(String rawType) {
+    void startRejectsLegacyPersistentMaterialBeforeAnyJdbcInteraction(String rawType) {
         InterviewStateJdbcTemplate jdbc = new InterviewStateJdbcTemplate();
         JdbcInterviewService service = service(jdbc);
 
         assertThatThrownBy(() -> service.start(
                 UUID.randomUUID(), UUID.randomUUID(), rawType, UUID.randomUUID(), "legacy-job-start"))
                 .isInstanceOfSatisfying(ApiException.class, error -> {
-                    assertThat(error.status()).isEqualTo(HttpStatus.CONFLICT);
-                    assertThat(error.detail()).isEqualTo("job_interview_package_required");
-                    assertThat(error.getMessage()).isEqualTo("工作面试请通过套餐流程开始");
+                    assertThat(error.status()).isEqualTo(HttpStatus.GONE);
+                    assertThat(error.detail()).isEqualTo("persistent_material_flow_removed");
                 });
         assertThat(jdbc.queries).isEmpty();
         assertThat(jdbc.updates).isEmpty();
     }
 
     @Test
-    void startStillValidatesMaterialForNonJobInterview() {
+    void startRejectsLegacyPersistentMaterialForNonJobInterview() {
         InterviewStateJdbcTemplate jdbc = new InterviewStateJdbcTemplate();
         JdbcInterviewService service = service(jdbc);
 
         assertThatThrownBy(() -> service.start(
                 UUID.randomUUID(), UUID.randomUUID(), "postgraduate", UUID.randomUUID(), "start-key"))
                 .isInstanceOfSatisfying(ApiException.class,
-                        error -> assertThat(error.detail()).isEqualTo("interview_material_not_found"));
+                        error -> assertThat(error.detail()).isEqualTo("persistent_material_flow_removed"));
     }
 
     @Test
@@ -101,12 +100,6 @@ class JdbcInterviewServiceStateTest {
         @Override
         public <T> T queryForObject(String sql, Class<T> requiredType, Object... args) {
             queries.add(sql);
-            if (sql.contains("FROM materials")) {
-                long matchingMaterials = sql.contains("retention_until >= ?")
-                        ? 0L
-                        : 1L;
-                return requiredType.cast(matchingMaterials);
-            }
             return null;
         }
 

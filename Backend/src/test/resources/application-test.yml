@@ -8,12 +8,15 @@ spring:
   ai:
     model:
       chat: none
+      embedding: none
   rabbitmq:
     listener:
       simple:
         auto-startup: false
 
 mianba:
+  content-safety:
+    audit-hmac-secret: test-content-safety-hmac-secret-that-is-longer-than-forty-eight-characters
   runtime:
     role: api
     production: false
@@ -32,3 +35,5 @@ mianba:
     rabbit-host: test
     rabbit-username: test
     rabbit-password: test
+  knowledge:
+    enabled: false

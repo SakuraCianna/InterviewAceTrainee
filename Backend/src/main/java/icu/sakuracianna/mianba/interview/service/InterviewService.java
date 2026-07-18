@@ -19,6 +19,14 @@ public interface InterviewService {
             UUID materialId,
             String idempotencyKey);
 
+    /** 使用当前请求中本地 RAG 生成的安全首题创建会话，不持久化材料上下文。 */
+    InterviewView startPersonalized(
+            UUID userId,
+            UUID sessionId,
+            String interviewType,
+            String idempotencyKey,
+            String openingQuestion);
+
     /** 返回用户当前唯一未结束会话。 */
     Optional<InterviewView> active(UUID userId);
 
