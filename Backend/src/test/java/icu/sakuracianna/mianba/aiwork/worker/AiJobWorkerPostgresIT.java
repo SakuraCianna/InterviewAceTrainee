@@ -89,30 +89,8 @@ class AiJobWorkerPostgresIT {
         AiJobEnvelope envelope = AiJobEnvelope.create(
                 jobId, "worker-postgres-it", "worker-postgres-it", Instant.now());
         try {
-            createQueuedFixture(userId, sessionId, turnId, jobId);
-            ObjectMapper mapper = JsonMapper.builder()
-                    .propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
-                    .build();
-            TransactionTemplate transactions = new TransactionTemplate(
-                    new DataSourceTransactionManager(workerDataSource));
-            ContentSafetyAuditService safety = new ContentSafetyAuditService(
-                    workerJdbc,
-                    mapper,
-                    new ContentSafetyProperties("worker-integration-audit-secret-0123456789-abcdefghijklmnop"));
-            AiJobWorker worker = new AiJobWorker(
-                    workerJdbc,
-                    transactions,
-                    mapper,
-                    new DeterministicInterviewAiGenerator(),
-                    safety,
-                    Clock.systemUTC());
-            Channel channel = mock(Channel.class);
-            MessageProperties properties = new MessageProperties();
-            properties.setDeliveryTag(41L);
-            properties.setMessageId(envelope.messageId().toString());
-            Message message = new Message(mapper.writeValueAsBytes(envelope), properties);
-
-            worker.consume(message, channel);
+            createQueuedFixture(userId, sessionId, turnId, jobId, 5);
+            Channel channel = consume(envelope);
 
             assertThat(ownerJdbc.queryForMap("""
                     SELECT status, stage, progress, attempt
@@ -136,25 +114,83 @@ class AiJobWorkerPostgresIT {
                     """, Integer.class, envelope.messageId(), jobId)).isEqualTo(1);
             verify(channel).basicAck(41L, false);
         } finally {
-            ownerJdbc.update("DELETE FROM processed_messages WHERE job_id = ?", jobId);
-            ownerJdbc.update("DELETE FROM ai_call_logs WHERE job_id = ?", jobId);
-            ownerJdbc.update("DELETE FROM content_safety WHERE job_id = ?", jobId);
-            ownerJdbc.update("DELETE FROM ai_jobs WHERE id = ?", jobId);
-            ownerJdbc.update("DELETE FROM turns WHERE session_id = ?", sessionId);
-            ownerJdbc.update("DELETE FROM sessions WHERE id = ?", sessionId);
-            ownerJdbc.update("DELETE FROM users WHERE id = ?", userId);
+            deleteFixture(userId, sessionId, jobId);
         }
     }
 
-    private void createQueuedFixture(UUID userId, UUID sessionId, UUID turnId, UUID jobId) {
+    @Test
+    void workerRoleCompletesFinalTurnAndPersistsSessionReport() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+        UUID turnId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        AiJobEnvelope envelope = AiJobEnvelope.create(
+                jobId, "worker-report-it", "worker-report-it", Instant.now());
+        try {
+            createQueuedFixture(userId, sessionId, turnId, jobId, 1);
+
+            Channel channel = consume(envelope);
+
+            assertThat(ownerJdbc.queryForMap("""
+                    SELECT status, stage, progress
+                    FROM ai_jobs WHERE id = ?
+                    """, jobId)).containsAllEntriesOf(Map.of(
+                            "status", "SUCCEEDED",
+                            "stage", "COMPLETED",
+                            "progress", 100));
+            assertThat(ownerJdbc.queryForMap("""
+                    SELECT status, current_turn_index
+                    FROM sessions WHERE id = ?
+                    """, sessionId)).containsAllEntriesOf(Map.of(
+                            "status", "completed",
+                            "current_turn_index", 0));
+            assertThat(ownerJdbc.queryForObject(
+                    "SELECT count(*) FROM reports WHERE session_id = ?",
+                    Integer.class,
+                    sessionId)).isEqualTo(1);
+            verify(channel).basicAck(41L, false);
+        } finally {
+            deleteFixture(userId, sessionId, jobId);
+        }
+    }
+
+    private Channel consume(AiJobEnvelope envelope) throws Exception {
+        ObjectMapper mapper = JsonMapper.builder()
+                .propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+                .build();
+        TransactionTemplate transactions = new TransactionTemplate(
+                new DataSourceTransactionManager(workerDataSource));
+        ContentSafetyAuditService safety = new ContentSafetyAuditService(
+                workerJdbc,
+                mapper,
+                new ContentSafetyProperties(
+                        "worker-integration-audit-secret-0123456789-abcdefghijklmnop"));
+        AiJobWorker worker = new AiJobWorker(
+                workerJdbc,
+                transactions,
+                mapper,
+                new DeterministicInterviewAiGenerator(),
+                safety,
+                Clock.systemUTC());
+        Channel channel = mock(Channel.class);
+        MessageProperties properties = new MessageProperties();
+        properties.setDeliveryTag(41L);
+        properties.setMessageId(envelope.messageId().toString());
+        Message message = new Message(mapper.writeValueAsBytes(envelope), properties);
+        worker.consume(message, channel);
+        return channel;
+    }
+
+    private void createQueuedFixture(
+            UUID userId, UUID sessionId, UUID turnId, UUID jobId, int totalTurns) {
         ownerJdbc.update("INSERT INTO users(id, email) VALUES (?, ?)",
                 userId, userId + "@example.invalid");
         ownerJdbc.update("""
                 INSERT INTO sessions(
                     id, user_id, start_idempotency_key, interview_type, status,
                     current_turn_index, total_turns, expires_at)
-                VALUES (?, ?, ?, 'civil_service', 'awaiting_ai', 0, 5, now() + interval '1 hour')
-                """, sessionId, userId, "worker-postgres-it-" + sessionId);
+                VALUES (?, ?, ?, 'civil_service', 'awaiting_ai', 0, ?, now() + interval '1 hour')
+                """, sessionId, userId, "worker-postgres-it-" + sessionId, totalTurns);
         ownerJdbc.update("""
                 INSERT INTO turns(
                     id, session_id, turn_index, round_name, question_text,
@@ -170,6 +206,19 @@ class AiJobWorkerPostgresIT {
                         0, 3, ?, ?, now() + interval '1 hour')
                 """, jobId, userId, sessionId,
                 "worker-postgres-it-" + jobId, "a".repeat(64));
+    }
+
+    private void deleteFixture(UUID userId, UUID sessionId, UUID jobId) {
+        ownerJdbc.update("DELETE FROM processed_messages WHERE job_id = ?", jobId);
+        ownerJdbc.update("DELETE FROM ai_call_logs WHERE job_id = ?", jobId);
+        ownerJdbc.update("DELETE FROM content_safety WHERE job_id = ?", jobId);
+        ownerJdbc.update("DELETE FROM report_revisions WHERE report_id IN ("
+                + "SELECT id FROM reports WHERE session_id = ?)", sessionId);
+        ownerJdbc.update("DELETE FROM reports WHERE session_id = ?", sessionId);
+        ownerJdbc.update("DELETE FROM ai_jobs WHERE id = ?", jobId);
+        ownerJdbc.update("DELETE FROM turns WHERE session_id = ?", sessionId);
+        ownerJdbc.update("DELETE FROM sessions WHERE id = ?", sessionId);
+        ownerJdbc.update("DELETE FROM users WHERE id = ?", userId);
     }
 
     private static void verifyDedicatedUrl(String databaseUrl) {

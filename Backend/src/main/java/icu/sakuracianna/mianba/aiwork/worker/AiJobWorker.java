@@ -381,7 +381,7 @@ public class AiJobWorker {
             jdbc.update("""
                     INSERT INTO reports(session_id, total_score, report_json)
                     VALUES (?, ?, ?::jsonb)
-                    ON CONFLICT (session_id) DO UPDATE
+                    ON CONFLICT (session_id) WHERE session_id IS NOT NULL DO UPDATE
                     SET total_score = EXCLUDED.total_score,
                         report_json = EXCLUDED.report_json,
                         updated_at = now()
