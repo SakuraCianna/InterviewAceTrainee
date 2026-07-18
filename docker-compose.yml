@@ -84,6 +84,8 @@ services:
       SPRING_DATASOURCE_USERNAME: mianba_owner
       SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "2"
       SPRING_FLYWAY_ENABLED: "true"
+      SPRING_AI_MODEL_EMBEDDING: none
+      SPRING_AI_VECTORSTORE_TYPE: none
       JAVA_TOOL_OPTIONS: >-
         -Xms64m -Xmx192m -XX:MaxMetaspaceSize=128m -XX:+UseG1GC
         -XX:+ExitOnOutOfMemoryError -Djava.io.tmpdir=/tmp
@@ -234,6 +236,7 @@ services:
       SPRING_FLYWAY_ENABLED: "false"
       SPRING_AI_MODEL_CHAT: none
       MIANBA_AI_MODEL_EMBEDDING: transformers
+      SPRING_AI_VECTORSTORE_TYPE: redis
       MIANBA_KNOWLEDGE_ENABLED: "true"
       MIANBA_KNOWLEDGE_SYNC_ON_STARTUP: "true"
       MIANBA_KNOWLEDGE_INITIALIZE_SCHEMA: "true"
@@ -337,6 +340,8 @@ services:
       SPRING_RABBITMQ_LISTENER_SIMPLE_ACKNOWLEDGE_MODE: manual
       SPRING_FLYWAY_ENABLED: "false"
       SPRING_AI_MODEL_CHAT: deepseek
+      SPRING_AI_MODEL_EMBEDDING: none
+      SPRING_AI_VECTORSTORE_TYPE: none
       JAVA_TOOL_OPTIONS: >-
         -Xms96m -Xmx352m -XX:MaxMetaspaceSize=144m -XX:+UseG1GC
         -XX:+ExitOnOutOfMemoryError -Djava.io.tmpdir=/tmp

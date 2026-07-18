@@ -270,11 +270,26 @@ api_section="$(awk '
   capture && /^  [a-z][a-z0-9_-]*:$/ { exit }
   capture { print }
 ' "$workspace/docker-compose.yml")"
+migrate_section="$(awk '
+  /^  migrate:$/ { capture=1; next }
+  capture && /^  [a-z][a-z0-9_-]*:$/ { exit }
+  capture { print }
+' "$workspace/docker-compose.yml")"
 worker_section="$(awk '
   /^  worker:$/ { capture=1; next }
   capture && /^  [a-z][a-z0-9_-]*:$/ { exit }
   capture { print }
 ' "$workspace/docker-compose.yml")"
+grep -Fq -- 'MIANBA_AI_MODEL_EMBEDDING: transformers' <<< "$api_section" \
+  || fail "API does not enable the local transformers embedding model"
+grep -Fq -- 'SPRING_AI_VECTORSTORE_TYPE: redis' <<< "$api_section" \
+  || fail "API does not enable the Redis vector store"
+for disabled_section in "$migrate_section" "$worker_section"; do
+  grep -Fq -- 'SPRING_AI_MODEL_EMBEDDING: none' <<< "$disabled_section" \
+    || fail "Non-API runtime does not disable embedding auto-configuration"
+  grep -Fq -- 'SPRING_AI_VECTORSTORE_TYPE: none' <<< "$disabled_section" \
+    || fail "Non-API runtime does not disable vector store auto-configuration"
+done
 grep -Fq -- 'source: content_safety_hmac_secret' <<< "$api_section" \
   || fail "API does not receive the content safety HMAC secret"
 grep -Fq -- 'source: content_safety_hmac_secret' <<< "$worker_section" \
