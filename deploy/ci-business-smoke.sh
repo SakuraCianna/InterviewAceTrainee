@@ -259,6 +259,18 @@ if (session.session_id !== sessionId || session.status !== 'active'
 NODE
 
 # 首轮暂停 Worker，确保刷新页面时可以从会话快照恢复 active_task，再从任务接口继续轮询。
+WORKER_INSTANCE_BEFORE="$(compose exec -T postgres sh -ec '
+  psql --set ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+    --tuples-only --no-align
+' <<'SQL'
+SELECT instance_id FROM runtime_heartbeats WHERE role = 'worker';
+SQL
+)"
+readonly WORKER_INSTANCE_BEFORE
+if [[ -z "$WORKER_INSTANCE_BEFORE" ]]; then
+  echo "Worker heartbeat instance was unavailable before restart" >&2
+  exit 1
+fi
 compose stop --timeout 30 worker >/dev/null
 
 for turn_index in 0 1 2 3 4; do
@@ -293,10 +305,35 @@ if (task.id !== taskId || task.session_id !== sessionId || task.status !== 'QUEU
 }
 NODE
     compose start worker >/dev/null
+    for worker_attempt in $(seq 1 60); do
+      worker_ready="$(compose exec -T \
+        -e CI_PREVIOUS_WORKER_INSTANCE="$WORKER_INSTANCE_BEFORE" postgres sh -ec '
+          psql --set ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+            --tuples-only --no-align --set "previous=$CI_PREVIOUS_WORKER_INSTANCE"
+        ' <<'SQL'
+SELECT CASE WHEN EXISTS (
+  SELECT 1 FROM runtime_heartbeats
+  WHERE role = 'worker'
+    AND instance_id <> :'previous'
+    AND consumers_ready = true
+    AND rabbit_ready = true
+    AND updated_at > now() - interval '30 seconds'
+) THEN 'ready' ELSE 'waiting' END;
+SQL
+)"
+      if [[ "$worker_ready" == "ready" ]]; then
+        break
+      fi
+      if [[ "$worker_attempt" == "60" ]]; then
+        echo "Restarted Worker did not publish a fresh ready heartbeat within 120 seconds" >&2
+        exit 1
+      fi
+      sleep 2
+    done
   fi
 
   task_status=""
-  for attempt in $(seq 1 60); do
+  for attempt in $(seq 1 120); do
     request "${TEMP_DIR}/task.json" "${BASE_URL}/api/tasks/${task_id}"
     task_status="$(json_value "${TEMP_DIR}/task.json" status)"
     case "$task_status" in
@@ -308,8 +345,8 @@ NODE
         exit 1
         ;;
     esac
-    if [[ "$attempt" == "60" ]]; then
-      echo "Worker task ${task_id} did not complete within 120 seconds" >&2
+    if [[ "$attempt" == "120" ]]; then
+      echo "Worker task ${task_id} did not complete within 240 seconds" >&2
       exit 1
     fi
     sleep 2
