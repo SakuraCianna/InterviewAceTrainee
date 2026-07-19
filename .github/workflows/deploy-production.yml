@@ -332,8 +332,8 @@ jobs:
           port="${PRODUCTION_PORT:-22}"
           stage_id="$DEPLOY_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           remote_path_b64="$(printf '%s' "$PRODUCTION_PATH" | base64 -w0)"
-          ssh_options=(-i ~/.ssh/mianba_deploy_key -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
-          scp_options=(-i ~/.ssh/mianba_deploy_key -P "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
+          ssh_options=(-i ~/.ssh/mianba_deploy_key -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
+          scp_options=(-i ~/.ssh/mianba_deploy_key -P "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
           ssh "${ssh_options[@]}" "$PRODUCTION_USER@$PRODUCTION_HOST" \
             "REMOTE_PATH_B64='$remote_path_b64' STAGE_ID='$stage_id' bash -se" <<'REMOTE'
           set -Eeuo pipefail
@@ -401,7 +401,7 @@ jobs:
           port="${PRODUCTION_PORT:-22}"
           stage_id="$DEPLOY_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           remote_path_b64="$(printf '%s' "$PRODUCTION_PATH" | base64 -w0)"
-          ssh_options=(-i ~/.ssh/mianba_deploy_key -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
+          ssh_options=(-i ~/.ssh/mianba_deploy_key -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
           ssh "${ssh_options[@]}" "$PRODUCTION_USER@$PRODUCTION_HOST" \
             "REMOTE_PATH_B64='$remote_path_b64' DEPLOY_SHA='$DEPLOY_SHA' STAGE_ID='$stage_id' bash -se" <<'REMOTE'
           set -Eeuo pipefail
@@ -529,7 +529,7 @@ jobs:
           set -Eeuo pipefail
           port="${PRODUCTION_PORT:-22}"
           remote_path_b64="$(printf '%s' "$PRODUCTION_PATH" | base64 -w0)"
-          ssh_options=(-i ~/.ssh/mianba_deploy_key -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
+          ssh_options=(-i ~/.ssh/mianba_deploy_key -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3)
           ssh "${ssh_options[@]}" "$PRODUCTION_USER@$PRODUCTION_HOST" \
             "REMOTE_PATH_B64='$remote_path_b64' DEPLOY_SHA='$DEPLOY_SHA' bash -se" <<'REMOTE'
           set -Eeuo pipefail
