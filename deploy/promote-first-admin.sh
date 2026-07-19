@@ -2,8 +2,8 @@
 set -eu
 
 # 仅用于全新数据库的首次管理员提升；邮箱来自 0600 文件，脚本不会打印其内容。
+# 必须在生产项目根目录(含 docker-compose.yml 的目录)下执行。
 : "${MIANBA_BOOTSTRAP_ADMIN_EMAIL_FILE:?MIANBA_BOOTSTRAP_ADMIN_EMAIL_FILE is required}"
-: "${MIANBA_PRODUCTION_ROOT:?MIANBA_PRODUCTION_ROOT is required}"
 test -f "$MIANBA_BOOTSTRAP_ADMIN_EMAIL_FILE"
 test ! -L "$MIANBA_BOOTSTRAP_ADMIN_EMAIL_FILE"
 if [ "$(stat -c '%a' "$MIANBA_BOOTSTRAP_ADMIN_EMAIL_FILE")" != "600" ]; then
@@ -13,13 +13,10 @@ fi
 test -s "$MIANBA_BOOTSTRAP_ADMIN_EMAIL_FILE"
 admin_email="$(tr -d '\r\n' < "$MIANBA_BOOTSTRAP_ADMIN_EMAIL_FILE")"
 test -n "$admin_email"
-script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-compose_helper="$script_dir/production-compose.sh"
-test -f "$compose_helper"
-test ! -L "$compose_helper"
+test -f docker-compose.yml
+test ! -L docker-compose.yml
 
-MIANBA_PRODUCTION_ROOT="$MIANBA_PRODUCTION_ROOT" \
-  bash "$compose_helper" exec -T postgres psql \
+docker compose exec -T postgres psql \
   --set ON_ERROR_STOP=1 \
   --username mianba_owner \
   --dbname mianba_prod \

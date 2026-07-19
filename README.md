@@ -5,7 +5,6 @@
 生产站点: <https://sakuracianna.icu/>
 
 [![CI](https://github.com/SakuraCianna/InterviewAceTrainee/actions/workflows/ci.yml/badge.svg)](https://github.com/SakuraCianna/InterviewAceTrainee/actions/workflows/ci.yml)
-[![Prepare or Deploy Production](https://github.com/SakuraCianna/InterviewAceTrainee/actions/workflows/deploy-production.yml/badge.svg)](https://github.com/SakuraCianna/InterviewAceTrainee/actions/workflows/deploy-production.yml)
 
 ## 功能概览
 
@@ -194,7 +193,7 @@ npm run dev
 | `resend_api_key`, `mail_from` | 验证码邮件交付 |
 | `tencent_app_id`, `tencent_secret_id`, `tencent_secret_key` | API 实时 ASR 与 TTS |
 
-根目录 `.env.example` 与 `deploy/compose.env.example` 使用完全相同的 15 个生产 Compose 字段；`deploy/validate-compose-env.sh` 以 UTF-8 严格解析服务器配置文件，不执行 `source`、不展开命令语法。
+根目录 `.env.example` 定义生产 Compose 用到的 15 个字段；`scripts/check-env-schema.ps1` 校验字段名称、顺序和中文注释格式一致。
 
 ### hCaptcha 人机验证
 
@@ -258,7 +257,7 @@ API 对个性化输入和业务内容执行以下边界：
 
 ## 首次管理员
 
-全新数据库不内置默认管理员、固定密码或公开 Bootstrap API。先通过正式邮箱流程注册并设置密码，再由批准的服务器运维身份使用 runtime 包内的 `deploy/promote-first-admin.sh` 提升首个管理员。脚本从 0600 文件读取邮箱；用户不存在、被停用、没有密码或数据库已有管理员时会拒绝，并把提升动作写入 `admin_audit`。完整步骤见生产重建 runbook；成功验证后应删除一次性邮箱文件。
+全新数据库不内置默认管理员、固定密码或公开 Bootstrap API。先通过正式邮箱流程注册并设置密码，再由批准的服务器运维身份在生产项目目录下执行 `deploy/promote-first-admin.sh` 提升首个管理员。脚本从 0600 文件读取邮箱；用户不存在、被停用、没有密码或数据库已有管理员时会拒绝，并把提升动作写入 `admin_audit`。完整步骤见生产重建 runbook；成功验证后应删除一次性邮箱文件。
 
 ## 4 核 4 GB 生产预算
 
@@ -286,32 +285,16 @@ API 对个性化输入和业务内容执行以下边界：
 
 门禁包括 Java 21 Maven test/package、hCaptcha 验证器契约、前端 `npm ci`/audit/test/typecheck/build、无 `.env` 文件的 Compose config 校验、使用临时自签证书的真实 `nginx -t`、部署脚本语法检查，以及 Java/前端 Docker 镜像构建和完整拓扑 readiness。
 
-### 预构建生产交付
+### 生产部署
 
-`deploy-production.yml` 提供受控的无仓库策略:
+生产部署为手动流程，不通过 GitHub Actions 自动发布到服务器。仓库、Secret 文件、证书和 Compose 配置都直接维护在服务器上的 `/home/ubuntu/InterviewAceTrainee` 目录：
 
-1. 操作者输入 `sakuracianna` 上完整 40 位 commit SHA
-2. 工作流验证该 commit 属于 `origin/sakuracianna`，以 detached HEAD 锁定同一 commit
-3. 重跑 Java 与前端门禁，在 GitHub runner 构建两个镜像
-4. 将六个运行镜像保存为带 SHA 的本地标签 tar，生成 SHA-256，并保留 7 天 artifact
-5. `prepare` 只生成候选包；`deploy` 需要 `production` Environment 审批后才传输
-6. 服务器在唯一 staging 内校验包与脚本 SHA-256，只创建不存在的 `releases/<SHA>`
-7. 候选 release 先通过深度 readiness 和 HTTPS 边缘探测，然后才原子切换 `current`；失败会恢复 `previous`
-8. 生产只执行 `docker load`；`docker compose up --no-build --pull never` 不现场构建
+1. 在服务器上 `git pull` 到 `sakuracianna` 分支的目标 commit
+2. `docker build` 构建 Java 与前端镜像（打上对应 commit SHA 标签）
+3. 按需 `docker compose run --rm migrate` 执行 Flyway 迁移
+4. `docker compose up -d --no-build --no-deps --pull never` 逐个更新 `material-parser`、`api`、`frontend`、`worker`、`nginx`，观察健康检查后再继续下一个服务
 
-常规发布由受控工作流执行 Flyway；只有按生产重建 runbook 审批的一次性迁移才使用 `docker compose run --pull never`，不得把迁移服务改为常驻进程。
-
-启用自动传输前必须由仓库管理员配置以下待配置项:
-
-| GitHub 配置 | 用途 |
-| --- | --- |
-| Environment `production` 审批人 | 人工发布门禁 |
-| `PRODUCTION_HOST` | 经确认的生产主机 |
-| `PRODUCTION_USER` | 最小权限部署用户 |
-| `PRODUCTION_PORT` | SSH 端口, 未设置时使用 22 |
-| `PRODUCTION_SSH_KEY` | 部署私钥 |
-| `PRODUCTION_KNOWN_HOSTS` | 固定主机指纹 |
-| `PRODUCTION_PATH` | 服务器上经核验的发布根目录 |
+服务器不运行测试、不使用未经 CI 校验的代码；发布前必须确认目标 commit 已在 `ci.yml` 跑绿。
 
 详见 [生产重建 runbook](docs/operations/production-rebuild-runbook.md)。
 

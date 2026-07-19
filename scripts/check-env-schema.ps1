@@ -2,7 +2,6 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $ExamplePath = Join-Path $RepoRoot ".env.example"
-$DeployExamplePath = Join-Path $RepoRoot "deploy\compose.env.example"
 $LocalEnvPath = Join-Path $RepoRoot ".env"
 $ComposePath = Join-Path $RepoRoot "docker-compose.yml"
 
@@ -82,9 +81,6 @@ function Assert-SameOrderedSchema {
 }
 
 $exampleKeys = Read-EnvSchema -Path $ExamplePath
-$deployExampleKeys = Read-EnvSchema -Path $DeployExamplePath
-Assert-SameOrderedSchema -ExpectedName ".env.example" -Expected $exampleKeys `
-    -ActualName "deploy/compose.env.example" -Actual $deployExampleKeys
 
 if (Test-Path -LiteralPath $LocalEnvPath -PathType Leaf) {
     $localKeys = Read-EnvSchema -Path $LocalEnvPath

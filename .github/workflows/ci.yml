@@ -103,7 +103,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install canonical non-secret Compose contract
-        run: install -m 0600 deploy/compose.env.example .env
+        run: install -m 0600 .env.example .env
 
       - name: Verify environment schema contract
         run: pwsh -NoProfile -File scripts/check-env-schema.ps1
@@ -139,14 +139,7 @@ jobs:
           sh -n deploy/postgres-init/001-create-app-role.sh
           sh -n deploy/prepare-server-secrets.sh
           sh -n deploy/promote-first-admin.sh
-          bash -n deploy/validate-compose-env.sh
-          bash -n deploy/production-compose.sh
-          bash -n deploy/activate-release.sh
-          bash -n deploy/rollback-release.sh
           bash -n deploy/ci-business-smoke.sh
-          bash deploy/tests/production-compose-contract.sh
-          bash deploy/tests/production-release-contract.sh
-          bash deploy/tests/rollback-compensation-contract.sh
           docker compose run --rm --no-deps --pull missing nginx nginx -t
 
       - name: Clean Compose validation resources
@@ -174,7 +167,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install canonical non-secret Compose contract
-        run: install -m 0600 deploy/compose.env.example .env
+        run: install -m 0600 .env.example .env
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
