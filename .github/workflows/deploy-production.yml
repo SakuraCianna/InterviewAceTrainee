@@ -383,7 +383,7 @@ jobs:
             stage="$root/.incoming/$STAGE_ID"
             test "$(realpath -m -- "$stage")" = "$stage"
             rm -rf -- "$stage"
-            REMOTE_CLEANUP
+          REMOTE_CLEANUP
             exit 1
           fi
 
