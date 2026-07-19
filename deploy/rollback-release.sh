@@ -76,15 +76,17 @@ validate_release_compose() {
 
 verify_release_images_present() {
   local release_sha="$1"
+  local release_path="$2"
   local image
   local -a images=(
     "mianba-java:$release_sha"
     "mianba-frontend:$release_sha"
-    "mianba-postgres:$release_sha"
-    "mianba-redis:$release_sha"
-    "mianba-rabbitmq:$release_sha"
-    "mianba-nginx:$release_sha"
   )
+  local -a vendor_images
+  mapfile -t vendor_images < <(
+    compose_for "$release_path" "$release_sha" config --images | grep -Fv ":$release_sha"
+  )
+  images+=("${vendor_images[@]}")
   for image in "${images[@]}"; do
     docker image inspect "$image" >/dev/null 2>&1 || {
       echo "Required rollback image is missing: $image" >&2
@@ -302,7 +304,7 @@ restore_release() {
   local release_path="$1"
   local release_sha="$2"
   validate_release_compose "$release_path" "$release_sha" \
-    && verify_release_images_present "$release_sha" \
+    && verify_release_images_present "$release_sha" "$release_path" \
     && compose_for "$release_path" "$release_sha" up -d --no-build --no-recreate --pull never \
       --wait --wait-timeout 240 \
       postgres redis rabbitmq \
@@ -460,7 +462,7 @@ if [[ -e "$previous_link" || -L "$previous_link" ]]; then
   [[ "$previous_release" != "$candidate_release" ]] || fail "previous points back to the failed candidate"
   validate_release_identity "$previous_release" "$previous_sha"
   validate_release_compose "$previous_release" "$previous_sha"
-  verify_release_images_present "$previous_sha"
+  verify_release_images_present "$previous_sha" "$previous_release"
   original_previous_present=1
   original_previous_target="$previous_release"
 else
