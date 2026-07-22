@@ -103,7 +103,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install canonical non-secret Compose contract
-        run: install -m 0600 deploy/compose.env.example .env
+        run: install -m 0600 .env.example .env
 
       - name: Verify environment schema contract
         run: pwsh -NoProfile -File scripts/check-env-schema.ps1
@@ -112,7 +112,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p .ci-secrets .ci-certs
+          mkdir -p .ci-secrets .ci-certs data/postgres data/redis data/rabbitmq
           for name in \
             postgres_owner_password postgres_api_password postgres_worker_password \
             redis_app_password rabbitmq_api_password rabbitmq_worker_password jwt_secret \
@@ -130,23 +130,18 @@ jobs:
             -out .ci-certs/sakuracianna.icu_bundle.pem >/dev/null 2>&1
           export MIANBA_APP_IMAGE=mianba-java:ci
           export MIANBA_FRONTEND_IMAGE=mianba-frontend:ci
+          export MIANBA_POSTGRES_IMAGE=mianba-postgres:ci
+          export MIANBA_REDIS_IMAGE=mianba-redis:ci
+          export MIANBA_RABBITMQ_IMAGE=mianba-rabbitmq:ci
           export MIANBA_SECRETS_DIR="$PWD/.ci-secrets"
           export MIANBA_CERTS_DIR="$PWD/.ci-certs"
-          export MIANBA_RUNTIME_CONFIG_DIR="$PWD/deploy"
           docker compose config --quiet
           docker compose -f docker-compose.yml -f deploy/docker-compose.ci.yml config --quiet
-          sh -n deploy/redis-entrypoint.sh
-          sh -n deploy/postgres-init/001-create-app-role.sh
+          sh -n docker/redis/redis-entrypoint.sh
+          sh -n docker/postgres/001-create-app-role.sh
           sh -n deploy/prepare-server-secrets.sh
           sh -n deploy/promote-first-admin.sh
-          bash -n deploy/validate-compose-env.sh
-          bash -n deploy/production-compose.sh
-          bash -n deploy/activate-release.sh
-          bash -n deploy/rollback-release.sh
           bash -n deploy/ci-business-smoke.sh
-          bash deploy/tests/production-compose-contract.sh
-          bash deploy/tests/production-release-contract.sh
-          bash deploy/tests/rollback-compensation-contract.sh
           docker compose run --rm --no-deps --pull missing nginx nginx -t
 
       - name: Clean Compose validation resources
@@ -155,9 +150,11 @@ jobs:
         env:
           MIANBA_APP_IMAGE: mianba-java:ci
           MIANBA_FRONTEND_IMAGE: mianba-frontend:ci
+          MIANBA_POSTGRES_IMAGE: mianba-postgres:ci
+          MIANBA_REDIS_IMAGE: mianba-redis:ci
+          MIANBA_RABBITMQ_IMAGE: mianba-rabbitmq:ci
           MIANBA_SECRETS_DIR: ${{ github.workspace }}/.ci-secrets
           MIANBA_CERTS_DIR: ${{ github.workspace }}/.ci-certs
-          MIANBA_RUNTIME_CONFIG_DIR: ${{ github.workspace }}/deploy
         run: docker compose down --remove-orphans || true
 
   docker:
@@ -174,7 +171,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install canonical non-secret Compose contract
-        run: install -m 0600 deploy/compose.env.example .env
+        run: install -m 0600 .env.example .env
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -201,17 +198,53 @@ jobs:
           cache-from: type=gha,scope=mianba-frontend
           cache-to: type=gha,mode=max,scope=mianba-frontend
 
+      - name: Build PostgreSQL configuration image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: docker/postgres
+          file: docker/postgres/Dockerfile
+          push: false
+          load: true
+          tags: mianba-postgres:${{ github.sha }}
+          cache-from: type=gha,scope=mianba-postgres
+          cache-to: type=gha,mode=max,scope=mianba-postgres
+
+      - name: Build Redis configuration image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: docker/redis
+          file: docker/redis/Dockerfile
+          push: false
+          load: true
+          tags: mianba-redis:${{ github.sha }}
+          cache-from: type=gha,scope=mianba-redis
+          cache-to: type=gha,mode=max,scope=mianba-redis
+
+      - name: Build RabbitMQ configuration image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: docker/rabbitmq
+          file: docker/rabbitmq/Dockerfile
+          push: false
+          load: true
+          tags: mianba-rabbitmq:${{ github.sha }}
+          cache-from: type=gha,scope=mianba-rabbitmq
+          cache-to: type=gha,mode=max,scope=mianba-rabbitmq
+
       - name: Start CI topology and verify the complete business flow
         shell: bash
         env:
           MIANBA_APP_IMAGE: mianba-java:${{ github.sha }}
           MIANBA_FRONTEND_IMAGE: mianba-frontend:${{ github.sha }}
+          MIANBA_POSTGRES_IMAGE: mianba-postgres:${{ github.sha }}
+          MIANBA_REDIS_IMAGE: mianba-redis:${{ github.sha }}
+          MIANBA_RABBITMQ_IMAGE: mianba-rabbitmq:${{ github.sha }}
           MIANBA_SECRETS_DIR: ${{ github.workspace }}/.ci-runtime-secrets
           MIANBA_CERTS_DIR: ${{ github.workspace }}/.ci-runtime-certs
-          MIANBA_RUNTIME_CONFIG_DIR: ${{ github.workspace }}/deploy
         run: |
           set -Eeuo pipefail
           install -d -m 700 "$MIANBA_SECRETS_DIR" "$MIANBA_CERTS_DIR"
+          install -d -m 750 data/postgres data/redis data/rabbitmq
           printf 'ci-deepseek-key\n' > "$MIANBA_SECRETS_DIR/deepseek_api_key"
           printf 'ci-resend-key\n' > "$MIANBA_SECRETS_DIR/resend_api_key"
           printf 'ci@example.invalid\n' > "$MIANBA_SECRETS_DIR/mail_from"
@@ -226,6 +259,26 @@ jobs:
             -keyout "$MIANBA_CERTS_DIR/sakuracianna.icu.key" \
             -out "$MIANBA_CERTS_DIR/sakuracianna.icu_bundle.pem" >/dev/null 2>&1
           sh deploy/prepare-server-secrets.sh
+
+          for data_dir in postgres redis rabbitmq; do
+            target="$PWD/data/$data_dir"
+            test -d "$target"
+            test ! -L "$target"
+            test "$(realpath "$target")" = "$target"
+          done
+
+          docker run --rm --user 0:0 --entrypoint sh \
+            --mount type=bind,source="$PWD/data/postgres",target=/target \
+            "$MIANBA_POSTGRES_IMAGE" \
+            -c 'set -eu; chown 999:999 /target; chmod 0750 /target'
+          docker run --rm --user 0:0 --entrypoint sh \
+            --mount type=bind,source="$PWD/data/redis",target=/target \
+            "$MIANBA_REDIS_IMAGE" \
+            -c 'set -eu; chown 999:1000 /target; chmod 0750 /target'
+          docker run --rm --user 0:0 --entrypoint sh \
+            --mount type=bind,source="$PWD/data/rabbitmq",target=/target \
+            "$MIANBA_RABBITMQ_IMAGE" \
+            -c 'set -eu; chown 999:999 /target; chmod 0750 /target'
 
           docker compose -f docker-compose.yml -f deploy/docker-compose.ci.yml \
             up -d --no-build --wait --wait-timeout 240 postgres redis rabbitmq
@@ -260,9 +313,11 @@ jobs:
         env:
           MIANBA_APP_IMAGE: mianba-java:${{ github.sha }}
           MIANBA_FRONTEND_IMAGE: mianba-frontend:${{ github.sha }}
+          MIANBA_POSTGRES_IMAGE: mianba-postgres:${{ github.sha }}
+          MIANBA_REDIS_IMAGE: mianba-redis:${{ github.sha }}
+          MIANBA_RABBITMQ_IMAGE: mianba-rabbitmq:${{ github.sha }}
           MIANBA_SECRETS_DIR: ${{ github.workspace }}/.ci-runtime-secrets
           MIANBA_CERTS_DIR: ${{ github.workspace }}/.ci-runtime-certs
-          MIANBA_RUNTIME_CONFIG_DIR: ${{ github.workspace }}/deploy
         run: |
           set +e
           compose=(docker compose -f docker-compose.yml -f deploy/docker-compose.ci.yml)
@@ -299,7 +354,9 @@ jobs:
         env:
           MIANBA_APP_IMAGE: mianba-java:${{ github.sha }}
           MIANBA_FRONTEND_IMAGE: mianba-frontend:${{ github.sha }}
+          MIANBA_POSTGRES_IMAGE: mianba-postgres:${{ github.sha }}
+          MIANBA_REDIS_IMAGE: mianba-redis:${{ github.sha }}
+          MIANBA_RABBITMQ_IMAGE: mianba-rabbitmq:${{ github.sha }}
           MIANBA_SECRETS_DIR: ${{ github.workspace }}/.ci-runtime-secrets
           MIANBA_CERTS_DIR: ${{ github.workspace }}/.ci-runtime-certs
-          MIANBA_RUNTIME_CONFIG_DIR: ${{ github.workspace }}/deploy
         run: docker compose -f docker-compose.yml -f deploy/docker-compose.ci.yml down --volumes --remove-orphans || true

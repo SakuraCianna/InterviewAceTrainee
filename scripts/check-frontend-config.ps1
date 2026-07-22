@@ -5,8 +5,7 @@ $ConfigPath = Join-Path $RepoRoot "Frontend\src\config\productConfig.ts"
 $ForbiddenPaths = @(
     (Join-Path $RepoRoot "Frontend\Dockerfile"),
     (Join-Path $RepoRoot "Frontend\src"),
-    (Join-Path $RepoRoot ".github\workflows\ci.yml"),
-    (Join-Path $RepoRoot ".github\workflows\deploy-production.yml")
+    (Join-Path $RepoRoot ".github\workflows\ci.yml")
 )
 $ForbiddenNames = @(
     "VITE_ADMIN_ENTRY_PATH",

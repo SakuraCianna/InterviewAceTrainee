@@ -1,6 +1,6 @@
 name: mianba
 
-# 生产 Compose 只消费 CI 预构建镜像。真实凭据来自服务器本地 secret 文件，
+# 生产 Compose 只消费已验证的本地镜像。真实凭据来自服务器本地 secret 文件，
 # 不进入环境变量、Git 仓库、镜像层或 docker inspect 输出。
 x-logging: &default-logging
   driver: json-file
@@ -19,7 +19,9 @@ x-java-security: &java-security
 
 services:
   postgres:
-    image: pgvector/pgvector:0.8.5-pg18-bookworm@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0
+    image: ${MIANBA_POSTGRES_IMAGE:?MIANBA_POSTGRES_IMAGE is required}
+    build:
+      context: ./docker/postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: mianba_prod
@@ -47,8 +49,11 @@ services:
       - log_min_duration_statement=750
     volumes:
       # PostgreSQL 18 将版本目录置于 /var/lib/postgresql 下。
-      - postgres-data:/var/lib/postgresql
-      - ${MIANBA_RUNTIME_CONFIG_DIR:?MIANBA_RUNTIME_CONFIG_DIR is required}/postgres-init/001-create-app-role.sh:/docker-entrypoint-initdb.d/001-create-app-role.sh:ro
+      - type: bind
+        source: ./data/postgres
+        target: /var/lib/postgresql
+        bind:
+          create_host_path: false
     networks:
       - data
     read_only: true
@@ -103,14 +108,18 @@ services:
     cpus: "0.50"
 
   redis:
-    image: redis:8.8.0-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
+    image: ${MIANBA_REDIS_IMAGE:?MIANBA_REDIS_IMAGE is required}
+    build:
+      context: ./docker/redis
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "/opt/mianba/redis-entrypoint.sh"]
     secrets:
       - redis_app_password
     volumes:
-      - redis-data:/data
-      - ${MIANBA_RUNTIME_CONFIG_DIR:?MIANBA_RUNTIME_CONFIG_DIR is required}/redis-entrypoint.sh:/opt/mianba/redis-entrypoint.sh:ro
+      - type: bind
+        source: ./data/redis
+        target: /data
+        bind:
+          create_host_path: false
     networks:
       - data
     read_only: true
@@ -135,7 +144,9 @@ services:
       start_period: 10s
 
   rabbitmq:
-    image: rabbitmq:4.3.2-management@sha256:c1e33461287f4c53049ce525575f0df77b2a00a88e2593776afbb6c1489bdb81
+    image: ${MIANBA_RABBITMQ_IMAGE:?MIANBA_RABBITMQ_IMAGE is required}
+    build:
+      context: ./docker/rabbitmq
     restart: unless-stopped
     environment:
       RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2 +sbwt none +sbwtdcpu none +sbwtdio none"
@@ -143,8 +154,11 @@ services:
       - source: rabbitmq_definitions
         target: rabbitmq-definitions.json
     volumes:
-      - rabbitmq-data:/var/lib/rabbitmq
-      - ${MIANBA_RUNTIME_CONFIG_DIR:?MIANBA_RUNTIME_CONFIG_DIR is required}/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - type: bind
+        source: ./data/rabbitmq
+        target: /var/lib/rabbitmq
+        bind:
+          create_host_path: false
     networks:
       - data
     expose:
@@ -452,14 +466,6 @@ networks:
     internal: true
   egress:
     driver: bridge
-
-volumes:
-  postgres-data:
-    name: mianba-postgres-data
-  redis-data:
-    name: mianba-redis-data
-  rabbitmq-data:
-    name: mianba-rabbitmq-data
 
 secrets:
   postgres_owner_password:
