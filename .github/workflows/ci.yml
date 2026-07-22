@@ -260,6 +260,26 @@ jobs:
             -out "$MIANBA_CERTS_DIR/sakuracianna.icu_bundle.pem" >/dev/null 2>&1
           sh deploy/prepare-server-secrets.sh
 
+          for data_dir in postgres redis rabbitmq; do
+            target="$PWD/data/$data_dir"
+            test -d "$target"
+            test ! -L "$target"
+            test "$(realpath "$target")" = "$target"
+          done
+
+          docker run --rm --user 0:0 --entrypoint sh \
+            --mount type=bind,source="$PWD/data/postgres",target=/target \
+            "$MIANBA_POSTGRES_IMAGE" \
+            -c 'set -eu; chown 999:999 /target; chmod 0750 /target'
+          docker run --rm --user 0:0 --entrypoint sh \
+            --mount type=bind,source="$PWD/data/redis",target=/target \
+            "$MIANBA_REDIS_IMAGE" \
+            -c 'set -eu; chown 999:1000 /target; chmod 0750 /target'
+          docker run --rm --user 0:0 --entrypoint sh \
+            --mount type=bind,source="$PWD/data/rabbitmq",target=/target \
+            "$MIANBA_RABBITMQ_IMAGE" \
+            -c 'set -eu; chown 999:999 /target; chmod 0750 /target'
+
           docker compose -f docker-compose.yml -f deploy/docker-compose.ci.yml \
             up -d --no-build --wait --wait-timeout 240 postgres redis rabbitmq
           docker compose -f docker-compose.yml -f deploy/docker-compose.ci.yml \
