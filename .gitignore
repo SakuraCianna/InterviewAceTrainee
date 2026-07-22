@@ -5,7 +5,9 @@ Frontend/*.tsbuildinfo
 
 database_backups/
 secrets/
-runtime-config/
+data/*
+!data/.gitignore
+!data/README.md
 nginx/certs/
 nginx/*.key
 nginx/*.csr

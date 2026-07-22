@@ -8,19 +8,20 @@
 /home/ubuntu/InterviewAceTrainee/
   .git/                  项目 Git 仓库, 分支跟随 sakuracianna
   Backend/ Frontend/     应用源码
-  deploy/                部署脚本与初始化配置
+  docker/                PostgreSQL/Redis/RabbitMQ 配置镜像
+  deploy/                CI 拓扑与必要运维脚本
+  data/                  PostgreSQL/Redis/RabbitMQ 本机持久化数据
   docker-compose.yml     生产 Compose 定义
-  .env                   非敏感生产配置(15 个字段, 与根目录 .env.example 同 schema)
+  .env                   非敏感生产配置(17 个字段, 与根目录 .env.example 同 schema)
   secrets/               0700 目录, 内含 0444 只读容器 Secret
   nginx/                 Nginx 配置与 TLS 证书(bundle.pem + .key)
-  runtime-config/        PostgreSQL/Redis/RabbitMQ 初始化与配置文件
 ```
 
 必须遵守:
 
 - 生产服务器不使用 GitHub Actions 或任何自动化流水线推送部署；`.github/workflows/ci.yml` 只在 GitHub Runner 上跑测试和构建校验，不接触服务器。
 - 发布前必须确认目标 commit 已在 `ci.yml` 跑绿。
-- 服务器上的 `.env`、`secrets/`、`nginx/` 下的证书私钥属于常驻资产，任何操作都不得覆盖、移动或输出其内容。
+- 服务器上的 `.env`、`secrets/`、`data/`、`nginx/` 下的证书私钥属于常驻资产，任何操作都不得覆盖、移动或输出其内容。
 - 禁止 `docker compose down -v`、`docker volume prune`、未核验对象的全局 prune、通配符删除或循环删除卷。
 - 身份、路径或卷不明确时停止操作，先只读核验。
 
@@ -32,6 +33,7 @@ git status
 git log -1 --oneline
 docker compose ps
 docker ps --all --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+test -d data/postgres && test -d data/redis && test -d data/rabbitmq
 df -h /
 ```
 
@@ -49,18 +51,29 @@ export DEPLOY_SHA='<目标40位commit SHA>'
 git fetch origin sakuracianna
 git checkout "$DEPLOY_SHA"
 
-# 2. 构建镜像(打上 commit SHA 标签)
+# 2. 构建应用镜像(打上 commit SHA 标签)
 docker build --tag "mianba-java:$DEPLOY_SHA" Backend
 docker build --tag "mianba-frontend:$DEPLOY_SHA" Frontend
 
-# 3. 更新 .env 里的两个镜像字段指向新 SHA(手动编辑, 不要用脚本覆盖整份 .env)
+# 3. 手动更新 .env 中发生变化的镜像字段, 不要用脚本覆盖整份 .env
 #    MIANBA_APP_IMAGE=mianba-java:$DEPLOY_SHA
 #    MIANBA_FRONTEND_IMAGE=mianba-frontend:$DEPLOY_SHA
+#    MIANBA_POSTGRES_IMAGE=mianba-postgres:$DEPLOY_SHA
+#    MIANBA_REDIS_IMAGE=mianba-redis:$DEPLOY_SHA
+#    MIANBA_RABBITMQ_IMAGE=mianba-rabbitmq:$DEPLOY_SHA
+docker compose config --quiet
 
-# 4. 如有新的 Flyway 迁移, 先执行一次性迁移
+# 4. 基础设施配置有变化时, 在新标签生效后构建并核验对应镜像
+docker compose build postgres redis rabbitmq
+docker image inspect \
+  "mianba-postgres:$DEPLOY_SHA" \
+  "mianba-redis:$DEPLOY_SHA" \
+  "mianba-rabbitmq:$DEPLOY_SHA" >/dev/null
+
+# 5. 如有新的 Flyway 迁移, 先执行一次性迁移
 docker compose run --rm --no-deps migrate
 
-# 5. 逐个更新服务, 每步都看健康检查再继续
+# 6. 逐个更新应用服务, 每步都看健康检查再继续
 docker compose up -d --no-build --no-deps --pull never material-parser
 docker compose up -d --no-build --no-deps --pull never api
 docker compose up -d --no-build --no-deps --pull never frontend
@@ -70,6 +83,8 @@ docker compose up -d --no-build --no-deps --pull never nginx
 
 **关键提醒**：`docker compose stop/rm` 按服务名操作时，会作用于该服务名下**当前实际运行的容器**，与它是不是"刚创建的候选"无关。执行任何 `stop`/`rm`/`down` 前，先用 `docker compose ps <service>` 确认目标就是你想操作的那个容器，不要假设它一定是本次发布产生的新容器。
 
+PostgreSQL、Redis 或 RabbitMQ 的镜像/数据挂载发生变化时，不使用上面的常规应用发布顺序；进入维护窗口并遵循 [named volume 到 data 目录迁移手册](named-volumes-to-data-migration.md)。
+
 ## 4. 发布后验证
 
 ```bash
@@ -77,7 +92,7 @@ cd /home/ubuntu/InterviewAceTrainee
 docker compose ps
 docker stats --no-stream
 docker compose exec -T rabbitmq rabbitmq-diagnostics -q ping
-docker compose exec -T api curl --fail --silent --show-error http://127.0.0.1:8000/api/health/readiness >/dev/null
+docker compose exec -T api curl --fail --silent --show-error http://127.0.0.1:8000/actuator/health/readiness >/dev/null
 docker compose exec -T material-parser curl --fail --silent --show-error http://127.0.0.1:8090/healthz >/dev/null
 docker compose exec -T nginx nginx -t
 ```
@@ -94,25 +109,34 @@ curl --fail --silent --show-error --head --max-time 10 https://sakuracianna.icu/
 
 ## 5. 回滚
 
-生产没有自动化的多版本 release 目录，回滚是手动操作：
+生产没有自动化的多版本 release 目录。存储已固定在项目 `data/` 后，普通应用回滚只切换 Java/前端镜像，不得 checkout 到使用 named volume 的旧 Compose：
 
 ```bash
 cd /home/ubuntu/InterviewAceTrainee
 export PREVIOUS_SHA='<出问题之前的commit SHA>'
 
-# 确认旧镜像还在(未被 docker image prune 清理)
+# 确认旧应用镜像还在(未被 docker image prune 清理)
 docker image inspect "mianba-java:$PREVIOUS_SHA" "mianba-frontend:$PREVIOUS_SHA"
 
-# 把 .env 里两个镜像字段改回旧 SHA, 然后逐个恢复服务
+# 保持当前兼容 data/ 的 Compose, 手动把两个应用镜像字段改回旧 SHA
+# MIANBA_APP_IMAGE=mianba-java:$PREVIOUS_SHA
+# MIANBA_FRONTEND_IMAGE=mianba-frontend:$PREVIOUS_SHA
+# 精确确认 .env 和 Compose 解析结果都只引用旧 SHA 后再继续
+grep -Fx "MIANBA_APP_IMAGE=mianba-java:$PREVIOUS_SHA" .env
+grep -Fx "MIANBA_FRONTEND_IMAGE=mianba-frontend:$PREVIOUS_SHA" .env
+docker compose config --quiet
+docker compose config --images | grep -Fx "mianba-java:$PREVIOUS_SHA"
+docker compose config --images | grep -Fx "mianba-frontend:$PREVIOUS_SHA"
+
+# 逐个恢复服务, 每步都等待健康检查通过后再继续
+docker compose up -d --no-build --no-deps --pull never material-parser
 docker compose up -d --no-build --no-deps --pull never api
 docker compose up -d --no-build --no-deps --pull never frontend
 docker compose up -d --no-build --no-deps --pull never worker
 docker compose up -d --no-build --no-deps --pull never nginx
-
-git checkout "$PREVIOUS_SHA"
 ```
 
-如果新版本引入了不兼容的 Flyway 变更，不做应用层盲回滚；所有 Flyway 变更必须保持至少一个发布周期的向后兼容性，出现不兼容时保持维护状态，由负责人决定前向修复方案。
+如果新版本引入了不兼容的 Flyway 变更，不做应用层盲回滚；所有 Flyway 变更必须保持至少一个发布周期的向后兼容性，出现不兼容时保持维护状态，由负责人决定前向修复方案。基础设施镜像或存储布局回滚必须单独进入维护窗口，不能套用本节应用镜像回滚。
 
 ## 6. Secret 与证书维护
 

@@ -83,7 +83,7 @@
 
 - `scripts/check-all.ps1` 已通过：15 个生产 Compose 字段在根 `.env`、根模板与部署模板中名称和顺序一致，且不存在本地地址变体；Java 157 个单元测试全部成功并完成 Boot JAR 重打包；前端 19 个测试文件、49 个测试全部成功，`npm audit` 为 0 个漏洞，`typecheck` 与 Vite 生产构建成功。真实 pgvector/PG18 + Flyway 的 `RETRYING → QUEUED` 约束测试已经接入 CI `integration` profile，本机按约定不启动 PostgreSQL，因此其结果必须等待精确提交的 GitHub CI。
 - Windows PowerShell 5.1 干净临时目录已完成 Maven Wrapper 首次引导：从固定 Maven Central HTTPS 地址下载 Maven 3.9.11，使用仓库固定 SHA-512 校验后解压，并由 Java 21 成功执行 `mvnw.cmd --version`；临时目录随后按规范化路径校验清理。
-- GitHub Actions YAML 已完成解析；部署 Shell 通过 `bash -n`，`production-compose-contract.sh`、`production-release-contract.sh` 与 `rollback-compensation-contract.sh` 全部通过。契约覆盖服务器 0600 `compose.env` 精确字段、父进程变量污染隔离、受控 project、精确六镜像闭包、严格健康 JSON、危险命令拒绝、越界指针拒绝、首次管理员事务锁，以及回滚指针提交失败后先恢复候选 API/边缘 readiness 再补偿原指针的故障注入。
+- 当时的 GitHub Actions YAML 已完成解析；旧自动发布方案的部署 Shell 通过 `bash -n`，三个发布契约脚本也全部通过。2026-07-22 改为服务器纯手动部署后，相关工作流、发布脚本与契约脚本已删除；这条仅保留为历史验证证据，不适用于当前部署流程。
 - 生产 Java 共 120 个文件、12254 行，其中注释 870 行（7.10%）、Javadoc 326 处，全部文件至少包含一处 Javadoc；`<p>`/`</p>`、`@author`、`@since`、`TODO`、`FIXME` 为 0，旧 Python 文件与生产调试打印为 0。
 - 最终 JAR 中测试条目为 0，独立 `MaterialParserMain` 主类为 1；前端 `dist` 中 test/spec 名称为 0。
 - 仓库敏感信息扫描未发现本次提供的 hCaptcha 凭据、私钥头、常见 Token 前缀。生产凭据仍须通过服务器受保护文件注入，不能根据本地扫描推断线上已配置。
