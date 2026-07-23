@@ -9,6 +9,30 @@ type EChartsInstance = ReturnType<AdminEChartsModule["initAdminChart"]>;
 const chartTextColor = "#444746";
 const chartMutedColor = "#747775";
 
+const labelTranslations: Record<string, string> = {
+  job: "求职面试",
+  postgraduate: "考研复试",
+  civil_service: "考公面试",
+  ielts: "雅思口语",
+  active: "进行中",
+  deleted: "已删除",
+  completed: "已完成",
+  created: "已创建",
+  awaiting_ai: "等待AI",
+  open: "待处理",
+  processing: "处理中",
+  resolved: "已解决",
+  rejected: "已驳回",
+  general: "常规",
+  refund_request: "退款",
+  service_dispute: "争议",
+  service_compensation: "补偿",
+};
+
+export function translateChartLabel(label: string): string {
+  return labelTranslations[label] ?? label;
+}
+
 export function lineDashboardOption(stats: AdminDashboardStats): EChartsOption {
   const labels = stats.daily_interviews.map((item) => item.label);
   return {
@@ -66,7 +90,7 @@ export function donutDashboardOption(points: AdminStatsPoint[], colors: string[]
         avoidLabelOverlap: true,
         itemStyle: { borderRadius: 6, borderColor: "#ffffff", borderWidth: 2 },
         label: { formatter: "{b}\n{c}", color: "#1f1f1f", fontWeight: 700, fontSize: 13 },
-        data: points.map((item) => ({ name: item.label, value: item.value })),
+        data: points.map((item) => ({ name: translateChartLabel(item.label), value: item.value })),
       },
     ],
   };
@@ -87,7 +111,7 @@ export function barDashboardOption(points: AdminStatsPoint[], name: string, colo
     },
     xAxis: {
       type: "category",
-      data: points.map((item) => item.label),
+      data: points.map((item) => translateChartLabel(item.label)),
       axisLabel: { color: chartMutedColor, fontSize: 12 },
       axisLine: { lineStyle: { color: "#e1e3e1" } },
     },

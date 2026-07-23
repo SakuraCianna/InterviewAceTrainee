@@ -2212,9 +2212,14 @@ export function AdminShell() {
                             <div className={adminClasses("admin2-log-main")}>
                               <strong>{entry.email}</strong>
                               <span>{businessLabel(entry.auth_method)} · {businessLabel(entry.role)} · {entry.ip_address ?? "未知 IP"}</span>
+                              {!entry.success && entry.failure_reason && (
+                                <em className={adminClasses("admin2-log-excerpt")}>
+                                  {getApiErrorMessage({ detail: entry.failure_reason }, "登录失败")}
+                                </em>
+                              )}
                             </div>
                             <StatusChip tone={entry.success ? "good" : "danger"}>
-                              {entry.success ? "成功" : getApiErrorMessage({ detail: entry.failure_reason ?? undefined }, "失败")}
+                              {entry.success ? "成功" : "失败"}
                             </StatusChip>
                             <time className={adminClasses("admin2-log-time")}>{formatDateTime(entry.created_at)}</time>
                           </article>

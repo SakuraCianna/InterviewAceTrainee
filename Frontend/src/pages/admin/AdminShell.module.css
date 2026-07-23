@@ -224,12 +224,12 @@ body:has(.admin-page--authed) {
   margin-top: 10px;
 }
 .admin-sidebar-nav button {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
+  display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 12px;
   min-height: 44px;
-  padding: 0 14px;
+  padding: 0 18px;
   border: 0;
   border-radius: 999px;
   color: #3c4043;
@@ -760,20 +760,21 @@ body:has(.admin-page--authed) {
   z-index: 40;
 }
 .admin-page.admin-page--authed .admin-select-trigger {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   width: 100%;
-  min-height: 58px;
-  padding: 0 18px 0 22px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 14px;
   border: 1px solid #c4c7c5;
-  border-radius: 18px;
+  border-radius: 10px;
   color: #202124 !important;
   background: #ffffff;
   font: inherit;
-  font-size: 17px;
-  font-weight: 760;
+  font-size: 14px;
+  font-weight: 600;
   line-height: 1.25;
   text-align: left;
   box-shadow: inset 0 0 0 1px transparent;
@@ -1068,10 +1069,11 @@ body:has(.admin-page--authed) {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 8px;
-  font-size: 13px;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 14px;
   font-weight: 720;
   line-height: 1;
   text-align: center;
@@ -1911,8 +1913,9 @@ body:has(.admin-page--authed) {
 }
 
 .admin2-page .admin-select-trigger {
-  min-height: 44px;
-  border-radius: 8px;
+  height: 40px;
+  min-height: 40px;
+  border-radius: 10px;
   font-size: 14px;
 }
 
