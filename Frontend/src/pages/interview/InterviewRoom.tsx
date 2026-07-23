@@ -519,9 +519,22 @@ export function InterviewRoom() {
         return;
       }
 
-      const sessionState = (data && typeof data === "object" && "current_session" in data && data.current_session)
-        ? (data as { current_session: InterviewStateResponse }).current_session
-        : (data as InterviewStateResponse);
+      let sessionState: InterviewStateResponse;
+      if (data && typeof data === "object" && "package_id" in data && "stages" in data) {
+        const packageData = data as { package_id: string; stages?: Array<{ session_id?: string }> };
+        const firstStageSessionId = packageData.stages?.[0]?.session_id || targetSessionId;
+        const sessionRes = await getInterviewSession(firstStageSessionId, controller.signal);
+        if (!sessionRes.response.ok || !sessionRes.data) {
+          const errorMessage = getApiErrorMessage(sessionRes.data, "获取面试状态失败");
+          setSocketMessage(`面试创建失败：${errorMessage}`);
+          return;
+        }
+        sessionState = sessionRes.data;
+      } else {
+        sessionState = (data && typeof data === "object" && "current_session" in data && data.current_session)
+          ? (data as { current_session: InterviewStateResponse }).current_session
+          : (data as InterviewStateResponse);
+      }
 
       setSessionId(sessionState.session_id);
       clearPersonalization(selectedModule.type);
