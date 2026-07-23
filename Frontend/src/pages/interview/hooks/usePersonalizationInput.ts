@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { InterviewType } from "../types";
+import { createSessionId } from "../roomUtils";
 
 /** 只在浏览器当前页面内持有个性化输入，并在会话创建成功后主动释放。 */
 export function usePersonalizationInput() {
@@ -20,23 +21,28 @@ export function usePersonalizationInput() {
     return true;
   }
 
-  function createStartFormData(sessionId: string, interviewType: InterviewType) {
+  function createStartFormData(sessionId: string, interviewType: InterviewType, packageId?: string) {
     if (!isReady(interviewType)) {
       throw new Error("personalization_input_incomplete");
     }
     const formData = new FormData();
-    formData.append("session_id", sessionId);
-    formData.append("interview_type", interviewType);
-    if (interviewType === "job" && jobResumeFile) {
-      formData.append("resume_file", jobResumeFile);
+    if (interviewType === "job") {
+      formData.append("package_id", packageId || createSessionId());
+      formData.append("first_session_id", sessionId);
+      if (jobResumeFile) {
+        formData.append("resume_file", jobResumeFile);
+      }
       formData.append("job_title", jobTitle.trim());
       formData.append("job_requirements", jobRequirements.trim());
-    }
-    if (interviewType === "postgraduate") {
-      formData.append("target_school", postgraduateSchool.trim());
-      formData.append("major", postgraduateMajor.trim());
-      if (postgraduateDirection.trim()) {
-        formData.append("research_direction", postgraduateDirection.trim());
+    } else {
+      formData.append("session_id", sessionId);
+      formData.append("interview_type", interviewType);
+      if (interviewType === "postgraduate") {
+        formData.append("target_school", postgraduateSchool.trim());
+        formData.append("major", postgraduateMajor.trim());
+        if (postgraduateDirection.trim()) {
+          formData.append("research_direction", postgraduateDirection.trim());
+        }
       }
     }
     return formData;

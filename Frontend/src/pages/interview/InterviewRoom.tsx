@@ -17,6 +17,7 @@ import { CSRF_COOKIE_NAME, createIdempotencyKey, getApiErrorMessage, getCookie }
 import { retryAfterSeconds } from "../../lib/emailCooldown";
 import {
   changePasswordWithEmailCode,
+  createPersonalizedInterviewPackage,
   deleteInterviewHistoryItem,
   getActiveInterviewSession,
   getCurrentAccount,
@@ -103,7 +104,7 @@ export function InterviewRoom() {
   const [socketMessage, setSocketMessage] = useState("正在检查是否有未完成训练。");
   const roomGenerationRef = useRef(0);
   const startSessionControllerRef = useRef<AbortController | null>(null);
-  const startSessionRequestRef = useRef<ReturnType<typeof startInterviewSession> | null>(null);
+  const startSessionRequestRef = useRef<ReturnType<typeof startInterviewSession> | ReturnType<typeof createPersonalizedInterviewPackage> | null>(null);
   const finishAnswerControllerRef = useRef<AbortController | null>(null);
   const taskRefreshControllerRef = useRef<AbortController | null>(null);
   const exitSessionControllerRef = useRef<AbortController | null>(null);
@@ -493,15 +494,20 @@ export function InterviewRoom() {
     setSessionId(targetSessionId);
     setIsStartingSession(true);
     try {
-      const request = selectedModuleNeedsPersonalization
-        ? startPersonalizedInterviewSession(
+      const request = selectedModule.type === "job"
+        ? createPersonalizedInterviewPackage(
           createStartFormData(targetSessionId, selectedModule.type),
           { idempotencyKey: operationKey, signal: controller.signal },
         )
-        : startInterviewSession(
-          { session_id: targetSessionId, interview_type: selectedModule.type },
-          { idempotencyKey: operationKey, signal: controller.signal },
-        );
+        : selectedModuleNeedsPersonalization
+          ? startPersonalizedInterviewSession(
+            createStartFormData(targetSessionId, selectedModule.type),
+            { idempotencyKey: operationKey, signal: controller.signal },
+          )
+          : startInterviewSession(
+            { session_id: targetSessionId, interview_type: selectedModule.type },
+            { idempotencyKey: operationKey, signal: controller.signal },
+          );
       startSessionRequestRef.current = request;
       const { response, data } = await request;
       if (controller.signal.aborted || generation !== roomGenerationRef.current) {
@@ -513,13 +519,17 @@ export function InterviewRoom() {
         return;
       }
 
-      setSessionId(data.session_id);
+      const sessionState = (data && typeof data === "object" && "current_session" in data && data.current_session)
+        ? (data as { current_session: InterviewStateResponse }).current_session
+        : (data as InterviewStateResponse);
+
+      setSessionId(sessionState.session_id);
       clearPersonalization(selectedModule.type);
-      setInterviewState(data);
+      setInterviewState(sessionState);
       setActiveSession(null);
       setStateIndex(1);
       setSocketMessage(
-        data.status === "completed"
+        sessionState.status === "completed"
           ? "这场训练已完成，可查看复盘报告。"
           : "面试已就绪，账户权益已同步。",
       );
@@ -527,7 +537,7 @@ export function InterviewRoom() {
       if (controller.signal.aborted || generation !== roomGenerationRef.current) {
         return;
       }
-      void speakQuestion(data.current_question?.text, data.interview_type, data.session_id);
+      void speakQuestion(sessionState.current_question?.text, sessionState.interview_type, sessionState.session_id);
     } catch {
       if (!controller.signal.aborted && generation === roomGenerationRef.current) {
         await reconcileAmbiguousSessionRequest(targetSessionId, generation, controller, "start");
@@ -1453,7 +1463,7 @@ export function InterviewRoom() {
                     void startSession(pendingResume);
                   }}
                 >
-                  <AppIcon icon={isSelectionStage ? "lucide:scan-line" : "lucide:play"} size={18} />
+                  <AppIcon icon={isSelectionStage ? "lucide:file-scan" : "lucide:play"} size={18} />
                   {isStartingSession ? "启动中" : !currentUser ? "先登录账户" : isSelectionStage ? "进入设备检测" : "重新启动面试"}
                 </Button>
                 <Button

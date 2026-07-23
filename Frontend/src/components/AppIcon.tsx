@@ -81,6 +81,7 @@ const icons: Record<string, IconifyIcon> = {
   "lucide:file-check-2": fileCheck2,
   "lucide:file-clock": fileClock,
   "lucide:file-scan": fileScan,
+  "lucide:scan-line": fileScan,
   "lucide:file-text": fileText,
   "lucide:gauge": gauge,
   "lucide:graduation-cap": graduationCap,
