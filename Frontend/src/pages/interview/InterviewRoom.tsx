@@ -913,6 +913,9 @@ export function InterviewRoom() {
     setInterviewState(data);
     setActiveSession(null);
     setSocketMessage(data.status === "completed" ? "已打开历史复盘报告。" : "已恢复这场未完成训练。");
+    if (data.status === "active") {
+      void speakQuestion(data.current_question?.text, data.interview_type, data.session_id);
+    }
     navigate("/interview/room");
   }
 
