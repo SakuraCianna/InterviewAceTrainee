@@ -1750,16 +1750,26 @@ export function AdminShell() {
                     {!isUserListLoading && userSearchResults.length === 0 && <p className={adminClasses("admin2-empty")}>暂无用户记录，或当前关键词没有匹配用户。</p>}
                     {!isUserListLoading && userSearchResults.map((user) => (
                       <article className={adminClasses("admin2-data-row", selectedUserEmail === user.email && "is-selected")} key={user.email}>
-                        <button type="button" className={adminClasses("admin2-data-main")} onClick={() => void loadUserHistory(user.email, user)}>
-                          <span><strong>{user.email}</strong><em>{businessLabel(user.role)}</em></span>
+                        <div className={adminClasses("admin2-data-cell-user")} onClick={() => void loadUserHistory(user.email, user)} role="button" tabIndex={0}>
+                          <strong>{user.email}</strong>
+                          <em>{businessLabel(user.role)}</em>
+                        </div>
+                        <div className={adminClasses("admin2-data-cell-center")}>
                           <StatusChip tone={user.is_active ? "good" : "danger"}>{user.is_active ? "启用中" : "已停用"}</StatusChip>
-                          <b>{user.credit_balance} 次</b>
-                          <span>{user.completed_interviews}/{user.total_interviews}</span>
-                          <span>{user.last_interview_at ? formatDateTime(user.last_interview_at) : "暂无"}</span>
-                        </button>
+                        </div>
+                        <div className={adminClasses("admin2-data-cell-center")}>
+                          <b className={adminClasses("admin2-credit-badge")}>{user.credit_balance} 次</b>
+                        </div>
+                        <div className={adminClasses("admin2-data-cell-text")}>
+                          {user.completed_interviews}/{user.total_interviews}
+                        </div>
+                        <div className={adminClasses("admin2-data-cell-text")}>
+                          {user.last_interview_at ? formatDateTime(user.last_interview_at) : "暂无"}
+                        </div>
                         <div className={adminClasses("admin2-row-actions")}>
                           <button
                             type="button"
+                            className={adminClasses("admin2-secondary-button")}
                             disabled={isLocked(`user-status:${user.email}`)}
                             onClick={() => void updateUserStatus(user, !user.is_active)}
                           >
@@ -1767,6 +1777,7 @@ export function AdminShell() {
                           </button>
                           <button
                             type="button"
+                            className={adminClasses("admin2-secondary-button")}
                             disabled={isLocked(`user-role:${user.email}`)}
                             onClick={() => void updateUserRole(user, user.role === "admin" ? "user" : "admin")}
                           >
