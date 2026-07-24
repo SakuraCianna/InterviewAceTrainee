@@ -35,7 +35,7 @@ import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
-@DisplayName("面试全流程与全场景 (Job, Postgraduate, CivilService, IELTS) 异常容错集成测试")
+@DisplayName("面试全流程与全场景 (Job, Postgraduate, CivilService, IELTS) 异常容错与边界条件集成测试")
 class InterviewFullLifecycleTest {
     private static final Instant NOW = Instant.parse("2026-07-25T00:00:00Z");
     private static final Clock FIXED_CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
@@ -129,6 +129,65 @@ class InterviewFullLifecycleTest {
     }
 
     @Test
+    @DisplayName("边界条件测试 1：空文本与超长文本(>8000字)提交校验")
+    void testAnswerLengthBoundaryValidation() {
+        UUID userId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+
+        // 1. 空回答
+        assertThatThrownBy(() -> interviewService.answer(
+                userId, sessionId, "idem-blank", 0, "   ", "req-blank"))
+                .isInstanceOfSatisfying(ApiException.class, error -> {
+                    assertThat(error.status()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+                    assertThat(error.detail()).isEqualTo("validation_failed");
+                });
+
+        // 2. 超长回答 (8001 字)
+        String overLongAnswer = "a".repeat(8001);
+        assertThatThrownBy(() -> interviewService.answer(
+                userId, sessionId, "idem-long", 0, overLongAnswer, "req-long"))
+                .isInstanceOfSatisfying(ApiException.class, error -> {
+                    assertThat(error.status()).isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+                    assertThat(error.detail()).isEqualTo("validation_failed");
+                });
+    }
+
+    @Test
+    @DisplayName("边界条件测试 2：回答轮次与会话当前轮次不匹配 (interview_turn_stale)")
+    void testAnswerTurnIndexStaleBoundary() {
+        UUID userId = UUID.randomUUID();
+        UUID sessionId = UUID.randomUUID();
+
+        // 当前会话处于第 1 轮 (current_turn_index = 1)，但客户端传 turnIndex = 0
+        jdbc.mockActiveSessionForAnswerWithTurn(sessionId, "job", 1);
+
+        assertThatThrownBy(() -> interviewService.answer(
+                userId, sessionId, "idem-stale", 0, "旧轮次的回答内容", "req-stale"))
+                .isInstanceOfSatisfying(ApiException.class, error -> {
+                    assertThat(error.status()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(error.detail()).isEqualTo("interview_turn_stale");
+                });
+    }
+
+    @Test
+    @DisplayName("边界条件测试 3：普通用户余额不足 (balance < 3) 拦截开通套餐")
+    void testInsufficientCreditBalanceBoundary() {
+        UUID userId = UUID.randomUUID();
+        UUID packageId = UUID.randomUUID();
+        UUID firstSessionId = UUID.randomUUID();
+
+        // 余额为 2 次，不足以支付开通套餐所需的 3 次
+        jdbc.mockUserRoleAndBalance(userId, "user", 2);
+
+        assertThatThrownBy(() -> packageService.createPersonalized(
+                userId, packageId, firstSessionId, "idempotency-insufficient", "请用两分钟介绍与你目标岗位最相关的一段经历。"))
+                .isInstanceOfSatisfying(ApiException.class, error -> {
+                    assertThat(error.status()).isEqualTo(HttpStatus.PAYMENT_REQUIRED);
+                    assertThat(error.detail()).isEqualTo("insufficient_credits");
+                });
+    }
+
+    @Test
     @DisplayName("测试尝试在已过期的会话上使用语音服务时拦截抛错")
     void testRequireSpeechContextExpiredSession() {
         UUID userId = UUID.randomUUID();
@@ -182,6 +241,9 @@ class InterviewFullLifecycleTest {
         private UUID mockSessionId;
         private UUID mockUserId;
         private String mockSessionStatus = "active";
+        private int mockTurnIndex = 0;
+        private String mockRole = "admin";
+        private int mockBalance = 10;
 
         void mockActiveTurnAndSession(UUID sessionId, String interviewType, String questionText) {
             this.currentSpeechMockState = "ACTIVE";
@@ -189,12 +251,21 @@ class InterviewFullLifecycleTest {
             this.mockSessionId = sessionId;
             this.mockInterviewType = interviewType;
             this.mockQuestionText = questionText;
+            this.mockTurnIndex = 0;
         }
 
         void mockActiveSessionForAnswer(UUID sessionId, String interviewType) {
             this.currentAnswerMockState = "ACTIVE";
             this.mockSessionId = sessionId;
             this.mockInterviewType = interviewType;
+            this.mockTurnIndex = 0;
+        }
+
+        void mockActiveSessionForAnswerWithTurn(UUID sessionId, String interviewType, int turnIndex) {
+            this.currentAnswerMockState = "ACTIVE";
+            this.mockSessionId = sessionId;
+            this.mockInterviewType = interviewType;
+            this.mockTurnIndex = turnIndex;
         }
 
         void mockExpiredSpeechState(UUID sessionId) {
@@ -215,6 +286,8 @@ class InterviewFullLifecycleTest {
 
         void mockUserRoleAndBalance(UUID userId, String role, int balance) {
             this.mockUserId = userId;
+            this.mockRole = role;
+            this.mockBalance = balance;
         }
 
         void mockPackageCreationQueries(UUID packageId) {
@@ -249,7 +322,7 @@ class InterviewFullLifecycleTest {
                     when(rs.getObject("id", UUID.class)).thenReturn(mockSessionId);
                     when(rs.getString("interview_type")).thenReturn(mockInterviewType);
                     when(rs.getString("session_status")).thenReturn("active");
-                    when(rs.getInt("current_turn_index")).thenReturn(0);
+                    when(rs.getInt("current_turn_index")).thenReturn(mockTurnIndex);
                     when(rs.getString("turn_status")).thenReturn("waiting_answer");
                     when(rs.getString("question_text")).thenReturn(mockQuestionText);
                     when(rs.getBoolean("unexpired")).thenReturn(true);
@@ -275,7 +348,7 @@ class InterviewFullLifecycleTest {
                     when(rs.getObject("id", UUID.class)).thenReturn(mockSessionId != null ? mockSessionId : UUID.randomUUID());
                     when(rs.getString("interview_type")).thenReturn(mockInterviewType);
                     when(rs.getString("status")).thenReturn("active");
-                    when(rs.getInt("current_turn_index")).thenReturn(0);
+                    when(rs.getInt("current_turn_index")).thenReturn(mockTurnIndex);
                     when(rs.getInt("total_turns")).thenReturn(5);
                     when(rs.getString("turn_status")).thenReturn("waiting_answer");
                     when(rs.getBoolean("unexpired")).thenReturn(true);
@@ -285,9 +358,12 @@ class InterviewFullLifecycleTest {
                 }
                 if (sql.contains("FROM users") && sql.contains("FOR UPDATE")) {
                     ResultSet rs = mock(ResultSet.class);
-                    when(rs.getInt("credit_balance")).thenReturn(10);
-                    when(rs.getString("role")).thenReturn("admin");
+                    when(rs.getInt("credit_balance")).thenReturn(mockBalance);
+                    when(rs.getString("role")).thenReturn(mockRole);
                     return List.of(rowMapper.mapRow(rs, 0));
+                }
+                if (sql.contains("FROM vouchers")) {
+                    return List.of();
                 }
                 if (sql.contains("FROM interview_packages") && sql.contains("start_idempotency_key")) {
                     return List.of();
