@@ -141,6 +141,12 @@ public class JdbcJobInterviewPackageService implements JobInterviewPackageServic
                 now.plus(24, ChronoUnit.HOURS), packageExpiresAt);
         Timestamp nowTimestamp = Timestamp.from(now);
 
+        jdbc.update("""
+                UPDATE interview_packages
+                SET status = 'CANCELLED', updated_at = ?
+                WHERE user_id = ? AND status = 'ACTIVE'
+                """, nowTimestamp, userId);
+
         insertPackage(
                 userId,
                 packageId,
