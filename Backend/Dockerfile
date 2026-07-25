@@ -10,10 +10,10 @@ ARG EMBEDDING_TOKENIZER_SHA256=2c3387be76557bd40970cec13153b3bbf80407865484b209e
 RUN apk add --no-cache curl \
     && mkdir -p /opt/mianba-model \
     && curl --fail --location --retry 3 \
-      "https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/${EMBEDDING_MODEL_REVISION}/onnx/model_quint8_avx2.onnx" \
+      "https://hf-mirror.com/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/${EMBEDDING_MODEL_REVISION}/onnx/model_quint8_avx2.onnx" \
       --output /opt/mianba-model/model.onnx \
     && curl --fail --location --retry 3 \
-      "https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/${EMBEDDING_MODEL_REVISION}/tokenizer.json" \
+      "https://hf-mirror.com/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/${EMBEDDING_MODEL_REVISION}/tokenizer.json" \
       --output /opt/mianba-model/tokenizer.json \
     && echo "${EMBEDDING_MODEL_SHA256}  /opt/mianba-model/model.onnx" | sha256sum -c - \
     && echo "${EMBEDDING_TOKENIZER_SHA256}  /opt/mianba-model/tokenizer.json" | sha256sum -c -
