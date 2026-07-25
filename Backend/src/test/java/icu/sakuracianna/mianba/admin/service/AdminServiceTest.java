@@ -124,7 +124,7 @@ class AdminServiceTest {
     }
 
     private static AdminService service(JdbcTemplate jdbc, SessionRegistry sessions) {
-        return new AdminService(jdbc, new ObjectMapper(), sessions, Clock.systemUTC());
+        return new AdminService(jdbc, new ObjectMapper(), sessions, Clock.systemUTC(), null);
     }
 
     private static String sha256(String value) {

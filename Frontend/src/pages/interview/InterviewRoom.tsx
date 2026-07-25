@@ -12,6 +12,7 @@ import { InterviewReport } from "./components/InterviewReport";
 import { RecordingControls } from "./components/RecordingControls";
 import { RecordingProgress } from "./components/RecordingProgress";
 import { MicrophoneLevelMeter } from "./components/MicrophoneLevelMeter";
+import { AudioWaveformVisualizer } from "./components/AudioWaveformVisualizer";
 import { useEmailCodeCooldown } from "../../hooks/useEmailCodeCooldown";
 import { CSRF_COOKIE_NAME, createIdempotencyKey, getApiErrorMessage, getCookie } from "../../lib/api";
 import { retryAfterSeconds } from "../../lib/emailCooldown";
@@ -208,6 +209,28 @@ export function InterviewRoom() {
       stopMicrophoneTest();
     };
   }, []);
+
+  useEffect(() => {
+    const handleCreditUpdate = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && typeof detail.newBalance === "number") {
+        setCurrentUser((prev: CurrentUserResponse | null) => (prev ? { ...prev, credit_balance: detail.newBalance } : null));
+      }
+    };
+    window.addEventListener("mianba:credit_updated", handleCreditUpdate);
+    return () => window.removeEventListener("mianba:credit_updated", handleCreditUpdate);
+  }, []);
+
+  useEffect(() => {
+    if (routeStage !== "room" || !interviewState || interviewState.status === "completed") return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "您正在进行面试训练，确定离开吗？当前答题进度已自动保存。";
+      return e.returnValue;
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [routeStage, interviewState]);
 
   function goToMicrophoneCheck(resume = false) {
     if (!resume && selectedModuleNeedsPersonalization && !personalizationReady) {
@@ -1353,6 +1376,8 @@ export function InterviewRoom() {
               <p>{transcriptPreview || "已经开始监听，说话后这里会显示实时转写内容。"}</p>
             </div>
           )}
+
+          <AudioWaveformVisualizer isRecording={isRecording} />
 
           <RecordingProgress
             active={isRecording || isFinishingAnswer}

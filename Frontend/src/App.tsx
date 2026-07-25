@@ -16,9 +16,13 @@ const HomePage = lazy(() => import("./pages/HomePage").then((module) => ({ defau
 const InterviewRoom = lazy(() => import("./pages/interview/InterviewRoom").then((module) => ({ default: module.InterviewRoom })));
 const LegalPage = lazy(() => import("./pages/LegalPage").then((module) => ({ default: module.LegalPage })));
 
+import { RealtimeNotificationListener } from "./components/RealtimeNotificationListener";
+
 export default function App() {
   return (
-    <Suspense fallback={<main className="route-loading">页面加载中...</main>}>
+    <>
+      <RealtimeNotificationListener />
+      <Suspense fallback={<main className="route-loading">页面加载中...</main>}>
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<AuthPage mode="login" />} />
@@ -34,5 +38,6 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
+    </>
   );
 }

@@ -38,12 +38,19 @@ public class AdminService {
     private final ObjectMapper mapper;
     private final SessionRegistry sessions;
     private final Clock clock;
+    private final icu.sakuracianna.mianba.platform.notification.RealtimeNotificationService notifications;
 
-    public AdminService(JdbcTemplate jdbc, ObjectMapper mapper, SessionRegistry sessions, Clock clock) {
+    public AdminService(
+            JdbcTemplate jdbc,
+            ObjectMapper mapper,
+            SessionRegistry sessions,
+            Clock clock,
+            icu.sakuracianna.mianba.platform.notification.RealtimeNotificationService notifications) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.sessions = sessions;
         this.clock = clock;
+        this.notifications = notifications;
     }
 
     @Transactional(readOnly = true)
@@ -394,6 +401,9 @@ public class AdminService {
                 idempotencyKey, adminId, normalizedNote);
         audit(adminId, "credit_adjust", "user_credit", user.id().toString(),
                 Map.of("balance", user.creditBalance()), Map.of("balance", nextBalance, "change", change));
+        if (notifications != null) {
+            notifications.notifyBalanceUpdate(user.id(), (int) nextBalance, (int) change, normalizedReason);
+        }
         return Map.of("balance_after", nextBalance);
     }
 
