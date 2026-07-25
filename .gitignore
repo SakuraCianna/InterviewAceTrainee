@@ -21,3 +21,10 @@ nginx/*.pem
 deploy/secrets/
 deploy/certs/
 *.secret
+
+# AI Agent 及本地构建生成的临时文件夹
+.claude/
+.superpowers/
+.tmp_deploy/
+.tmp_review/
+

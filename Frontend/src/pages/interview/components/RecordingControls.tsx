@@ -39,7 +39,7 @@ export function RecordingControls(props: RecordingControlsProps) {
         disabled={!props.isRecording || props.isPreparing || props.isFinishing || props.isTaskPending}
         onClick={props.onFinish}
       >
-        <AppIcon icon="lucide:square" size={18} />
+        <AppIcon icon="lucide:check-circle-2" size={18} />
         {props.isFinishing ? "提交中" : "回答完毕"}
       </Button>
       <Button type="button" className={styles.secondaryButton} shape="rounded" disabled={!props.canReplay} onClick={props.onReplay}>

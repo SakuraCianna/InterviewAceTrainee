@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdempotencyKey } from "../../lib/api";
-import { startPersonalizedInterviewSession, submitInterviewAnswer } from "./interviewApi";
+import { createPersonalizedInterviewPackage, startPersonalizedInterviewSession, submitInterviewAnswer } from "./interviewApi";
 
 function acceptedAnswerResponse() {
   return new Response(JSON.stringify({
@@ -13,6 +13,31 @@ function acceptedAnswerResponse() {
     report: null,
   }), {
     status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function acceptedPackageResponse() {
+  return new Response(JSON.stringify({
+    package_id: "22222222-2222-4222-8222-222222222222",
+    status: "ACTIVE",
+    current_stage_code: "TECHNICAL_FIRST",
+    expires_at: "2026-07-24T12:00:00Z",
+    charged_credit: 3,
+    voucher_used: false,
+    stages: [],
+    current_session: {
+      session_id: "11111111-1111-4111-8111-111111111111",
+      interview_type: "job",
+      status: "active",
+      current_step_index: 1,
+      total_steps: 4,
+      current_question: null,
+      report: null,
+    },
+    report: null,
+  }), {
+    status: 201,
     headers: { "Content-Type": "application/json" },
   });
 }
@@ -60,12 +85,31 @@ describe("startPersonalizedInterviewSession", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(acceptedAnswerResponse()));
     const formData = new FormData();
     formData.append("session_id", "session-1");
-    formData.append("interview_type", "job");
-    formData.append("job_title", "销售经理");
+    formData.append("interview_type", "postgraduate");
+    formData.append("target_school", "清华大学");
 
     await startPersonalizedInterviewSession(formData, { idempotencyKey: operationKey });
 
     expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("/api/interviews/personalized");
+    const request = vi.mocked(fetch).mock.calls[0]?.[1];
+    expect(new Headers(request?.headers).get("Idempotency-Key")).toBe(operationKey);
+    expect(new Headers(request?.headers).has("Content-Type")).toBe(false);
+    expect(request?.body).toBe(formData);
+  });
+});
+
+describe("createPersonalizedInterviewPackage", () => {
+  it("在同一个创建请求中提交工作面试套餐资料并访问 /api/interview-packages/personalized", async () => {
+    const operationKey = createIdempotencyKey();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(acceptedPackageResponse()));
+    const formData = new FormData();
+    formData.append("package_id", "package-1");
+    formData.append("first_session_id", "session-1");
+    formData.append("job_title", "AI开发工程师");
+
+    await createPersonalizedInterviewPackage(formData, { idempotencyKey: operationKey });
+
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("/api/interview-packages/personalized");
     const request = vi.mocked(fetch).mock.calls[0]?.[1];
     expect(new Headers(request?.headers).get("Idempotency-Key")).toBe(operationKey);
     expect(new Headers(request?.headers).has("Content-Type")).toBe(false);

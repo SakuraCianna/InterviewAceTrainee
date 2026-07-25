@@ -129,6 +129,13 @@ public final class SessionDeletionCoordinator {
             if (changed != 1) {
                 throw new IllegalStateException("Interview deletion marker was not recorded");
             }
+            jdbc.update("""
+                    UPDATE interview_packages
+                    SET status = 'CANCELLED', updated_at = now()
+                    WHERE id IN (
+                        SELECT package_id FROM interview_package_stages WHERE session_id = ?
+                    ) AND status = 'ACTIVE'
+                    """, sessionId);
         }
         return DeletionDecision.NEEDS_ERASURE;
     }
