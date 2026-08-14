@@ -6,6 +6,7 @@ import icu.sakuracianna.mianba.identity.security.JwtService;
 import icu.sakuracianna.mianba.identity.service.SessionRegistry;
 import icu.sakuracianna.mianba.identity.service.UserAccountRepository;
 import icu.sakuracianna.mianba.platform.config.SecurityProperties;
+import jakarta.servlet.DispatcherType;
 import java.util.List;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -53,7 +54,8 @@ public class SecurityConfiguration {
                 .httpBasic(basic -> basic.disable())
                 .logout(logout -> logout.disable())
                 .authorizeHttpRequests(authorize -> authorize
-                        .requestMatchers("/actuator/health/**", "/api/health/**").permitAll()
+                        .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.ASYNC).permitAll()
+                        .requestMatchers("/error", "/actuator/health/**", "/api/health/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/auth/hcaptcha/config").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/interview-products/**").permitAll()
                         .requestMatchers(HttpMethod.POST,
